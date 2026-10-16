@@ -26,6 +26,13 @@ if [ -f "/opt/etc/fptn-client.conf" ]; then
     fi
 fi
 
+# Remember panel ownership before removing its config files. Do not restart a
+# shared Lighttpd instance when this install never managed the FPTN panel.
+FPTN_PANEL_PRESENT=no
+if [ -f "/opt/etc/fptn-web-panel.installed" ] || [ -f "/opt/etc/lighttpd/conf.d/85-fptn.conf" ]; then
+    FPTN_PANEL_PRESENT=yes
+fi
+
 # 1. Остановка процессов и служб / Stop services
 echo "[1/5] Остановка служб FPTN / Stopping FPTN services..."
 if [ -f "/opt/etc/init.d/S53fptn-client" ]; then
@@ -43,6 +50,7 @@ rm -f /opt/bin/fptn-ndm-setup.sh
 rm -f /opt/etc/fptn-watchdog.sh
 rm -f /opt/etc/fptn-client.conf
 rm -f /opt/etc/init.d/S53fptn-client
+rm -f /opt/etc/fptn-web-panel.installed
 if [ -f /opt/etc/lighttpd/conf.d/85-fptn.conf.pre-fptn.bak ]; then
     cp -p /opt/etc/lighttpd/conf.d/85-fptn.conf.pre-fptn.bak /opt/etc/lighttpd/conf.d/85-fptn.conf
     rm -f /opt/etc/lighttpd/conf.d/85-fptn.conf.pre-fptn.bak
@@ -52,9 +60,11 @@ fi
 rm -rf /opt/share/www/fptn
 
 # 3. Перезапуск веб-сервера Lighttpd / Restart Lighttpd
-echo "[3/5] Обновление конфигурации Lighttpd / Updating Lighttpd..."
-if [ -f "/opt/etc/init.d/S80lighttpd" ]; then
+echo "[3/5] Перезапуск веб-сервера Lighttpd / Restart Lighttpd"
+if [ "$FPTN_PANEL_PRESENT" = "yes" ] && [ -x "/opt/etc/init.d/S80lighttpd" ]; then
     /opt/etc/init.d/S80lighttpd restart >/dev/null 2>&1 || true
+else
+    echo "Панель FPTN не обнаружена; Lighttpd не перезапускается."
 fi
 
 # 4. Удаление из планировщика Cron / Clean Crontab
