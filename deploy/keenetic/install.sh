@@ -430,6 +430,7 @@ FPTN_LIGHTTPD_TOUCHED=no
 rollback_failed_install() {
     [ "$FPTN_INSTALL_COMMITTED" = "yes" ] && return 0
     echo "Установка прервалась: восстанавливаю файлы FPTN из $BACKUP_DIR."
+    ROLLBACK_RESTORE_FAILED=no
     for _restore_file in \
         /opt/bin/fptn-client-cli \
         /opt/bin/fptn-client-cli.pre-update.bak \
@@ -446,10 +447,22 @@ rollback_failed_install() {
         _rel=${_restore_file#/opt/}
         _saved="$BACKUP_DIR/$_rel"
         if [ -f "$_saved" ]; then
-            mkdir -p "$(dirname "$_restore_file")"
-            cp -p "$_saved" "$_restore_file" || echo "WARNING: could not restore $_restore_file"
+            _restore_dir=$(dirname "$_restore_file")
+            _restore_tmp="$_restore_file.rollback.$"
+            if mkdir -p "$_restore_dir" &&
+               cp -p "$_saved" "$_restore_tmp" &&
+               mv -f "$_restore_tmp" "$_restore_file"; then
+                :
+            else
+                rm -f "$_restore_tmp" 2>/dev/null || true
+                ROLLBACK_RESTORE_FAILED=yes
+                echo "WARNING: could not safely restore $_restore_file from $_saved"
+            fi
         else
-            rm -f "$_restore_file"
+            if ! rm -f "$_restore_file"; then
+                ROLLBACK_RESTORE_FAILED=yes
+                echo "WARNING: could not remove newly created file $_restore_file"
+            fi
         fi
     done
     rmdir /opt/share/www/fptn 2>/dev/null || true
@@ -471,7 +484,9 @@ rollback_failed_install() {
         fi
     fi
     if [ "$FPTN_LIGHTTPD_TOUCHED" = "yes" ] && [ -x /opt/etc/init.d/S80lighttpd ]; then
-        if lighttpd -tt -f /opt/etc/lighttpd/lighttpd.conf >/dev/null 2>&1; then
+        if [ "$ROLLBACK_RESTORE_FAILED" = "yes" ]; then
+            echo "WARNING: at least one file restore failed; leaving shared Lighttpd running to avoid applying a possibly partial rollback."
+        elif lighttpd -tt -f /opt/etc/lighttpd/lighttpd.conf >/dev/null 2>&1; then
             /opt/etc/init.d/S80lighttpd restart >/dev/null 2>&1 || echo "WARNING: Lighttpd restart failed after restoring its config."
         else
             echo "WARNING: restored Lighttpd config did not validate; not restarting shared Lighttpd."
