@@ -113,19 +113,26 @@ function get_token_servers_info($token) {
     if (empty($token)) {
         return null;
     }
+    $token_hash = hash('sha256', (string)$token);
     if (file_exists($servers_file) && filesize($servers_file) > 10) {
         $cached = json_decode(file_get_contents($servers_file), true);
-        if ($cached && !empty($cached['servers'])) {
+        // Не используем список серверов, сохранённый для другого токена.
+        // Старый формат без хэша безопасно перестраивается из текущего токена.
+        if ($cached && !empty($cached['servers'])
+            && isset($cached['token_sha256'])
+            && hash_equals($token_hash, (string)$cached['token_sha256'])) {
             return $cached;
         }
     }
     $info = parse_fptn_token_direct($token);
     if ($info) {
+        $info['token_sha256'] = $token_hash;
         @file_put_contents($servers_file, json_encode($info, JSON_PRETTY_PRINT | JSON_UNESCAPED_UNICODE), LOCK_EX);
         return $info;
     }
     $cli_info = parse_token_via_cli($token);
     if ($cli_info) {
+        $cli_info['token_sha256'] = $token_hash;
         @file_put_contents($servers_file, json_encode($cli_info, JSON_PRETTY_PRINT | JSON_UNESCAPED_UNICODE), LOCK_EX);
         return $cli_info;
     }
@@ -703,6 +710,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                         }
 
                         if ($parsed && !empty($parsed['servers']) && is_array($parsed['servers'])) {
+                            $parsed['token_sha256'] = hash('sha256', $token);
                             @file_put_contents($servers_file, json_encode($parsed, JSON_PRETTY_PRINT | JSON_UNESCAPED_UNICODE), LOCK_EX);
                             $config['TOKEN'] = $token;
                             write_config();
