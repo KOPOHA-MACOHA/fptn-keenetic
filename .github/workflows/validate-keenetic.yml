@@ -6,6 +6,12 @@ on:
   pull_request:
   workflow_dispatch:
 
+# Keep only the newest validation for a branch. Push and PR events for the
+# same branch share a group, so they cannot fill the runner queue with duplicates.
+concurrency:
+  group: validate-keenetic-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
   syntax:
     runs-on: ubuntu-latest
