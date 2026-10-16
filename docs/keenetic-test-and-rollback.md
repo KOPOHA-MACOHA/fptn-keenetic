@@ -9,6 +9,20 @@ This is a manual checklist, not an installer. Nothing in this document has been 
 - Confirm the router has enough free space: `df -h /opt`.
 - Keep the backup directory private. `/opt/etc/fptn-client.conf` can contain the subscription token and web-panel password. Never upload the backup or paste its contents into an issue.
 
+## Read-only baseline before any installation
+
+This is the next step before testing FPTN. It collects a snapshot only; it does not install packages, stop services, write router configuration, or change routes. It does write the downloaded script to `/tmp`.
+
+**Do not run yet unless you are ready to collect the baseline.** Pin the script to the reviewed immutable commit so the branch can move without changing what is executed:
+
+```sh
+COMMIT="54df538481b48f55276fd66bc1f9035f1c29f277"
+URL="https://raw.githubusercontent.com/KOPOHA-MACOHA/fptn-keenetic/$COMMIT/deploy/keenetic/preflight.sh"
+curl -fsSL "$URL" -o /tmp/fptn-preflight.sh && sh /tmp/fptn-preflight.sh
+```
+
+The report includes private IP addresses, interface names and routes. Keep it private; do not paste the raw report into a public issue or PR. If you want help interpreting it, share only the relevant sanitized sections: free storage, memory/load, architecture/feed list, installed relevant packages, and whether any OpkgTun interfaces or FPTN processes already exist. Redact public IPs, subscription tokens, passwords, hostnames and any identifying network details.
+
 ## Client-only installation
 
 For a first test, prefer the client-only mode so the installer does not install Lighttpd/PHP, write the FPTN web-panel config, or restart Lighttpd:
