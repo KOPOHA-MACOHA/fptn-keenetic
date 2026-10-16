@@ -87,4 +87,16 @@ if command -v lighttpd >/dev/null 2>&1 && [ -f /opt/etc/lighttpd/lighttpd.conf ]
         echo "Current Lighttpd config validation: FAIL (details suppressed)"
     fi
 fi
+section "Dedicated FPTN panel port check (8080)"
+if command -v netstat >/dev/null 2>&1; then
+    _port_lines=$(netstat -tuln 2>/dev/null | grep -E '[:.]8080[[:space:]]' || true)
+    if [ -n "$_port_lines" ]; then
+        echo "Port 8080 appears to have an existing listener:"
+        printf '%s\n' "$_port_lines"
+    else
+        echo "No listener on port 8080 was detected (installer will recheck before changes)."
+    fi
+else
+    echo "netstat is unavailable; port availability must be checked during installation."
+fi
 echo "Read-only preflight complete. No changes were made."
