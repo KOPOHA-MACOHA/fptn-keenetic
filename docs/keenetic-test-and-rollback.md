@@ -23,22 +23,25 @@ curl -fsSL "$URL" -o /tmp/fptn-preflight.sh && sh /tmp/fptn-preflight.sh
 
 The report includes private IP addresses, interface names and routes. Keep it private; do not paste the raw report into a public issue or PR. If you want help interpreting it, share only the relevant sanitized sections: free storage, memory/load, architecture/feed list, installed relevant packages, and whether any OpkgTun interfaces or FPTN processes already exist. Redact public IPs, subscription tokens, passwords, hostnames and any identifying network details.
 
-## Client-only installation
+## Full web panel installation (preferred for users who need GUI control)
 
-For a first test, prefer the client-only mode so the installer does not install Lighttpd/PHP, write the FPTN web-panel config, or restart Lighttpd:
+The router already has Lighttpd, PHP CGI, PHP sessions and the CGI module installed. The installer should reuse an explicit existing Lighttpd listener and publish the panel at `/fptn/`; if no explicit listener is configured, it asks for a panel port. It validates the existing Lighttpd configuration before modifying it and validates the resulting configuration before restarting the shared service.
+
+**Do not run yet.** First run the updated read-only preflight script and inspect the selected Lighttpd directives and its config-validation result. If the existing config fails validation, stop here and fix that separately.
+
+For the later install, use an immutable commit so the installer and downloaded companion files come from the same reviewed tree:
 
 ```sh
 # EXAMPLE ONLY — DO NOT RUN YET.
-# Pin the installer and its companion files to the same reviewed commit.
-COMMIT="a7d9ab11c9e324f26445d3cba148a8aeda601c70"
+COMMIT="3a772176f38810925e8e8a0a21aba4696aab533a"
 BASE="https://raw.githubusercontent.com/KOPOHA-MACOHA/fptn-keenetic/$COMMIT"
 curl -fsSL "$BASE/deploy/keenetic/install.sh" -o /tmp/fptn-install.sh
-FPTN_GITHUB_RAW_BASE="$BASE" sh /tmp/fptn-install.sh --no-web-panel
+FPTN_GITHUB_RAW_BASE="$BASE" sh /tmp/fptn-install.sh
 ```
 
-This mode requires a valid subscription token. It still installs the client dependencies, downloads/replaces the binary, writes the client config, and creates a persistent KeeneticOS OpkgTun interface. It is therefore lower risk than the full panel install, but not risk-free.
+The installer leaves a new client service disabled, so the tunnel should not start automatically after installation. The web panel will be available at the URL printed at the end, typically `http://ROUTER-LAN-IP:PORT/fptn/` or on the existing Lighttpd port at `/fptn/`. On first visit, set a unique administrator password of at least 10 characters. Do not expose the panel to the internet; use it only from your trusted LAN.
 
-The installer now creates a private snapshot under `/opt/var/backups/fptn-preinstall-YYYYMMDD-HHMMSS` before package or KeeneticOS changes. It preserves the directory layout for files it finds and saves `ndmc -c "show running-config"`. Keep that snapshot private and record its exact path. It is not an automatic rollback and does not back up the whole router configuration or package database.
+This full-panel mode does install any missing packages, replaces the client binary after a basic smoke test, writes the panel configuration and creates a persistent KeeneticOS OpkgTun interface. It may restart the existing Lighttpd service after validating its configuration. It is lower risk than an unreviewed install, but it is not risk-free. The available-RAM check aborts below 32 MiB and warns below 96 MiB; your current baseline is about 64 MiB, so expect a warning.
 
 ## 1. Create a private backup
 
