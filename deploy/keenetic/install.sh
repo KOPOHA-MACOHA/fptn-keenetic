@@ -160,9 +160,13 @@ is_port_busy() {
 }
 
 AUTO_ACCEPT="no"
-if [ "$1" = "-y" ] || [ "$1" = "--auto" ]; then
-    AUTO_ACCEPT="yes"
-fi
+INSTALL_WEB_PANEL="yes"
+for _arg in "$@"; do
+    case "$_arg" in
+        -y|--auto) AUTO_ACCEPT="yes" ;;
+        --no-web-panel) INSTALL_WEB_PANEL="no" ;;
+    esac
+done
 
 # Функция считывания ввода пользователя с подстановкой по умолчанию
 read_input() {
@@ -180,42 +184,47 @@ read_input() {
 }
 
 # 2. Интерактивный опрос параметров / Interactive Configuration Prompt
-DEFAULT_PORT=8088
-if [ -f "/opt/etc/lighttpd/conf.d/80-nfqws.conf" ]; then
-    NFQWS_PORT=$(grep -oE "server.port := [0-9]+" /opt/etc/lighttpd/conf.d/80-nfqws.conf | awk '{print $3}')
-    if [ -n "$NFQWS_PORT" ]; then
-        DEFAULT_PORT=$NFQWS_PORT
+USER_PORT=""
+if [ "$INSTALL_WEB_PANEL" = "yes" ]; then
+    DEFAULT_PORT=8088
+    if [ -f "/opt/etc/lighttpd/conf.d/80-nfqws.conf" ]; then
+        NFQWS_PORT=$(grep -oE "server.port := [0-9]+" /opt/etc/lighttpd/conf.d/80-nfqws.conf | awk '{print $3}')
+        if [ -n "$NFQWS_PORT" ]; then
+            DEFAULT_PORT=$NFQWS_PORT
+        fi
     fi
-fi
-
-# Проверяем, свободен ли дефолтный порт
-if is_port_busy "$DEFAULT_PORT"; then
-    echo "Предупреждение: Порт $DEFAULT_PORT уже занят! / Warning: Port $DEFAULT_PORT is currently busy!"
-    CHECK_P=8089
-    while is_port_busy "$CHECK_P"; do
-        CHECK_P=$((CHECK_P + 1))
-    done
-    DEFAULT_PORT=$CHECK_P
-    echo "Автоматически выбран свободный порт / Auto-selected available port: $DEFAULT_PORT"
-fi
-
-printf "Введите порт для веб-панели FPTN / Enter FPTN web panel port (default %s): " "$DEFAULT_PORT"
-read_input USER_PORT "$DEFAULT_PORT"
-USER_PORT="$REPLY"
-
-case "$USER_PORT" in
-    ''|*[!0-9]*)
-        echo "Ошибка: порт должен быть числом от 1 до 65535. Установка отменена."
+    
+    # Проверяем, свободен ли дефолтный порт
+    if is_port_busy "$DEFAULT_PORT"; then
+        echo "Предупреждение: Порт $DEFAULT_PORT уже занят! / Warning: Port $DEFAULT_PORT is currently busy!"
+        CHECK_P=8089
+        while is_port_busy "$CHECK_P"; do
+            CHECK_P=$((CHECK_P + 1))
+        done
+        DEFAULT_PORT=$CHECK_P
+        echo "Автоматически выбран свободный порт / Auto-selected available port: $DEFAULT_PORT"
+    fi
+    
+    printf "Введите порт для веб-панели FPTN / Enter FPTN web panel port (default %s): " "$DEFAULT_PORT"
+    read_input USER_PORT "$DEFAULT_PORT"
+    USER_PORT="$REPLY"
+    
+    case "$USER_PORT" in
+        ''|*[!0-9]*)
+            echo "Ошибка: порт должен быть числом от 1 до 65535. Установка отменена."
+            exit 1
+            ;;
+    esac
+    if [ "$USER_PORT" -lt 1 ] || [ "$USER_PORT" -gt 65535 ]; then
+        echo "Ошибка: порт должен быть в диапазоне 1-65535. Установка отменена."
         exit 1
-        ;;
-esac
-if [ "$USER_PORT" -lt 1 ] || [ "$USER_PORT" -gt 65535 ]; then
-    echo "Ошибка: порт должен быть в диапазоне 1-65535. Установка отменена."
-    exit 1
-fi
-
-if is_port_busy "$USER_PORT"; then
-    echo "ВНИМАНИЕ: Выбранный порт $USER_PORT сейчас занят! / WARNING: Selected port $USER_PORT is busy!"
+    fi
+    
+    if is_port_busy "$USER_PORT"; then
+        echo "ВНИМАНИЕ: Выбранный порт $USER_PORT сейчас занят! / WARNING: Selected port $USER_PORT is busy!"
+    fi
+    
+    
 fi
 
 # Проверяем наличие уже существующего конфига для сохранения настроек при обновлении
@@ -281,7 +290,11 @@ fi
 
 echo ""
 echo "Параметры установки / Installation Parameters:"
-echo "  Веб-порт / Web Port:               $USER_PORT"
+if [ "$INSTALL_WEB_PANEL" = "yes" ]; then
+    echo "  Веб-порт / Web Port:               $USER_PORT"
+else
+    echo "  Веб-панель не устанавливается / Web panel disabled"
+fi
 echo "  Интерфейс KeeneticOS / OS Interface: $USER_KTUN ($USER_LTUN)"
 if [ -n "$USER_TOKEN" ]; then
     echo "  Токен подписки / Subscription Token: [Указан / Specified]"
@@ -348,9 +361,14 @@ esac
 
 # 3. Установка необходимых системных пакетов / Install Entware packages
 echo ""
-echo "[1/7] Обновление пакетов и установка зависимостей / Updating packages & dependencies..."
+echo "[1/7] Установка зависимостей Entware / Installing Entware dependencies..."
 opkg update || true
-opkg install lighttpd lighttpd-mod-cgi php8-cgi php8-mod-openssl php8-mod-session libxml2 procps-ng-pgrep procps-ng-pkill curl ca-bundle ca-certificates
+if [ "$INSTALL_WEB_PANEL" = "yes" ]; then
+    opkg install lighttpd lighttpd-mod-cgi php8-cgi php8-mod-openssl php8-mod-session libxml2 procps-ng-pgrep procps-ng-pkill curl ca-bundle ca-certificates
+else
+    # Client-only mode deliberately does not install/restart Lighttpd or PHP.
+    opkg install procps-ng-pgrep procps-ng-pkill curl ca-bundle ca-certificates
+fi
 
 # 4. Автоопределение архитектуры и скачивание бинарника fptn-client-cli / Detect CPU & Download Binary
 echo ""
@@ -503,99 +521,106 @@ else
     echo "Интерфейс $USER_KTUN успешно настроен / Interface $USER_KTUN successfully configured."
 fi
 
-# 6. Настройка веб-сервера Lighttpd / Configure Lighttpd
-echo ""
-echo "[4/7] Настройка конфигурации Lighttpd / Configuring Lighttpd web server..."
-LIGHTTPD_CONF_DIR="/opt/etc/lighttpd/conf.d"
-mkdir -p "$LIGHTTPD_CONF_DIR"
-FPTN_LIGHTTPD_CONF="$LIGHTTPD_CONF_DIR/85-fptn.conf"
-FPTN_LIGHTTPD_BACKUP="$FPTN_LIGHTTPD_CONF.pre-fptn.bak"
-FPTN_LIGHTTPD_HAD_CONFIG=no
-if [ -f "$FPTN_LIGHTTPD_CONF" ]; then
-    # Keep a one-time copy of a pre-existing FPTN config; never overwrite this backup.
-    if [ ! -f "$FPTN_LIGHTTPD_BACKUP" ]; then
-        cp -p "$FPTN_LIGHTTPD_CONF" "$FPTN_LIGHTTPD_BACKUP" || {
-            echo "Ошибка: не удалось сохранить прежний конфиг $FPTN_LIGHTTPD_CONF; отмена."
-            exit 1
-        }
-    fi
-    FPTN_LIGHTTPD_HAD_CONFIG=yes
-fi
-
-# Проверяем, задан ли уже server.port в существующих конфигах Lighttpd
-SERVER_PORT_DEFINED=no
-for _cf in /opt/etc/lighttpd/lighttpd.conf /opt/etc/lighttpd/conf.d/*.conf; do
-    if [ -f "$_cf" ] && [ "$_cf" != "$LIGHTTPD_CONF_DIR/85-fptn.conf" ]; then
-        if grep -oE "^\s*server\.port\s*[:=]" "$_cf" >/dev/null 2>&1; then
-            SERVER_PORT_DEFINED=yes
-            break
+if [ "$INSTALL_WEB_PANEL" = "yes" ]; then
+    # 6. Настройка веб-сервера Lighttpd / Configure Lighttpd
+    echo ""
+    echo "[4/7] Настройка конфигурации Lighttpd / Configuring Lighttpd web server..."
+    LIGHTTPD_CONF_DIR="/opt/etc/lighttpd/conf.d"
+    mkdir -p "$LIGHTTPD_CONF_DIR"
+    FPTN_LIGHTTPD_CONF="$LIGHTTPD_CONF_DIR/85-fptn.conf"
+    FPTN_LIGHTTPD_BACKUP="$FPTN_LIGHTTPD_CONF.pre-fptn.bak"
+    FPTN_LIGHTTPD_HAD_CONFIG=no
+    if [ -f "$FPTN_LIGHTTPD_CONF" ]; then
+        # Keep a one-time copy of a pre-existing FPTN config; never overwrite this backup.
+        if [ ! -f "$FPTN_LIGHTTPD_BACKUP" ]; then
+            cp -p "$FPTN_LIGHTTPD_CONF" "$FPTN_LIGHTTPD_BACKUP" || {
+                echo "Ошибка: не удалось сохранить прежний конфиг $FPTN_LIGHTTPD_CONF; отмена."
+                exit 1
+            }
         fi
+        FPTN_LIGHTTPD_HAD_CONFIG=yes
     fi
-done
-
-if [ "$SERVER_PORT_DEFINED" = "yes" ]; then
-    cat << EOF > "$LIGHTTPD_CONF_DIR/85-fptn.conf"
-# Настройки веб-интерфейса FPTN
-server.modules += ( "mod_cgi" )
-\$HTTP["url"] =~ "^/fptn/" {
-    cgi.assign = ( ".php" => "/opt/bin/php-cgi" )
-    static-file.exclude-extensions += ( ".php" )
-}
-EOF
-else
-    cat << EOF > "$LIGHTTPD_CONF_DIR/85-fptn.conf"
-# Настройки веб-интерфейса FPTN на порту $USER_PORT
-server.port = $USER_PORT
-server.modules += ( "mod_cgi" )
-\$HTTP["url"] =~ "^/fptn/" {
-    cgi.assign = ( ".php" => "/opt/bin/php-cgi" )
-    static-file.exclude-extensions += ( ".php" )
-}
-EOF
-fi
-
-# Validate the complete config before restarting a shared web server.
-# If invalid, restore the previous FPTN snippet (or remove the new one) and abort.
-if ! lighttpd -tt -f /opt/etc/lighttpd/lighttpd.conf >/dev/null 2>&1; then
-    echo "ОШИБКА: конфигурация Lighttpd не прошла проверку; перезапуск отменён."
-    if [ "$FPTN_LIGHTTPD_HAD_CONFIG" = "yes" ] && [ -f "$FPTN_LIGHTTPD_BACKUP" ]; then
-        cp -p "$FPTN_LIGHTTPD_BACKUP" "$FPTN_LIGHTTPD_CONF"
+    
+    # Проверяем, задан ли уже server.port в существующих конфигах Lighttpd
+    SERVER_PORT_DEFINED=no
+    for _cf in /opt/etc/lighttpd/lighttpd.conf /opt/etc/lighttpd/conf.d/*.conf; do
+        if [ -f "$_cf" ] && [ "$_cf" != "$LIGHTTPD_CONF_DIR/85-fptn.conf" ]; then
+            if grep -oE "^\s*server\.port\s*[:=]" "$_cf" >/dev/null 2>&1; then
+                SERVER_PORT_DEFINED=yes
+                break
+            fi
+        fi
+    done
+    
+    if [ "$SERVER_PORT_DEFINED" = "yes" ]; then
+        cat << EOF > "$LIGHTTPD_CONF_DIR/85-fptn.conf"
+    # Настройки веб-интерфейса FPTN
+    server.modules += ( "mod_cgi" )
+    \$HTTP["url"] =~ "^/fptn/" {
+        cgi.assign = ( ".php" => "/opt/bin/php-cgi" )
+        static-file.exclude-extensions += ( ".php" )
+    }
+    EOF
     else
-        rm -f "$FPTN_LIGHTTPD_CONF"
+        cat << EOF > "$LIGHTTPD_CONF_DIR/85-fptn.conf"
+    # Настройки веб-интерфейса FPTN на порту $USER_PORT
+    server.port = $USER_PORT
+    server.modules += ( "mod_cgi" )
+    \$HTTP["url"] =~ "^/fptn/" {
+        cgi.assign = ( ".php" => "/opt/bin/php-cgi" )
+        static-file.exclude-extensions += ( ".php" )
+    }
+    EOF
     fi
-    echo "Проверьте конфиги Lighttpd вручную. Остальные шаги установщика могли уже выполниться."
-    exit 1
-fi
-
-echo "Перезапуск Lighttpd / Restarting Lighttpd..."
-if ! /opt/etc/init.d/S80lighttpd restart; then
-    echo "ОШИБКА: Lighttpd не перезапустился."
-    if [ "$FPTN_LIGHTTPD_HAD_CONFIG" = "yes" ] && [ -f "$FPTN_LIGHTTPD_BACKUP" ]; then
-        cp -p "$FPTN_LIGHTTPD_BACKUP" "$FPTN_LIGHTTPD_CONF"
-    else
-        rm -f "$FPTN_LIGHTTPD_CONF"
-    fi
-    /opt/etc/init.d/S80lighttpd restart >/dev/null 2>&1 || true
-    echo "Прежний фрагмент конфигурации восстановлен, но установку нужно проверить вручную."
-    exit 1
-fi
-
-# 7. Установка файлов веб-панели / Install Web Panel
-echo ""
-echo "[5/7] Копирование файлов веб-панели / Copying web panel files..."
-WWW_DIR="/opt/share/www/fptn"
-mkdir -p "$WWW_DIR"
-
-SCRIPT_DIR=$(dirname "$0")
-if [ -f "$SCRIPT_DIR/index.php" ]; then
-    cp "$SCRIPT_DIR/index.php" "$WWW_DIR/index.php"
-else
-    if ! download_file "${GITHUB_RAW_BASE}/deploy/keenetic/index.php" "$WWW_DIR/index.php" 30; then
-        echo "Ошибка: Не удалось скачать index.php / Error: Failed to download index.php"
+    
+    # Validate the complete config before restarting a shared web server.
+    # If invalid, restore the previous FPTN snippet (or remove the new one) and abort.
+    if ! lighttpd -tt -f /opt/etc/lighttpd/lighttpd.conf >/dev/null 2>&1; then
+        echo "ОШИБКА: конфигурация Lighttpd не прошла проверку; перезапуск отменён."
+        if [ "$FPTN_LIGHTTPD_HAD_CONFIG" = "yes" ] && [ -f "$FPTN_LIGHTTPD_BACKUP" ]; then
+            cp -p "$FPTN_LIGHTTPD_BACKUP" "$FPTN_LIGHTTPD_CONF"
+        else
+            rm -f "$FPTN_LIGHTTPD_CONF"
+        fi
+        echo "Проверьте конфиги Lighttpd вручную. Остальные шаги установщика могли уже выполниться."
         exit 1
     fi
+    
+    echo "Перезапуск Lighttpd / Restarting Lighttpd..."
+    if ! /opt/etc/init.d/S80lighttpd restart; then
+        echo "ОШИБКА: Lighttpd не перезапустился."
+        if [ "$FPTN_LIGHTTPD_HAD_CONFIG" = "yes" ] && [ -f "$FPTN_LIGHTTPD_BACKUP" ]; then
+            cp -p "$FPTN_LIGHTTPD_BACKUP" "$FPTN_LIGHTTPD_CONF"
+        else
+            rm -f "$FPTN_LIGHTTPD_CONF"
+        fi
+        /opt/etc/init.d/S80lighttpd restart >/dev/null 2>&1 || true
+        echo "Прежний фрагмент конфигурации восстановлен, но установку нужно проверить вручную."
+        exit 1
+    fi
+    
+    # 7. Установка файлов веб-панели / Install Web Panel
+    echo ""
+    echo "[5/7] Копирование файлов веб-панели / Copying web panel files..."
+    WWW_DIR="/opt/share/www/fptn"
+    mkdir -p "$WWW_DIR"
+    
+    SCRIPT_DIR=$(dirname "$0")
+    if [ -f "$SCRIPT_DIR/index.php" ]; then
+        cp "$SCRIPT_DIR/index.php" "$WWW_DIR/index.php"
+    else
+        if ! download_file "${GITHUB_RAW_BASE}/deploy/keenetic/index.php" "$WWW_DIR/index.php" 30; then
+            echo "Ошибка: Не удалось скачать index.php / Error: Failed to download index.php"
+            exit 1
+        fi
+    fi
+    chmod 644 "$WWW_DIR/index.php"
+    
+    
+else
+    echo "Веб-панель пропущена: Lighttpd и PHP не изменяются."
+    echo "Web panel skipped: Lighttpd and PHP are left untouched."
 fi
-chmod 644 "$WWW_DIR/index.php"
 
 # Serialize arbitrary values as valid POSIX shell single-quoted literals before
 # writing a config file that will later be sourced. This is essential for tokens
@@ -611,6 +636,9 @@ echo ""
 echo "[6/8] Сохранение конфигурации FPTN / Saving FPTN configuration..."
 CONF_PATH="/opt/etc/fptn-client.conf"
 CONF_ENABLED="no"
+if [ "$INSTALL_WEB_PANEL" = "no" ]; then
+    CONF_ENABLED="yes"
+fi
 CONF_SERVERS=""
 CONF_PASS=""
 CONF_TUN_IPV6=""
@@ -687,8 +715,8 @@ if [ -n "$USER_TOKEN" ]; then
     if [ -x "/opt/bin/fptn-client-cli" ]; then
         /opt/bin/fptn-client-cli --access-token "$USER_TOKEN" --show-servers > /opt/etc/fptn-servers.json 2>/dev/null || true  # глушение-обосновано: первичный разбор токена может вернуть ошибку при невалидном токене
     fi
-    if [ ! -s "/opt/etc/fptn-servers.json" ]; then
-        # Резервный разбор через PHP CGI
+    if [ ! -s "/opt/etc/fptn-servers.json" ] && [ "$INSTALL_WEB_PANEL" = "yes" ]; then
+        # Резервный разбор через PHP CGI (only available with web panel)
         /opt/bin/php-cgi -q -r '
             $token = trim($argv[1] ?? "");
             $clean = preg_replace("/^(fptn:\/\/|fptn:)/i", "", $token);
@@ -747,14 +775,22 @@ echo "==========================================================="
 echo "     Установка успешно завершена / Installation Finished!"
 echo "==========================================================="
 echo ""
-echo "  1. Веб-панель доступна по адресу / Web panel URL:"
-echo "     http://${ROUTER_LAN_IP}:$USER_PORT/fptn/"
+if [ "$INSTALL_WEB_PANEL" = "yes" ]; then
+    echo "  1. Веб-панель доступна по адресу / Web panel URL:"
+    echo "     http://${ROUTER_LAN_IP}:$USER_PORT/fptn/"
+    echo ""
+    echo "  2. Запуск туннеля / How to start VPN:"
+    echo "     - Откройте веб-панель / Open FPTN Web Panel."
+    echo "     - Проверьте сервер и нажмите 'Запустить' / Click 'Start'."
+else
+    echo "  Веб-панель не устанавливалась. Lighttpd/PHP не менялись."
+    echo "  Web panel was skipped; Lighttpd/PHP were not changed."
+    echo "  Служба включена для автозапуска, но туннель пока не стартовал."
+    echo "  Service is enabled for boot, but the tunnel has not been started yet."
+    echo "  Для ручного запуска: /opt/etc/init.d/S53fptn-client start"
+fi
 echo ""
-echo "  2. Запуск туннеля / How to start VPN:"
-echo "     - Откройте веб-панель / Open FPTN Web Panel."
-echo "     - Проверьте сервер и нажмите 'Запустить' / Click 'Start'."
-echo ""
-echo "  3. Маршрутизация трафика / Traffic Routing:"
+echo "  Маршрутизация трафика / Traffic Routing:"
 echo "     - В Keenetic Web UI в разделе 'Приоритеты подключений'"
 echo "       появится подключение '$USER_KTUN'."
 echo "     - Перетащите '$USER_KTUN' в нужную политику маршрутизации."
