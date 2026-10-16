@@ -166,17 +166,17 @@ fi
 
 # Функция считывания ввода пользователя с подстановкой по умолчанию
 read_input() {
-    _var_name="$1"
+    # Return the answer through REPLY instead of eval: user-entered tokens must
+    # never be reparsed as shell code.
     _default_val="$2"
-    _res=""
     if [ "$AUTO_ACCEPT" = "yes" ]; then
-        _res="$_default_val"
-        echo "$_res"
+        REPLY="$_default_val"
+        printf '%s\n' "$REPLY"
     else
-        read -r _res 2>/dev/null || _res=""
-        _res=${_res:-$_default_val}
+        REPLY=""
+        read -r REPLY 2>/dev/null || REPLY=""
+        REPLY=${REPLY:-$_default_val}
     fi
-    eval "$_var_name=\"\$_res\""
 }
 
 # 2. Интерактивный опрос параметров / Interactive Configuration Prompt
@@ -201,6 +201,7 @@ fi
 
 printf "Введите порт для веб-панели FPTN / Enter FPTN web panel port (default %s): " "$DEFAULT_PORT"
 read_input USER_PORT "$DEFAULT_PORT"
+USER_PORT="$REPLY"
 
 if is_port_busy "$USER_PORT"; then
     echo "ВНИМАНИЕ: Выбранный порт $USER_PORT сейчас занят! / WARNING: Selected port $USER_PORT is busy!"
@@ -260,9 +261,11 @@ USER_LTUN="$DEFAULT_LTUN"
 if [ -n "$PREV_TOKEN" ]; then
     printf "Найден токен [%s...]. Нажмите Enter для сохранения или введите новый / Existing token found [%s...]. Press Enter to keep or type new: " "$(echo "$PREV_TOKEN" | cut -c 1-12)" "$(echo "$PREV_TOKEN" | cut -c 1-12)"
     read_input USER_TOKEN "$PREV_TOKEN"
+    USER_TOKEN="$REPLY"
 else
     printf "Введите токен подписки FPTN (опционально) / Enter FPTN subscription token (optional): "
     read_input USER_TOKEN ""
+    USER_TOKEN="$REPLY"
 fi
 
 echo ""
@@ -277,6 +280,7 @@ fi
 echo ""
 printf "Продолжить установку? / Continue installation? (y/n, default y): "
 read_input CONFIRM "y"
+CONFIRM="$REPLY"
 if [ "$CONFIRM" != "y" ] && [ "$CONFIRM" != "Y" ]; then
     echo "Установка отменена / Installation cancelled."
     exit 0
