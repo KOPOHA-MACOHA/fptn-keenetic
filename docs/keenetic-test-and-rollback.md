@@ -25,9 +25,9 @@ The report includes private IP addresses, interface names and routes. Keep it pr
 
 ## Full web panel installation (preferred for users who need GUI control)
 
-The router already has Lighttpd, PHP CGI, PHP sessions and the CGI module installed. The installer keeps the existing Lighttpd listener (currently port 8088 for other tools) and adds a dedicated socket for FPTN on port 8080. If 8080 is already occupied or referenced by the Lighttpd config, it selects a free alternative or asks for one. The panel is served from its own document root and opens at `http://ROUTER-LAN-IP:PORT/`, without a `/fptn/` path. The existing shared Lighttpd configuration is validated before and after the change; the installer aborts if validation fails.
+The router already has Lighttpd, PHP CGI, PHP sessions and the CGI module installed. The installer keeps the existing Lighttpd listener (currently port 8088 for other tools) and adds a dedicated socket for FPTN on port 1111. If 1111 is already occupied or referenced by the Lighttpd config, it selects a free alternative or asks for one. The panel is served from its own document root and opens at `http://ROUTER-LAN-IP:PORT/`, without a `/fptn/` path. The existing shared Lighttpd configuration is validated before and after the change; the installer aborts if validation fails.
 
-**Do not run yet.** Before installing, run the read-only preflight again and check whether port 8080 is already listening. The installer also checks the port at installation time to catch changes since the preflight.
+**Do not run yet.** Before installing, run the read-only preflight again and check whether port 1111 is already listening. The installer also checks the port at installation time to catch changes since the preflight.
 
 For the later install, use an immutable commit so the installer and downloaded companion files come from the same reviewed tree:
 
