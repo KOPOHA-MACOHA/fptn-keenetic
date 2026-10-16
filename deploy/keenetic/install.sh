@@ -258,9 +258,10 @@ case "$RAW_ARCH" in
     armv7*)
         ARCH_SUFFIX="armv7"
         ;;
-    mips*el)
+    mips|mipsel|mips*el)
+        # uname -m на части Keenetic возвращает просто "mips", хотя Entware
+        # использует mipsel. Сначала учитываем явно настроенный soft-float feed.
         ARCH_SUFFIX="mipsel"
-        # Проверяем, использует ли Entware репозиторий soft-float (например KN-1713 / MT7628)
         if grep -Rqs 'mipselsf' /opt/etc/opkg.conf /opt/etc/opkg/*.conf 2>/dev/null; then # глушение-обосновано: часть файлов opkg может отсутствовать
             ARCH_SUFFIX="mipselsf"
         fi
@@ -273,15 +274,8 @@ esac
 
 echo "Архитектура процессора / CPU Architecture: $RAW_ARCH ($ARCH_SUFFIX)"
 
-# Останавливаем запущенную службу перед обновлением
-if [ -f "/opt/etc/init.d/S53fptn-client" ]; then
-    echo "Остановка запущенной службы / Stopping running VPN service..."
-    /opt/etc/init.d/S53fptn-client stop >/dev/null 2>&1 || true
-    sleep 1
-fi
-pkill -9 -f "/opt/bin/fptn-client-cli" >/dev/null 2>&1 || true
-rm -f /opt/bin/fptn-client-cli
-
+# Не останавливаем службу и не удаляем рабочий бинарник до проверки загрузки.
+# После проверки mv заменит файл атомарно; при ошибке старый бинарник останется.
 # Проверка валидности бинарного файла (не менее 1 МБ и отсутствие HTML ошибок)
 check_binary_valid() {
     _f="$1"
@@ -310,8 +304,9 @@ for _src_url in "$BIN_RAW_URL" "$BIN_RELEASE_URL" "$BIN_LATEST_URL"; do
     fi
 done
 
-if [ "$DOWNLOAD_SUCCESS" != "yes" ] && [ ! -s "/opt/bin/fptn-client-cli" ]; then
-    echo "Ошибка: Не удалось скачать бинарный файл / Error: Failed to download valid binary!"
+if [ "$DOWNLOAD_SUCCESS" != "yes" ]; then
+    rm -f "/opt/bin/fptn-client-cli.tmp"
+    echo "Ошибка: Не удалось скачать проверенный бинарный файл. Существующий бинарник не изменён. / Error: Failed to download a validated binary. Existing binary was preserved."
     exit 1
 fi
 chmod +x /opt/bin/fptn-client-cli
