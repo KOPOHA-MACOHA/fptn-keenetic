@@ -87,13 +87,30 @@ if [ -z "$REMOTE_VER" ]; then
 fi
 
 # Универсальная функция скачивания с каскадом прокси-зеркал / Download helper with mirror fallback
+download_content_valid() {
+    _file="$1"
+    [ -s "$_file" ] || return 1
+    case "$_file" in
+        */index.php)
+            head -c 5 "$_file" 2>/dev/null | grep -q '^<?php'
+            ;;
+        */S53fptn-client)
+            head -n 1 "$_file" 2>/dev/null | grep -q '^#!/bin/sh'
+            ;;
+        *)
+            return 0
+            ;;
+    esac
+}
+
 download_file() {
     _url="$1"
     _dest="$2"
     _timeout="${3:-120}"
 
+    rm -f "$_dest"
     if curl -sSL --fail --connect-timeout 10 --max-time "$_timeout" -o "$_dest" "$_url"; then
-        if [ -s "$_dest" ]; then return 0; fi
+        if download_content_valid "$_dest"; then return 0; fi
     fi
 
     # Прокси получают полный исходный URL. Не подставляем зеркало upstream:
@@ -102,7 +119,7 @@ download_file() {
         _mirror_url="${_prefix}${_url}"
         rm -f "$_dest"
         if curl -sSL --fail --connect-timeout 10 --max-time "$_timeout" -o "$_dest" "$_mirror_url"; then
-            if [ -s "$_dest" ]; then return 0; fi
+            if download_content_valid "$_dest"; then return 0; fi
         fi
     done
     rm -f "$_dest"
