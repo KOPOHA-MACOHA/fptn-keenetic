@@ -674,7 +674,19 @@ if (isset($_GET['ajax'])) {
             }
         }
         if ($enabled === 'yes') {
-            exec("{$init_script} start 2>&1");
+            exec(escapeshellarg($init_script) . " start 2>&1", $start_output, $start_code);
+            if ($start_code !== 0) {
+                // Если новая служба даже не смогла стартовать, откатываем все заменённые
+                // файлы и только после этого пробуем запустить прежнюю версию.
+                @copy($backup_bin, $cli_path);
+                @copy($backup_init, $service_path);
+                @copy($backup_php, $panel_path);
+                chmod($cli_path, 0755);
+                chmod($service_path, 0755);
+                exec(escapeshellarg($init_script) . " start >/dev/null 2>&1");
+                echo json_encode(['success' => false, 'message' => 'Новая служба не запустилась; файлы восстановлены из резервных копий.']);
+                exit;
+            }
         }
         
         // 4. Сохраняем информацию об установленной версии
