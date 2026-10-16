@@ -2,8 +2,8 @@ name: Build and Test
 
 on:
   push:
-    # Full project builds use dedicated self-hosted runners. Do not launch
-    # them for every audit-branch commit; run on the integration branches.
+    # Full project builds use dedicated self-hosted runners. Avoid running
+    # them for every audit-branch commit.
     branches:
       - master
       - main
@@ -121,7 +121,7 @@ jobs:
           cppcheck --force --error-exitcode=1 --enable=all --check-level=exhaustive --language=c++ --suppress=unusedFunction --inline-suppr --suppress=missingIncludeSystem --suppress=unmatchedSuppression -I ./src/fptn-client/ -I ./src/fptn-server/ -I ./src/fptn-passwd/ -I ./src/fptn-client-protocol-lib -I ./src/ ./src/ ./tests/
       - name: Run cmake-format
         run: |
-          cmake-format -i CMakeLists.txt src/fptn-client/CMakeLists.txt src/fptn-passwd/CMakeLists.txt src/fptn-server/CMakeLists.txt src/fptn-protocol-lib/CMakeLists.txt depends/cmake/FetchBase64.cmake depends/cmake/FetchWintun.cmake depends/cmake/FetchWintun.cmake
+          cmake-format -i CMakeLists.txt src/fptn-client/CMakeLists.txt src/fptn-passwd/CMakeLists.txt src/fptn-server/CMakeLists.txt src/fptn-protocol-lib/CMakeLists.txt depends/cmake/FetchBase64.cmake depends/cmake/FetchLibTunTap.cmake depends/cmake/FetchWintun.cmake
       - name: Build
         run: |
           cd build
@@ -224,7 +224,8 @@ jobs:
   build_windows_AMD64:
     runs-on: Windows11_AMD64
     steps:
-      - uses: actions/checkout@v3
+      - name: Checkout code
+        uses: actions/checkout@v3
         with:
           submodules: true
       - name: Set env
@@ -253,11 +254,11 @@ jobs:
       - name: Run cppcheck
         shell: powershell
         run: |
-          cppcheck --force --error-exitcode=1 --enable=all --check-level=exhaustive --language=c++ --suppress=unusedFunction --inline-suppr --suppress=missingIncludeSystem --suppress=unknownMacro --suppress=unmatchedSuppression -I ./src/fptn-client/ -I ./src/fptn-server/ -I ./src/fptn-passwd/ -I ./src/fptn-client-protocol-lib -I ./src/ ./src/ ./tests/
+          cppcheck --force --error-exitcode=1 --enable=all --check-level=exhaustive --language=c++ --suppress=unusedFunction --inline-suppr --suppress=missingIncludeSystem --suppress=unknownMacro --suppress=unmatchedSuppression -I ./src/fptn-client/ -I ./src/fptn-server/ -I ./src/fptn-passwd/ -I ./src/fptn-client-protocol-lib -I ./src/  ./src/ ./tests/
       - name: Run cmake-format
         shell: powershell
         run: |
-          cmake-format -i CMakeLists.txt src/fptn-client/CMakeLists.txt src/fptn-passwd/CMakeLists.txt src/fptn-server/CMakeLists.txt src/fptn-protocol-lib/CMakeLists.txt depends/cmake/FetchBase64.cmake depends/cmake/FetchWintun.cmake depends/cmake/FetchWintun.cmake
+          cmake-format -i CMakeLists.txt src/fptn-client/CMakeLists.txt src/fptn-passwd/CMakeLists.txt src/fptn-server/CMakeLists.txt src/fptn-protocol-lib/CMakeLists.txt depends/cmake/FetchBase64.cmake depends/cmake/FetchLibTunTap.cmake depends/cmake/FetchWintun.cmake
       - name: Build
         shell: powershell
         run: |
@@ -314,15 +315,15 @@ jobs:
         run: |
           docker pull --quiet $DOCKER_REGISTRY/$IMAGE_NAME:$RELEASE_VERSION-amd64
           docker pull --quiet $DOCKER_REGISTRY/$IMAGE_NAME:$RELEASE_VERSION-arm64
-
+          
           docker manifest rm $DOCKER_REGISTRY/$IMAGE_NAME:$RELEASE_VERSION 2>/dev/null || true
           docker manifest rm $DOCKER_REGISTRY/$IMAGE_NAME:latest 2>/dev/null || true
-
+          
           docker buildx imagetools create \
             -t $DOCKER_REGISTRY/$IMAGE_NAME:$RELEASE_VERSION \
             $DOCKER_REGISTRY/$IMAGE_NAME:$RELEASE_VERSION-amd64 \
             $DOCKER_REGISTRY/$IMAGE_NAME:$RELEASE_VERSION-arm64
-
+          
           docker buildx imagetools create \
             -t "$DOCKER_REGISTRY/$IMAGE_NAME":latest \
             $DOCKER_REGISTRY/$IMAGE_NAME:$RELEASE_VERSION-amd64 \
