@@ -72,7 +72,12 @@ jobs:
               --base master \
               --head "$BRANCH" \
               --title "Sync upstream FPTN release $TAG" \
-              --body "Automated merge of upstream release [`$TAG`](https://github.com/fptn-project/fptn/releases/tag/$TAG) into the Keenetic fork.\n\nThis PR does not install or deploy anything to a router. Review conflicts and Keenetic-specific changes, run CI, then merge only after the MIPS/Entware binary and web-panel integration have been checked."
+              --body "$(cat <<EOF
+Automated merge of upstream release $TAG (https://github.com/fptn-project/fptn/releases/tag/$TAG) into the Keenetic fork.
+
+This PR does not install or deploy anything to a router. Review conflicts and Keenetic-specific changes, run CI, then merge only after the MIPS/Entware binary and web-panel integration have been checked.
+EOF
+)"
           fi
 
       - name: Report upstream merge conflicts
@@ -88,5 +93,8 @@ jobs:
           if [ "$existing" -eq 0 ]; then
             gh issue create \
               --title "$title" \
-              --body "The scheduled upstream sync could not merge release [$TAG](https://github.com/fptn-project/fptn/releases/tag/$TAG) cleanly into the fork's `master`. No branch was pushed and no files were changed on the default branch. Resolve the merge manually, preserving Keenetic/Entware-specific installer, service, web-panel and build changes. Do not deploy the result to a router until the MIPS binary is rebuilt and validated."
+              --body "$(cat <<EOF
+The scheduled upstream sync could not merge release $TAG (https://github.com/fptn-project/fptn/releases/tag/$TAG) cleanly into the fork master. No branch was pushed and no files were changed on the default branch. Resolve the merge manually, preserving Keenetic/Entware-specific installer, service, web-panel and build changes. Do not deploy the result to a router until the MIPS binary is rebuilt and validated.
+EOF
+)"
           fi
