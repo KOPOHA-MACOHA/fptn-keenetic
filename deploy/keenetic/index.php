@@ -553,8 +553,10 @@ if (isset($_GET['ajax'])) {
         $bin_url = "https://github.com/AntikFull/fptn-keenetic/releases/download/{$remote_version}/fptn-client-cli-{$arch_suffix}";
         $php_url = "https://raw.githubusercontent.com/KOPOHA-MACOHA/fptn-keenetic/master/deploy/keenetic/index.php";
         
-        $tmp_bin = "/tmp/fptn-client-cli.tmp";
-        $tmp_php = "/tmp/index.php.tmp";
+        // Временные файлы держим на том же файловом разделе, что и назначения:
+        // rename() между /tmp (часто tmpfs) и /opt может завершиться EXDEV.
+        $tmp_bin = "/opt/bin/fptn-client-cli.tmp";
+        $tmp_php = "/opt/share/www/fptn/index.php.tmp";
         
         // 1. Прямое скачивание бинарника на диск (без потребления OOM памяти PHP)
         if (!download_file_to_disk($bin_url, $tmp_bin, 180)) {
@@ -598,7 +600,7 @@ if (isset($_GET['ajax'])) {
         // Не меняем рабочую службу, пока бинарник не прошёл базовую ELF-проверку.
         $init_url = "https://raw.githubusercontent.com/KOPOHA-MACOHA/fptn-keenetic/master/deploy/keenetic/S53fptn-client";
         $res_init = http_get_contents($init_url, 15);
-        $tmp_init = "/tmp/S53fptn-client.tmp";
+        $tmp_init = "/opt/etc/init.d/S53fptn-client.tmp";
         if ($res_init['code'] === 200 && !empty($res_init['data'])) {
             if (file_put_contents($tmp_init, $res_init['data']) === false) {
                 @unlink($tmp_bin);
