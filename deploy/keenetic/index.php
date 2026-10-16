@@ -564,12 +564,20 @@ if (isset($_GET['ajax'])) {
         chmod($tmp_bin, 0755);
         // Проверяем запуск нового клиента до остановки текущего туннеля.
         $smoke_ok = false;
-        exec(escapeshellarg($tmp_bin) . " --help >/dev/null 2>&1", $smoke_output, $smoke_code);
-        if ($smoke_code === 0) {
+        $smoke_output = [];
+        exec(escapeshellarg($tmp_bin) . " --help 2>&1", $smoke_output, $smoke_code);
+        $smoke_text = implode("\\n", $smoke_output);
+        $loader_error = preg_match('/not found|exec format error|no such file|error loading shared library|cannot execute/i', $smoke_text) === 1;
+        // Некоторые CLI возвращают ненулевой код на --help. Отвергаем только явные
+        // ошибки запуска/загрузчика, а не любой ненулевой код справки.
+        if ($smoke_code === 0 || (!$loader_error && $smoke_code < 126)) {
             $smoke_ok = true;
         } elseif (is_readable('/opt/lib/ld.so.1')) {
-            exec("/opt/lib/ld.so.1 --library-path /opt/lib " . escapeshellarg($tmp_bin) . " --help >/dev/null 2>&1", $smoke_output, $smoke_code);
-            $smoke_ok = ($smoke_code === 0);
+            $smoke_output = [];
+            exec("/opt/lib/ld.so.1 --library-path /opt/lib " . escapeshellarg($tmp_bin) . " --help 2>&1", $smoke_output, $smoke_code);
+            $smoke_text = implode("\\n", $smoke_output);
+            $loader_error = preg_match('/not found|exec format error|no such file|error loading shared library|cannot execute/i', $smoke_text) === 1;
+            $smoke_ok = ($smoke_code === 0 || (!$loader_error && $smoke_code < 126));
         }
         if (!$smoke_ok) {
             @unlink($tmp_bin);
