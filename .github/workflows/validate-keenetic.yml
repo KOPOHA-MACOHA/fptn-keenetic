@@ -30,3 +30,4 @@ jobs:
           sh -n deploy/keenetic/uninstall.sh
           sh -n deploy/keenetic/S53fptn-client
           sh -n deploy/keenetic/fptn-monitor.sh
+          sh -n deploy/keenetic/preflight.sh
