@@ -33,7 +33,7 @@ For the later install, use an immutable commit so the installer and downloaded c
 
 ```sh
 # EXAMPLE ONLY — DO NOT RUN YET.
-COMMIT="786b9114ef387ba3af7da17f81c2be549b0031d7"
+COMMIT="cfd1838303b68d08b7a547527b450ae4aeb02662"
 BASE="https://raw.githubusercontent.com/KOPOHA-MACOHA/fptn-keenetic/$COMMIT"
 curl -fsSL "$BASE/deploy/keenetic/install.sh" -o /tmp/fptn-install.sh
 FPTN_GITHUB_RAW_BASE="$BASE" sh /tmp/fptn-install.sh
