@@ -282,6 +282,9 @@ check_binary_valid() {
     if [ ! -s "$_f" ]; then return 1; fi
     _sz=$(wc -c < "$_f" 2>/dev/null || echo 0)
     if [ "$_sz" -lt 1000000 ]; then return 1; fi
+    # Проверяем ELF magic, а не только размер: HTML/текстовая ошибка может быть большой.
+    _magic=$(od -An -tx1 -N4 "$_f" 2>/dev/null | tr -d ' \n')
+    if [ "$_magic" != "7f454c46" ]; then return 1; fi
     if head -n 1 "$_f" | grep -qi "Not Found\|DOCTYPE\|404\|error"; then return 1; fi
     return 0
 }
