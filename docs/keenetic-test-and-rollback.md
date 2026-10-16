@@ -30,7 +30,7 @@ For a first test, prefer the client-only mode so the installer does not install 
 ```sh
 # EXAMPLE ONLY — DO NOT RUN YET.
 # Pin the installer and its companion files to the same reviewed commit.
-COMMIT="a385eb181c4a6df345d81fbae40f419889f2f69e"
+COMMIT="a7d9ab11c9e324f26445d3cba148a8aeda601c70"
 BASE="https://raw.githubusercontent.com/KOPOHA-MACOHA/fptn-keenetic/$COMMIT"
 curl -fsSL "$BASE/deploy/keenetic/install.sh" -o /tmp/fptn-install.sh
 FPTN_GITHUB_RAW_BASE="$BASE" sh /tmp/fptn-install.sh --no-web-panel
