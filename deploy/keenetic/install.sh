@@ -172,7 +172,7 @@ download_file() {
 # Do not ignore Lighttpd: it may already own a socket on this port.
 is_port_busy() {
     _p="$1"
-    _listeners=$(netstat -tuln 2>/dev/null | grep -E "[:.]\${_p}[[:space:]]" 2>/dev/null || true)
+    _listeners=$(netstat -tuln 2>/dev/null | grep -E "[:.]${_p}[[:space:]]" 2>/dev/null || true)
     [ -n "$_listeners" ]
 }
 
