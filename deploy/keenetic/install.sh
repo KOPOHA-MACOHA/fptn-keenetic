@@ -27,7 +27,8 @@ if [ ! -d "/opt/etc" ] || [ ! -x "/opt/bin/opkg" ]; then
 fi
 
 # После слияния в master установщик и веб-обновление берут исходники из этого форка.
-GITHUB_RAW_BASE="https://raw.githubusercontent.com/KOPOHA-MACOHA/fptn-keenetic/master"
+# Override with an immutable reviewed commit when testing a PR before merge.
+GITHUB_RAW_BASE="${FPTN_GITHUB_RAW_BASE:-https://raw.githubusercontent.com/KOPOHA-MACOHA/fptn-keenetic/master}"
 
 # Обработка команды удаления / Uninstall command handler
 if [ "$1" = "--uninstall" ] || [ "$1" = "-u" ] || [ "$1" = "uninstall" ]; then
