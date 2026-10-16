@@ -1,0 +1,24 @@
+name: Validate Keenetic scripts
+
+on:
+  push:
+    branches: [master, "audit/**"]
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  syntax:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Set up PHP
+        uses: shivammathur/setup-php@v2
+        with:
+          php-version: "8.2"
+      - name: PHP syntax
+        run: php -l deploy/keenetic/index.php
+      - name: POSIX shell syntax
+        run: |
+          sh -n deploy/keenetic/install.sh
+          sh -n deploy/keenetic/S53fptn-client
+          sh -n deploy/keenetic/fptn-monitor.sh
