@@ -26,7 +26,9 @@ for f in \
   /opt/etc/init.d/S53fptn-client \
   /opt/share/www/fptn/index.php \
   /opt/etc/fptn-servers.json \
-  /opt/etc/fptn-monitor.conf
+  /opt/etc/fptn-monitor.conf \
+  /opt/etc/lighttpd/conf.d/85-fptn.conf \
+  /opt/etc/lighttpd/conf.d/85-fptn.conf.pre-fptn.bak
 do
   if [ -f "$f" ]; then
     mkdir -p "$BACKUP/$(dirname "$f" | sed 's#^/opt/##')"
@@ -72,6 +74,8 @@ BACKUP="/opt/backup/fptn-pretest-YYYYMMDD-HHMMSS"
 [ ! -f "$BACKUP/share/www/fptn/index.php" ] || cp -p "$BACKUP/share/www/fptn/index.php" /opt/share/www/fptn/index.php
 [ ! -f "$BACKUP/etc/fptn-servers.json" ] || cp -p "$BACKUP/etc/fptn-servers.json" /opt/etc/fptn-servers.json
 [ ! -f "$BACKUP/etc/fptn-monitor.conf" ] || cp -p "$BACKUP/etc/fptn-monitor.conf" /opt/etc/fptn-monitor.conf
+[ ! -f "$BACKUP/etc/lighttpd/conf.d/85-fptn.conf" ] || cp -p "$BACKUP/etc/lighttpd/conf.d/85-fptn.conf" /opt/etc/lighttpd/conf.d/85-fptn.conf
+[ ! -f "$BACKUP/etc/lighttpd/conf.d/85-fptn.conf.pre-fptn.bak" ] || cp -p "$BACKUP/etc/lighttpd/conf.d/85-fptn.conf.pre-fptn.bak" /opt/etc/lighttpd/conf.d/85-fptn.conf.pre-fptn.bak
 
 chmod +x /opt/bin/fptn-client-cli /opt/etc/init.d/S53fptn-client 2>/dev/null || true
 /opt/etc/init.d/S53fptn-client start
@@ -79,6 +83,15 @@ chmod +x /opt/bin/fptn-client-cli /opt/etc/init.d/S53fptn-client 2>/dev/null || 
 ```
 
 If rollback commands report errors, do not repeatedly restart the tunnel. Preserve the error output and recover over LAN/console access. Restoring the saved Keenetic running configuration is a separate, potentially disruptive operation; do not blindly import it while remote.
+
+
+
+## Extra caution for this fork
+
+- The installer changes persistent KeeneticOS configuration for an OpkgTun interface and restarts Lighttpd, which may serve other local tools. A file backup alone is not enough to restore these changes.
+- Before the first install, save the output of ndmc -c "show running-config" and note any existing OpkgTun interfaces. Do not paste the output publicly; it may reveal private network details.
+- If the installer stops after changing the KeeneticOS interface, compare the saved running-config with the current one and restore only the FPTN-specific interface/policy changes. Do not blindly import the whole saved configuration over a remote connection.
+- Do not use the standalone or embedded uninstaller as a substitute for a verified rollback test. Keep the backup until the router has survived a reboot and the other Entware services have been checked.
 
 ## Important limitations
 
