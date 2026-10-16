@@ -9,6 +9,20 @@ This is a manual checklist, not an installer. Nothing in this document has been 
 - Confirm the router has enough free space: `df -h /opt`.
 - Keep the backup directory private. `/opt/etc/fptn-client.conf` can contain the subscription token and web-panel password. Never upload the backup or paste its contents into an issue.
 
+## Client-only installation
+
+For a first test, prefer the client-only mode so the installer does not install Lighttpd/PHP, write the FPTN web-panel config, or restart Lighttpd:
+
+```sh
+# Do not run until the PR is merged/reviewed and you are ready to test.
+# Replace the URL with the reviewed installer source.
+sh install.sh --no-web-panel
+```
+
+This mode requires a valid subscription token. It still installs the client dependencies, downloads/replaces the binary, writes the client config, and creates a persistent KeeneticOS OpkgTun interface. It is therefore lower risk than the full panel install, but not risk-free.
+
+The installer now creates a private snapshot under `/opt/var/backups/fptn-preinstall-YYYYMMDD-HHMMSS` before package or KeeneticOS changes. It preserves the directory layout for files it finds and saves `ndmc -c "show running-config"`. Keep that snapshot private and record its exact path. It is not an automatic rollback and does not back up the whole router configuration or package database.
+
 ## 1. Create a private backup
 
 Run these commands manually over SSH only after you are ready to test. They only create a backup; they do not stop services or change the running configuration.
