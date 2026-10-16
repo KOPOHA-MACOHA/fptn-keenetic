@@ -69,7 +69,11 @@ if command -v ndmc >/dev/null 2>&1 && [ -f "$CONF" ]; then
                 fail "Interface $KTUN exists but is not marked FPTN"
             fi
         else
-            fail "Could not confirm KeeneticOS interface $KTUN"
+            if grep -Eq "^ENABLED=['\\"]?no['\\"]?$" "$CONF"; then
+                pass "KeeneticOS interface creation deferred because FPTN is disabled"
+            else
+                fail "Could not confirm KeeneticOS interface $KTUN"
+            fi
         fi
     else
         fail "Could not read TUN_INTERFACE from $CONF"
