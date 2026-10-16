@@ -388,10 +388,13 @@ umask 077
 mkdir -p "$BACKUP_DIR"
 for _backup_file in \
     /opt/bin/fptn-client-cli \
+    /opt/bin/fptn-client-cli.pre-update.bak \
+    /opt/bin/fptn-client-cli.tmp \
     /opt/etc/fptn-client.conf \
     /opt/etc/fptn-version \
     /opt/etc/fptn-servers.json \
     /opt/etc/fptn-monitor.conf \
+    /opt/etc/fptn-web-panel.installed \
     /opt/etc/init.d/S53fptn-client \
     /opt/share/www/fptn/index.php \
     /opt/etc/lighttpd/conf.d/85-fptn.conf \
@@ -412,6 +415,54 @@ if command -v ndmc >/dev/null 2>&1; then
 fi
 chmod 700 "$BACKUP_DIR"
 echo "Резервная копия перед установкой / Pre-install snapshot: $BACKUP_DIR"
+
+FPTN_CREATED_INTERFACE=no
+FPTN_INSTALL_COMMITTED=no
+FPTN_LIGHTTPD_TOUCHED=no
+rollback_failed_install() {
+    [ "$FPTN_INSTALL_COMMITTED" = "yes" ] && return 0
+    echo "Установка прервалась: восстанавливаю файлы FPTN из $BACKUP_DIR."
+    for _restore_file in \
+        /opt/bin/fptn-client-cli \
+        /opt/bin/fptn-client-cli.pre-update.bak \
+        /opt/bin/fptn-client-cli.tmp \
+        /opt/etc/fptn-client.conf \
+        /opt/etc/fptn-version \
+        /opt/etc/fptn-servers.json \
+        /opt/etc/fptn-monitor.conf \
+        /opt/etc/fptn-web-panel.installed \
+        /opt/etc/init.d/S53fptn-client \
+        /opt/share/www/fptn/index.php \
+        /opt/etc/lighttpd/conf.d/85-fptn.conf \
+        /opt/etc/lighttpd/conf.d/85-fptn.conf.pre-fptn.bak; do
+        _rel=${_restore_file#/opt/}
+        _saved="$BACKUP_DIR/$_rel"
+        if [ -f "$_saved" ]; then
+            mkdir -p "$(dirname "$_restore_file")"
+            cp -p "$_saved" "$_restore_file" || echo "WARNING: could not restore $_restore_file"
+        else
+            rm -f "$_restore_file"
+        fi
+    done
+    rmdir /opt/share/www/fptn 2>/dev/null || true
+    if [ "$FPTN_CREATED_INTERFACE" = "yes" ]; then
+        _rollback_if=$(ndmc -c "show interface $USER_KTUN" 2>&1 || true)
+        if echo "$_rollback_if" | grep -qi "Fptn"; then
+            ndmc -c "no interface $USER_KTUN" >/dev/null 2>&1 || true
+            ndmc -c "system configuration save" >/dev/null 2>&1 || true
+            echo "Removed newly created FPTN interface during failed-install cleanup."
+        fi
+    fi
+    if [ "$FPTN_LIGHTTPD_TOUCHED" = "yes" ] && [ -x /opt/etc/init.d/S80lighttpd ]; then
+        if lighttpd -tt -f /opt/etc/lighttpd/lighttpd.conf >/dev/null 2>&1; then
+            /opt/etc/init.d/S80lighttpd restart >/dev/null 2>&1 || echo "WARNING: Lighttpd restart failed after restoring its config."
+        else
+            echo "WARNING: restored Lighttpd config did not validate; not restarting shared Lighttpd."
+        fi
+    fi
+    echo "Rollback attempt finished. Entware packages already installed by opkg are not automatically removed."
+}
+trap 'rollback_failed_install' 0
 
 # 3. Установка необходимых системных пакетов / Install Entware packages
 echo ""
@@ -573,6 +624,7 @@ if [ "$INSTALL_WEB_PANEL" = "yes" ]; then
         fi
     done
     
+    FPTN_LIGHTTPD_TOUCHED=yes
     if [ "$SERVER_PORT_DEFINED" = "yes" ]; then
         cat << EOF > "$LIGHTTPD_CONF_DIR/85-fptn.conf"
     # Настройки веб-интерфейса FPTN
@@ -783,19 +835,6 @@ chmod 755 /opt/etc/init.d/S53fptn-client
 # 5. Создание и настройка TUN-интерфейса в KeeneticOS / Register TUN Interface in KeeneticOS
 FPTN_CREATED_INTERFACE=no
 FPTN_INSTALL_COMMITTED=no
-# If anything fails after creating a new interface, remove only that newly
-# created interface. Never delete an interface that existed before this run.
-trap '
-    if [ "$FPTN_INSTALL_COMMITTED" != "yes" ] && [ "$FPTN_CREATED_INTERFACE" = "yes" ]; then
-        _rollback_if=$(ndmc -c "show interface $USER_KTUN" 2>&1 || true)
-        if echo "$_rollback_if" | grep -qi "Fptn"; then
-            ndmc -c "no interface $USER_KTUN" >/dev/null 2>&1 || true
-            ndmc -c "system configuration save" >/dev/null 2>&1 || true
-            echo "Removed newly created FPTN interface during failed-install cleanup."
-        fi
-    fi
-' 0
-
 EXISTING_IF=$(ndmc -c "show interface $USER_KTUN" 2>&1 || true)
 if [ -n "$EXISTING_IF" ] && ! echo "$EXISTING_IF" | grep -qiE "error|no such|not found"; then
     if ! echo "$EXISTING_IF" | grep -qi "Fptn"; then
@@ -831,8 +870,6 @@ if ! ndmc -c "system configuration save" >/dev/null 2>&1; then
     echo "ОШИБКА: KeeneticOS не подтвердил сохранение конфигурации."
     exit 1
 fi
-FPTN_INSTALL_COMMITTED=yes
-trap - 0
 echo "FPTN interface $USER_KTUN configured and saved."
 
 # 8. Восстановление выполняется встроенным supervisor в fptn-client-cli.
@@ -877,3 +914,5 @@ echo "       появится подключение '$USER_KTUN'."
 echo "     - Перетащите '$USER_KTUN' в нужную политику маршрутизации."
 echo "     - Drag connection '$USER_KTUN' into target routing policy."
 echo "==========================================================="
+FPTN_INSTALL_COMMITTED=yes
+trap - 0
