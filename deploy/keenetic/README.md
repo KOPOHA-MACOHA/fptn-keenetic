@@ -73,16 +73,21 @@ system configuration save
 ```
 
 ### Шаг 4. Настройка веб-сервера Lighttpd
-Создайте файл `/opt/etc/lighttpd/conf.d/85-fptn.conf`:
+
+Установщик настраивает отдельный socket Lighttpd на порту `1111` (если он занят, предложит свободный порт). Существующий listener на `8088`, используемый другими инструментами, остаётся без изменений. Каталог панели: `/opt/share/www/fptn`.
+
+Пример фрагмента `/opt/etc/lighttpd/conf.d/85-fptn.conf`:
 ```lighttpd
-# Настройки веб-интерфейса FPTN
 server.modules += ( "mod_cgi" )
-$HTTP["url"] =~ "^/fptn/" {
+$SERVER["socket"] == ":1111" {
+    server.document-root = "/opt/share/www/fptn"
+    index-file.names = ( "index.php", "index.html" )
     cgi.assign = ( ".php" => "/opt/bin/php-cgi" )
     static-file.exclude-extensions += ( ".php" )
 }
 ```
-Перезапустите Lighttpd: `/opt/etc/init.d/S80lighttpd restart`.
+
+После установки панель открывается по адресу `http://192.168.1.1:1111/` (или по выбранному свободному порту). Не публикуйте этот интерфейс в интернет; используйте его из доверенной локальной сети.
 
 ### Шаг 5. Файлы панели и службы
 1. Создайте папку `/opt/share/www/fptn/` и скопируйте туда файл [index.php](index.php).
@@ -124,7 +129,7 @@ $HTTP["url"] =~ "^/fptn/" {
 
 ## 4. Сброс пароля веб-панели
 
-Если вы забыли пароль доступа к веб-панели `/fptn/`:
+Если вы забыли пароль доступа к веб-панели:
 1. Подключитесь к роутеру по SSH.
 2. Откройте `/opt/etc/fptn-client.conf` и удалите строку `WEB_PASSWORD`:
    ```bash
@@ -197,15 +202,21 @@ system configuration save
 ```
 
 ### Step 4. Configure Lighttpd Web Server
-Create `/opt/etc/lighttpd/conf.d/85-fptn.conf`:
+
+The installer adds a dedicated Lighttpd socket on port `1111` (or chooses a free alternative if the port is occupied). The existing listener and document root used by SmartDNS and other tools remain unchanged. The panel is served from `/opt/share/www/fptn` and opens at `http://192.168.1.1:1111/` (or the selected port).
+
+Example `/opt/etc/lighttpd/conf.d/85-fptn.conf`:
 ```lighttpd
 server.modules += ( "mod_cgi" )
-$HTTP["url"] =~ "^/fptn/" {
+$SERVER["socket"] == ":1111" {
+    server.document-root = "/opt/share/www/fptn"
+    index-file.names = ( "index.php", "index.html" )
     cgi.assign = ( ".php" => "/opt/bin/php-cgi" )
     static-file.exclude-extensions += ( ".php" )
 }
 ```
-Restart Lighttpd: `/opt/etc/init.d/S80lighttpd restart`.
+
+The installer validates the full Lighttpd configuration before and after adding the socket and restarts the existing Lighttpd process. Other local web tools may experience a brief restart. Do not expose the FPTN panel to the internet; use it only from your trusted LAN.
 
 ### Step 5. Web Panel and Service Configuration
 1. Create directory `/opt/share/www/fptn/` and copy [index.php](index.php) into it.
@@ -238,7 +249,7 @@ The FPTN client runs with `--disable-routing`, delegating full routing policy co
 
 ## 4. Resetting Web Panel Password
 
-If you forget your `/fptn/` web panel password:
+If you forget your web panel password:
 1. Connect to the router via SSH.
 2. Remove the `WEB_PASSWORD` line in `/opt/etc/fptn-client.conf`:
    ```bash

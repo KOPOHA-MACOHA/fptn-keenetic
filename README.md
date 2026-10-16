@@ -36,7 +36,7 @@ curl -fsSL https://raw.githubusercontent.com/AntikFull/fptn-keenetic/master/depl
 ### What the installer does:
 1. **Installs packages:** Installs required Entware packages (`lighttpd`, `php8-cgi` for the web interface, `curl`, and certificates).
 2. **Detects processor architecture:** Automatically detects your hardware platform (`aarch64`, `armv7`, or `mipsel`) and downloads the appropriate static FPTN client binary.
-3. **Prompts for parameters:** Prompts you for the interface name, port for the web panel (default `8088`), and your subscription token.
+3. **Prompts for parameters:** Prompts you for the interface name, port for the web panel (default `1111`), and your subscription token.
 4. **Creates and configures a TUN interface in KeeneticOS:** Automatically registers an interface of type `OpkgTun` with `ip global` flags and TCP MSS adjustment so the router treats the tunnel as a working internet connection.
 5. **Configures autostart:** Registers the startup service in `/opt/etc/init.d/S53fptn-client`.
 
@@ -46,9 +46,9 @@ curl -fsSL https://raw.githubusercontent.com/AntikFull/fptn-keenetic/master/depl
 
 After the installation is complete, open the web panel in your browser:
 ```
-http://192.168.1.1:8088/fptn/
+http://192.168.1.1:1111/
 ```
-*(If you selected a different port during installation, use it instead of `8088`)*.
+*(If the installer selected another free port, use the port shown at the end of installation.)*.
 
 In the web panel, you can:
 * Save/update your FPTN subscription token.

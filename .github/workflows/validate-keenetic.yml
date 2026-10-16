@@ -1,0 +1,36 @@
+name: Validate Keenetic scripts
+
+on:
+  # Validation is a PR check; a separate push run would duplicate it.
+  pull_request:
+    paths:
+      - 'deploy/keenetic/**'
+      - '.github/workflows/**'
+      - 'docs/**'
+  workflow_dispatch:
+
+# Keep only the newest validation for this pull request.
+concurrency:
+  group: validate-keenetic-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  syntax:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Set up PHP
+        uses: shivammathur/setup-php@v2
+        with:
+          php-version: "8.2"
+      - name: PHP syntax
+        run: php -l deploy/keenetic/index.php
+      - name: Validate GitHub Actions workflows
+        run: docker run --rm -v "${{ github.workspace }}:/repo" -w /repo rhysd/actionlint:latest .github/workflows/upstream-release-sync.yml
+      - name: POSIX shell syntax
+        run: |
+          sh -n deploy/keenetic/install.sh
+          sh -n deploy/keenetic/uninstall.sh
+          sh -n deploy/keenetic/S53fptn-client
+          sh -n deploy/keenetic/fptn-monitor.sh
+          sh -n deploy/keenetic/preflight.sh

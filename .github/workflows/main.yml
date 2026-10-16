@@ -2,12 +2,20 @@ name: Build and Test
 
 on:
   push:
+    # Full project builds use dedicated self-hosted runners. Avoid running
+    # them for every audit-branch commit.
     branches:
-      - '**'
+      - master
+      - main
     tags:
       - '*'
   release:
     types: [ published ]
+
+# Superseded runs for the same ref should not occupy self-hosted runners.
+concurrency:
+  group: build-and-test-${{ github.ref }}
+  cancel-in-progress: true
 env:
   DOCKER_REGISTRY: fptnvpn
   IMAGE_NAME: fptn-vpn-server

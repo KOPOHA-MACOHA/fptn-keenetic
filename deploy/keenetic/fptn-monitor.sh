@@ -6,12 +6,22 @@ LOG_FILE="/opt/var/log/fptn-monitor.log"
 mkdir -p "/opt/var/log" 2>/dev/null || true
 
 CONSECUTIVE_CPU_SPIKES=0
-BOT_TOKEN="8690233007:AAEw2baXjyXvCUo_SVdqtw20BIruxIbQdBY"
-CHAT_ID="758274393"
+# Не хранить Telegram credentials в публичном репозитории.
+# При необходимости задайте их в /opt/etc/fptn-monitor.conf (права 600):
+# BOT_TOKEN="..."
+# CHAT_ID="..."
+MONITOR_CONFIG="/opt/etc/fptn-monitor.conf"
+if [ -r "$MONITOR_CONFIG" ]; then
+    . "$MONITOR_CONFIG"
+fi
+BOT_TOKEN="${BOT_TOKEN:-}"
+CHAT_ID="${CHAT_ID:-}"
 
 send_tg_notification() {
     _msg="$1"
-    curl -s -X POST "https://api.telegram.org/bot${BOT_TOKEN}/sendMessage" \
+    # Без конфигурации монитор продолжает локально логировать, но не отправляет запросы.
+    [ -n "$BOT_TOKEN" ] && [ -n "$CHAT_ID" ] || return 0
+    curl -sS --fail --connect-timeout 5 --max-time 10 -X POST "https://api.telegram.org/bot${BOT_TOKEN}/sendMessage" \
          -d "chat_id=${CHAT_ID}" \
          -d "text=${_msg}" >/dev/null 2>&1 &
 }

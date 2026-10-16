@@ -4,14 +4,20 @@
 // Исправлено: добавлены авторизация, защита от CSRF, маскирование токена и автообновление
 
 $sess_dir = '/opt/tmp/php_sessions';
+umask(0077);
 if (!is_dir($sess_dir)) {
-    @mkdir($sess_dir, 0777, true);
+    @mkdir($sess_dir, 0700, true);
+}
+if (is_dir($sess_dir)) {
+    @chmod($sess_dir, 0700);
 }
 if (is_dir($sess_dir) && is_writable($sess_dir)) {
     session_save_path($sess_dir);
 }
 ini_set('session.cookie_httponly', 1);
 ini_set('session.use_only_cookies', 1);
+ini_set('session.use_strict_mode', 1);
+ini_set('session.cookie_samesite', 'Lax');
 
 session_name('FPTN_SESS');
 session_start();
@@ -113,19 +119,26 @@ function get_token_servers_info($token) {
     if (empty($token)) {
         return null;
     }
+    $token_hash = hash('sha256', (string)$token);
     if (file_exists($servers_file) && filesize($servers_file) > 10) {
         $cached = json_decode(file_get_contents($servers_file), true);
-        if ($cached && !empty($cached['servers'])) {
+        // Не используем список серверов, сохранённый для другого токена.
+        // Старый формат без хэша безопасно перестраивается из текущего токена.
+        if ($cached && !empty($cached['servers'])
+            && isset($cached['token_sha256'])
+            && hash_equals($token_hash, (string)$cached['token_sha256'])) {
             return $cached;
         }
     }
     $info = parse_fptn_token_direct($token);
     if ($info) {
+        $info['token_sha256'] = $token_hash;
         @file_put_contents($servers_file, json_encode($info, JSON_PRETTY_PRINT | JSON_UNESCAPED_UNICODE), LOCK_EX);
         return $info;
     }
     $cli_info = parse_token_via_cli($token);
     if ($cli_info) {
+        $cli_info['token_sha256'] = $token_hash;
         @file_put_contents($servers_file, json_encode($cli_info, JSON_PRETTY_PRINT | JSON_UNESCAPED_UNICODE), LOCK_EX);
         return $cli_info;
     }
@@ -294,8 +307,10 @@ function http_get_contents($url, $timeout = 10) {
         curl_setopt($ch, CURLOPT_FOLLOWLOCATION, true);
         curl_setopt($ch, CURLOPT_CONNECTTIMEOUT, $timeout);
         curl_setopt($ch, CURLOPT_TIMEOUT, $timeout);
-        curl_setopt($ch, CURLOPT_SSL_VERIFYPEER, false);
-        curl_setopt($ch, CURLOPT_SSL_VERIFYHOST, false);
+        // Не отключаем проверку TLS: иначе токены и загружаемые обновления
+        // можно перехватить при атаке посредника.
+        curl_setopt($ch, CURLOPT_SSL_VERIFYPEER, true);
+        curl_setopt($ch, CURLOPT_SSL_VERIFYHOST, 2);
         curl_setopt($ch, CURLOPT_USERAGENT, 'Mozilla/5.0 (Keenetic FPTN Client)');
         $data = curl_exec($ch);
         $code = curl_getinfo($ch, CURLINFO_HTTP_CODE);
@@ -305,7 +320,7 @@ function http_get_contents($url, $timeout = 10) {
         }
     }
     
-    $cmd = "curl -sL -k --connect-timeout " . (int)$timeout . " --max-time " . (int)$timeout . " " . escapeshellarg($url) . " 2>/dev/null";
+    $cmd = "curl -sL --connect-timeout " . (int)$timeout . " --max-time " . (int)$timeout . " " . escapeshellarg($url) . " 2>/dev/null";
     $data = shell_exec($cmd);
     if ($data !== null && $data !== false && strlen($data) > 0) {
         return ['code' => 200, 'data' => $data];
@@ -318,8 +333,8 @@ function http_get_contents($url, $timeout = 10) {
             'follow_location' => 1
         ],
         'ssl' => [
-            'verify_peer' => false,
-            'verify_peer_name' => false
+            'verify_peer' => true,
+            'verify_peer_name' => true
         ]
     ]);
     $data = @file_get_contents($url, false, $ctx);
@@ -344,15 +359,22 @@ function get_installed_version() {
 // Прямое скачивание бинарников на диск во избежание исчерпания памяти php-cgi (memory_limit)
 function download_file_to_disk($url, $dest_path, $timeout = 180) {
     @unlink($dest_path);
-    $cmd = "curl -sL -k --connect-timeout 15 --max-time " . (int)$timeout . " -o " . escapeshellarg($dest_path) . " " . escapeshellarg($url) . " 2>/dev/null";
+    $cmd = "curl -sL --fail --connect-timeout 15 --max-time " . (int)$timeout . " -o " . escapeshellarg($dest_path) . " " . escapeshellarg($url) . " 2>/dev/null";
     exec($cmd);
-    if (file_exists($dest_path) && filesize($dest_path) > 1000000) {
+    if (file_exists($dest_path) && filesize($dest_path) > 1000000
+        && @file_get_contents($dest_path, false, null, 0, 4) === "\x7fELF") {
         return true;
     }
+    @unlink($dest_path);
     $mirror_url = "https://ghproxy.net/" . $url;
-    $cmd_mirror = "curl -sL -k --connect-timeout 15 --max-time " . (int)$timeout . " -o " . escapeshellarg($dest_path) . " " . escapeshellarg($mirror_url) . " 2>/dev/null";
+    $cmd_mirror = "curl -sL --fail --connect-timeout 15 --max-time " . (int)$timeout . " -o " . escapeshellarg($dest_path) . " " . escapeshellarg($mirror_url) . " 2>/dev/null";
     exec($cmd_mirror);
-    return file_exists($dest_path) && filesize($dest_path) > 1000000;
+    if (file_exists($dest_path) && filesize($dest_path) > 1000000
+        && @file_get_contents($dest_path, false, null, 0, 4) === "\x7fELF") {
+        return true;
+    }
+    @unlink($dest_path);
+    return false;
 }
 
 // Функция чтения конфигурации
@@ -505,7 +527,11 @@ if (isset($_GET['ajax'])) {
                 break;
             case 'mips':
             case 'mipsel':
-                $arch_suffix = 'mipsel';
+                // uname -m может возвращать "mips"; Entware feed определяет ABI точнее.
+                $softfloat_feed = trim((string)shell_exec(
+                    "if grep -Rqs 'mipselsf' /opt/etc/opkg.conf /opt/etc/opkg/*.conf 2>/dev/null; then echo yes; fi"
+                )) === 'yes';
+                $arch_suffix = $softfloat_feed ? 'mipselsf' : 'mipsel';
                 break;
             default:
                 echo json_encode(['success' => false, 'message' => 'Неподдерживаемая архитектура процессора: ' . $arch]);
@@ -531,10 +557,12 @@ if (isset($_GET['ajax'])) {
         }
         
         $bin_url = "https://github.com/AntikFull/fptn-keenetic/releases/download/{$remote_version}/fptn-client-cli-{$arch_suffix}";
-        $php_url = "https://raw.githubusercontent.com/AntikFull/fptn-keenetic/master/deploy/keenetic/index.php";
+        $php_url = "https://raw.githubusercontent.com/KOPOHA-MACOHA/fptn-keenetic/master/deploy/keenetic/index.php";
         
-        $tmp_bin = "/tmp/fptn-client-cli.tmp";
-        $tmp_php = "/tmp/index.php.tmp";
+        // Временные файлы держим на том же файловом разделе, что и назначения:
+        // rename() между /tmp (часто tmpfs) и /opt может завершиться EXDEV.
+        $tmp_bin = "/opt/bin/fptn-client-cli.tmp";
+        $tmp_php = "/opt/share/www/fptn/index.php.tmp";
         
         // 1. Прямое скачивание бинарника на диск (без потребления OOM памяти PHP)
         if (!download_file_to_disk($bin_url, $tmp_bin, 180)) {
@@ -542,7 +570,29 @@ if (isset($_GET['ajax'])) {
             exit;
         }
         chmod($tmp_bin, 0755);
-        
+        // Проверяем запуск нового клиента до остановки текущего туннеля.
+        $smoke_ok = false;
+        $smoke_output = [];
+        exec(escapeshellarg($tmp_bin) . " --help 2>&1", $smoke_output, $smoke_code);
+        $smoke_text = implode("\\n", $smoke_output);
+        $loader_error = preg_match('/not found|exec format error|no such file|error loading shared library|cannot execute/i', $smoke_text) === 1;
+        // Некоторые CLI возвращают ненулевой код на --help. Отвергаем только явные
+        // ошибки запуска/загрузчика, а не любой ненулевой код справки.
+        if ($smoke_code === 0 || (!$loader_error && $smoke_code < 126)) {
+            $smoke_ok = true;
+        } elseif (is_readable('/opt/lib/ld.so.1')) {
+            $smoke_output = [];
+            exec("/opt/lib/ld.so.1 --library-path /opt/lib " . escapeshellarg($tmp_bin) . " --help 2>&1", $smoke_output, $smoke_code);
+            $smoke_text = implode("\\n", $smoke_output);
+            $loader_error = preg_match('/not found|exec format error|no such file|error loading shared library|cannot execute/i', $smoke_text) === 1;
+            $smoke_ok = ($smoke_code === 0 || (!$loader_error && $smoke_code < 126));
+        }
+        if (!$smoke_ok) {
+            @unlink($tmp_bin);
+            echo json_encode(['success' => false, 'message' => 'Новый бинарник не прошёл проверку запуска; текущий клиент не изменён.']);
+            exit;
+        }
+
         // 2. Скачивание PHP панели
         $res_php = http_get_contents($php_url, 20);
         if ($res_php['code'] !== 200 || empty($res_php['data'])) {
@@ -550,28 +600,74 @@ if (isset($_GET['ajax'])) {
             echo json_encode(['success' => false, 'message' => "Не удалось скачать новую веб-панель index.php: HTTP {$res_php['code']}"]);
             exit;
         }
-        file_put_contents($tmp_php, $res_php['data']);
-
-        // 3. Обновление скрипта службы S53fptn-client
-        $init_url = "https://raw.githubusercontent.com/AntikFull/fptn-keenetic/master/deploy/keenetic/S53fptn-client";
-        $res_init = http_get_contents($init_url, 15);
-        if ($res_init['code'] === 200 && !empty($res_init['data'])) {
-            file_put_contents("/opt/etc/init.d/S53fptn-client", $res_init['data']);
-            chmod("/opt/etc/init.d/S53fptn-client", 0755);
-        }
-        
-        // 1. Останавливаем службу
-        exec("{$init_script} stop 2>&1");
-        
-        // 2. Перемещаем бинарник
-        if (!rename($tmp_bin, $cli_path)) {
+        if (file_put_contents($tmp_php, $res_php['data'], LOCK_EX) === false) {
             @unlink($tmp_bin);
             @unlink($tmp_php);
-            echo json_encode(['success' => false, 'message' => 'Не удалось перезаписать файл клиента /opt/bin/fptn-client-cli. Проверьте права доступа.']);
+            echo json_encode(['success' => false, 'message' => 'Не удалось сохранить временную копию веб-панели.']);
+            exit;
+        }
+
+        // 3. Обновление скрипта службы скачиваем во временный файл.
+        // Не меняем рабочую службу, пока бинарник не прошёл базовую ELF-проверку.
+        $init_url = "https://raw.githubusercontent.com/KOPOHA-MACOHA/fptn-keenetic/master/deploy/keenetic/S53fptn-client";
+        $res_init = http_get_contents($init_url, 15);
+        $tmp_init = "/opt/etc/init.d/S53fptn-client.tmp";
+        if ($res_init['code'] === 200 && !empty($res_init['data'])) {
+            if (file_put_contents($tmp_init, $res_init['data']) === false) {
+                @unlink($tmp_bin);
+                @unlink($tmp_php);
+                echo json_encode(['success' => false, 'message' => 'Не удалось сохранить временный файл службы.']);
+                exit;
+            }
+            chmod($tmp_init, 0755);
+        }
+
+        // 4. Сохраняем все файлы, которые будут заменены. Если резервная копия
+        // не создаётся, отменяем обновление до остановки действующего туннеля.
+        $backup_bin = $cli_path . '.pre-update.bak';
+        $service_path = "/opt/etc/init.d/S53fptn-client";
+        $panel_path = "/opt/share/www/fptn/index.php";
+        $backup_init = $service_path . '.pre-update.bak';
+        $backup_php = $panel_path . '.pre-update.bak';
+        if (!file_exists($cli_path) || !@copy($cli_path, $backup_bin)
+            || !file_exists($service_path) || !@copy($service_path, $backup_init)
+            || !file_exists($panel_path) || !@copy($panel_path, $backup_php)) {
+            @unlink($tmp_bin);
+            @unlink($tmp_php);
+            @unlink($tmp_init);
+            echo json_encode(['success' => false, 'message' => 'Не удалось создать резервные копии файлов; обновление отменено.']);
+            exit;
+        }
+
+        // 5. Останавливаем службу только после загрузки всех файлов и создания backup.
+        exec(escapeshellarg($init_script) . " stop 2>&1");
+
+        // 6. Заменяем бинарник и обновляемые скрипты. При любой ошибке восстанавливаем
+        // все исходные файлы до попытки снова запустить службу.
+        $update_ok = @rename($tmp_bin, $cli_path);
+        if ($update_ok && file_exists($tmp_init)) {
+            $update_ok = @rename($tmp_init, $service_path);
+        }
+        if ($update_ok) {
+            $update_ok = @rename($tmp_php, $panel_path);
+        }
+
+        if (!$update_ok) {
+            @copy($backup_bin, $cli_path);
+            @copy($backup_init, $service_path);
+            @copy($backup_php, $panel_path);
+            chmod($cli_path, 0755);
+            chmod($service_path, 0755);
+            @unlink($tmp_bin);
+            @unlink($tmp_php);
+            @unlink($tmp_init);
+            exec(escapeshellarg($init_script) . " start >/dev/null 2>&1");
+            echo json_encode(['success' => false, 'message' => 'Обновление не завершено: исходные файлы восстановлены из резервных копий.']);
             exit;
         }
         chmod($cli_path, 0755);
-        
+        chmod($service_path, 0755);
+
         // 3. Перечитываем конфигурацию и запускаем службу, если она должна быть включена
         // Читаем вручную конфигурационный файл
         $enabled = 'no';
@@ -584,14 +680,24 @@ if (isset($_GET['ajax'])) {
             }
         }
         if ($enabled === 'yes') {
-            exec("{$init_script} start 2>&1");
+            exec(escapeshellarg($init_script) . " start 2>&1", $start_output, $start_code);
+            if ($start_code !== 0) {
+                // Если новая служба даже не смогла стартовать, откатываем все заменённые
+                // файлы и только после этого пробуем запустить прежнюю версию.
+                @copy($backup_bin, $cli_path);
+                @copy($backup_init, $service_path);
+                @copy($backup_php, $panel_path);
+                chmod($cli_path, 0755);
+                chmod($service_path, 0755);
+                exec(escapeshellarg($init_script) . " start >/dev/null 2>&1");
+                echo json_encode(['success' => false, 'message' => 'Новая служба не запустилась; файлы восстановлены из резервных копий.']);
+                exit;
+            }
         }
         
         // 4. Сохраняем информацию об установленной версии
         @file_put_contents($version_file, $remote_version);
         
-        // 5. Заменяем саму себя в последнюю очередь
-        rename($tmp_php, "/opt/share/www/fptn/index.php");
         
         echo json_encode(['success' => true, 'message' => 'Обновление успешно установлено!']);
         exit;
@@ -640,20 +746,27 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 
         // 1. Установка нового пароля (если он еще не задан)
         if ($action === 'setup_password' && !$password_set) {
-            $new_pass = $_POST['password'] ?? '';
-            $confirm_pass = $_POST['confirm_password'] ?? '';
-            if (strlen($new_pass) < 6) {
-                $error = 'Пароль должен быть не менее 6 символов';
-            } elseif ($new_pass !== $confirm_pass) {
-                $error = 'Пароли не совпадают';
+            $submitted_csrf = $_POST['csrf_token'] ?? '';
+            $session_csrf = $_SESSION['csrf_token'] ?? '';
+            if (empty($submitted_csrf) || empty($session_csrf) || !hash_equals($session_csrf, $submitted_csrf)) {
+                $error = 'Ошибка безопасности: неверный CSRF токен. Перезагрузите страницу.';
             } else {
-                $config['WEB_PASSWORD'] = password_hash($new_pass, PASSWORD_BCRYPT);
-                if (write_config()) {
-                    $_SESSION['auth'] = true;
-                    header("Location: " . $_SERVER['PHP_SELF']);
-                    exit;
+                $new_pass = $_POST['password'] ?? '';
+                $confirm_pass = $_POST['confirm_password'] ?? '';
+                if (strlen($new_pass) < 10) {
+                    $error = 'Пароль должен быть не менее 10 символов';
+                } elseif ($new_pass !== $confirm_pass) {
+                    $error = 'Пароли не совпадают';
                 } else {
-                    $error = 'Не удалось записать пароль в конфигурацию.';
+                    $config['WEB_PASSWORD'] = password_hash($new_pass, PASSWORD_BCRYPT);
+                    if (write_config()) {
+                        session_regenerate_id(true);
+                        $_SESSION['auth'] = true;
+                        header("Location: " . $_SERVER['PHP_SELF']);
+                        exit;
+                    } else {
+                        $error = 'Не удалось записать пароль в конфигурацию.';
+                    }
                 }
             }
         }
@@ -662,6 +775,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         elseif ($action === 'login' && $password_set) {
             $pass = $_POST['password'] ?? '';
             if (password_verify($pass, $config['WEB_PASSWORD'])) {
+                session_regenerate_id(true);
                 $_SESSION['auth'] = true;
                 header("Location: " . $_SERVER['PHP_SELF']);
                 exit;
@@ -686,12 +800,6 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             
             $is_valid_csrf = (!empty($submitted_csrf) && !empty($session_csrf) && hash_equals($session_csrf, $submitted_csrf));
             
-            // Если сессия активна, но сессионный токен пуст или пересоздался в другом процессе php-cgi — принимаем и фиксируем токен
-            if (!$is_valid_csrf && !empty($submitted_csrf)) {
-                $_SESSION['csrf_token'] = $submitted_csrf;
-                $is_valid_csrf = true;
-            }
-
             if (!$is_valid_csrf) {
                 $error = 'Ошибка безопасности: неверный CSRF токен. Перезагрузите страницу.';
             } else {
@@ -707,6 +815,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                         }
 
                         if ($parsed && !empty($parsed['servers']) && is_array($parsed['servers'])) {
+                            $parsed['token_sha256'] = hash('sha256', $token);
                             @file_put_contents($servers_file, json_encode($parsed, JSON_PRETTY_PRINT | JSON_UNESCAPED_UNICODE), LOCK_EX);
                             $config['TOKEN'] = $token;
                             write_config();

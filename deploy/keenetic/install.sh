@@ -1,5 +1,6 @@
 #!/bin/sh
 # Интерактивный установщик FPTN-клиента для Keenetic (Entware) / Interactive FPTN Client Installer for Keenetic
+# Use --no-web-panel for a client-only install that does not install/restart Lighttpd or PHP.
 # Автор / Author: Antigravity
 # Поддержка языков / Language: Русский (RU) & English (EN)
 
@@ -9,9 +10,21 @@ set -e
 export LANG="${LANG:-ru_RU.UTF-8}"
 export LC_ALL="${LC_ALL:-ru_RU.UTF-8}"
 
+AUTO_ACCEPT="no"
+INSTALL_WEB_PANEL="yes"
+for _arg in "$@"; do
+    case "$_arg" in
+        -y|--auto) AUTO_ACCEPT="yes" ;;
+        --no-web-panel) INSTALL_WEB_PANEL="no" ;;
+    esac
+done
+
 echo "==========================================================="
-echo "  Установка FPTN-клиента и веб-панели для Keenetic (Entware)"
-echo "  Installing FPTN Client & Web Panel for Keenetic (Entware)"
+echo "  Установка FPTN-клиента для Keenetic (Entware)"
+echo "  Installing FPTN Client for Keenetic (Entware)"
+if [ "$INSTALL_WEB_PANEL" = "no" ]; then
+    echo "  Режим без веб-панели / Client-only mode"
+fi
 echo "==========================================================="
 echo ""
 
@@ -22,18 +35,28 @@ if [ ! -d "/opt/etc" ] || [ ! -x "/opt/bin/opkg" ]; then
     exit 1
 fi
 
-GITHUB_RAW_BASE="https://raw.githubusercontent.com/AntikFull/fptn-keenetic/master"
+# После слияния в master установщик и веб-обновление берут исходники из этого форка.
+# Override with an immutable reviewed commit when testing a PR before merge.
+GITHUB_RAW_BASE="${FPTN_GITHUB_RAW_BASE:-https://raw.githubusercontent.com/KOPOHA-MACOHA/fptn-keenetic/master}"
 
 # Обработка команды удаления / Uninstall command handler
 if [ "$1" = "--uninstall" ] || [ "$1" = "-u" ] || [ "$1" = "uninstall" ]; then
     echo "Запуск процесса удаления FPTN... / Starting FPTN uninstallation..."
     
-    KTUN_NAME="OpkgTun1"
+    KTUN_NAME=""
+    FPTN_CONFIG_PRESENT=no
     if [ -f "/opt/etc/fptn-client.conf" ]; then
+        FPTN_CONFIG_PRESENT=yes
+        TUN_INTERFACE=""
         . "/opt/etc/fptn-client.conf" 2>/dev/null || true
         if [ -n "$TUN_INTERFACE" ]; then
             KTUN_NAME=$(echo "$TUN_INTERFACE" | sed -E 's/opkgtun([0-9]+)/OpkgTun\1/i')
         fi
+    fi
+
+    FPTN_PANEL_PRESENT=no
+    if [ -f "/opt/etc/fptn-web-panel.installed" ] || [ -f "/opt/etc/lighttpd/conf.d/85-fptn.conf" ]; then
+        FPTN_PANEL_PRESENT=yes
     fi
 
     echo "[1/5] Остановка служб FPTN / Stopping FPTN services..."
@@ -46,13 +69,23 @@ if [ "$1" = "--uninstall" ] || [ "$1" = "-u" ] || [ "$1" = "uninstall" ]; then
     pkill -9 -f "fptn-watchdog" >/dev/null 2>&1 || true
 
     echo "[2/5] Удаление бинарников и файлов веб-панели / Removing binary & web files..."
-    rm -f /opt/bin/fptn-client-cli /opt/bin/fptn-watchdog.sh /opt/bin/fptn-ndm-setup.sh /opt/etc/fptn-client.conf /opt/etc/init.d/S53fptn-client /opt/etc/fptn-watchdog.sh /opt/etc/lighttpd/conf.d/85-fptn.conf
+    rm -f /opt/bin/fptn-client-cli /opt/bin/fptn-watchdog.sh /opt/bin/fptn-ndm-setup.sh /opt/etc/fptn-client.conf /opt/etc/init.d/S53fptn-client /opt/etc/fptn-watchdog.sh
+    # Restore the pre-FPTN Lighttpd fragment if the installer saved one.
+    if [ -f /opt/etc/lighttpd/conf.d/85-fptn.conf.pre-fptn.bak ]; then
+        cp -p /opt/etc/lighttpd/conf.d/85-fptn.conf.pre-fptn.bak /opt/etc/lighttpd/conf.d/85-fptn.conf
+        rm -f /opt/etc/lighttpd/conf.d/85-fptn.conf.pre-fptn.bak
+    else
+        rm -f /opt/etc/lighttpd/conf.d/85-fptn.conf
+    fi
     rm -rf /opt/share/www/fptn
 
     echo "[3/5] Обновление конфигурации Lighttpd / Updating Lighttpd..."
-    if [ -f "/opt/etc/init.d/S80lighttpd" ]; then
+    if [ "$FPTN_PANEL_PRESENT" = "yes" ] && [ -x "/opt/etc/init.d/S80lighttpd" ]; then
         /opt/etc/init.d/S80lighttpd restart >/dev/null 2>&1 || true
+    else
+        echo "Панель FPTN не обнаружена; Lighttpd не перезапускается."
     fi
+    rm -f /opt/etc/fptn-web-panel.installed
 
     echo "[4/5] Очистка старых записей cron / Cleaning legacy crontab entries..."
     # Задание могло быть добавлено и в /opt/etc/crontab, и в пользовательский
@@ -66,10 +99,20 @@ if [ "$1" = "--uninstall" ] || [ "$1" = "-u" ] || [ "$1" = "uninstall" ]; then
         fi
     done
 
-    echo "[5/5] Удаление интерфейса $KTUN_NAME в KeeneticOS / Removing $KTUN_NAME interface..."
-    if which ndmc >/dev/null 2>&1; then
-        ndmc -c "no interface $KTUN_NAME" 2>/dev/null || true
-        ndmc -c "system configuration save" 2>/dev/null || true
+    if [ -n "$KTUN_NAME" ] && [ "$FPTN_CONFIG_PRESENT" = "yes" ]; then
+        echo "[5/5] Проверка интерфейса FPTN $KTUN_NAME / Checking FPTN interface..."
+        if command -v ndmc >/dev/null 2>&1; then
+            _uninstall_if=$(ndmc -c "show interface $KTUN_NAME" 2>&1 || true)
+            if echo "$_uninstall_if" | grep -qi "Fptn"; then
+                ndmc -c "no interface $KTUN_NAME" 2>/dev/null || true
+                ndmc -c "system configuration save" 2>/dev/null || true
+            else
+                echo "Интерфейс $KTUN_NAME не помечен как FPTN; оставляю его нетронутым."
+                echo "Interface not marked FPTN; leaving it untouched."
+            fi
+        fi
+    else
+        echo "[5/5] Конфигурация FPTN не найдена; интерфейсы KeeneticOS не изменяются."
     fi
 
     echo ""
@@ -86,85 +129,110 @@ if [ -z "$REMOTE_VER" ]; then
 fi
 
 # Универсальная функция скачивания с каскадом прокси-зеркал / Download helper with mirror fallback
+download_content_valid() {
+    _file="$1"
+    [ -s "$_file" ] || return 1
+    case "$_file" in
+        */index.php)
+            head -c 5 "$_file" 2>/dev/null | grep -q '^<?php'
+            ;;
+        */S53fptn-client)
+            head -n 1 "$_file" 2>/dev/null | grep -q '^#!/bin/sh'
+            ;;
+        *)
+            return 0
+            ;;
+    esac
+}
+
 download_file() {
     _url="$1"
     _dest="$2"
     _timeout="${3:-120}"
 
-    if curl -sSL --connect-timeout 10 --max-time "$_timeout" -o "$_dest" "$_url"; then
-        if [ -s "$_dest" ]; then return 0; fi
+    rm -f "$_dest"
+    if curl -sSL --fail --connect-timeout 10 --max-time "$_timeout" -o "$_dest" "$_url"; then
+        if download_content_valid "$_dest"; then return 0; fi
     fi
 
-    # Пробуем каскад зеркал / Try mirrors fallback
-    for _prefix in "https://ghproxy.net/" "https://ghfast.top/" "https://cdn.jsdelivr.net/gh/AntikFull/fptn-keenetic@master/"; do
+    # Прокси получают полный исходный URL. Не подставляем зеркало upstream:
+    # оно могло бы вернуть старую панель/службу вместо файлов этого форка.
+    for _prefix in "https://ghproxy.net/" "https://ghfast.top/"; do
         _mirror_url="${_prefix}${_url}"
-        if curl -sSL --connect-timeout 10 --max-time "$_timeout" -o "$_dest" "$_mirror_url"; then
-            if [ -s "$_dest" ]; then return 0; fi
+        rm -f "$_dest"
+        if curl -sSL --fail --connect-timeout 10 --max-time "$_timeout" -o "$_dest" "$_mirror_url"; then
+            if download_content_valid "$_dest"; then return 0; fi
         fi
     done
+    rm -f "$_dest"
     return 1
 }
 
-# Функция проверки занятости порта посторонними сервисами (кроме lighttpd)
+# Return busy if ANY process already listens on the requested TCP/UDP port.
+# Do not ignore Lighttpd: it may already own a socket on this port.
 is_port_busy() {
     _p="$1"
-    _listeners=$(netstat -tulnp 2>/dev/null | grep -E ":${_p}\s" 2>/dev/null || netstat -tuln 2>/dev/null | grep -E ":${_p}\s" 2>/dev/null || true)
-    if [ -n "$_listeners" ]; then
-        # Если порт занят НЕ lighttpd (например nginx, xray, adguard)
-        if echo "$_listeners" | grep -v "lighttpd" >/dev/null 2>&1; then
-            return 0
-        fi
-    fi
-    return 1
+    _listeners=$(netstat -tuln 2>/dev/null | grep -E "[:.]${_p}[[:space:]]" 2>/dev/null || true)
+    [ -n "$_listeners" ]
 }
-
-AUTO_ACCEPT="no"
-if [ "$1" = "-y" ] || [ "$1" = "--auto" ]; then
-    AUTO_ACCEPT="yes"
-fi
 
 # Функция считывания ввода пользователя с подстановкой по умолчанию
 read_input() {
-    _var_name="$1"
+    # Return the answer through REPLY instead of eval: user-entered tokens must
+    # never be reparsed as shell code.
     _default_val="$2"
-    _res=""
     if [ "$AUTO_ACCEPT" = "yes" ]; then
-        _res="$_default_val"
-        echo "$_res"
+        REPLY="$_default_val"
+        printf '%s\n' "$REPLY"
     else
-        read -r _res 2>/dev/null || _res=""
-        _res=${_res:-$_default_val}
+        REPLY=""
+        read -r REPLY 2>/dev/null || REPLY=""
+        REPLY=${REPLY:-$_default_val}
     fi
-    eval "$_var_name=\"\$_res\""
 }
 
-# 2. Интерактивный опрос параметров / Interactive Configuration Prompt
-DEFAULT_PORT=8088
-if [ -f "/opt/etc/lighttpd/conf.d/80-nfqws.conf" ]; then
-    NFQWS_PORT=$(grep -oE "server.port := [0-9]+" /opt/etc/lighttpd/conf.d/80-nfqws.conf | awk '{print $3}')
-    if [ -n "$NFQWS_PORT" ]; then
-        DEFAULT_PORT=$NFQWS_PORT
+# 2. Select a dedicated, memorable web-panel port. Existing Lighttpd
+# services keep their current listener; FPTN gets an additional socket.
+USER_PORT=""
+if [ "$INSTALL_WEB_PANEL" = "yes" ]; then
+    DEFAULT_PORT=1111
+    if is_port_busy "$DEFAULT_PORT" ||
+       grep -R -E "(:|[[:space:]])${DEFAULT_PORT}([[:space:]]|[;}]|$)" /opt/etc/lighttpd/lighttpd.conf /opt/etc/lighttpd/conf.d 2>/dev/null | grep -v '^[[:space:]]*#' >/dev/null 2>&1; then
+        echo "Порт $DEFAULT_PORT уже занят или упомянут в конфигурации Lighttpd."
+        CHECK_P=$((DEFAULT_PORT + 1))
+        while is_port_busy "$CHECK_P" ||
+              grep -R -E "(:|[[:space:]])${CHECK_P}([[:space:]]|[;}]|$)" /opt/etc/lighttpd/lighttpd.conf /opt/etc/lighttpd/conf.d 2>/dev/null | grep -v '^[[:space:]]*#' >/dev/null 2>&1; do
+            CHECK_P=$((CHECK_P + 1))
+            [ "$CHECK_P" -le 65535 ] || { echo "Не найден свободный порт."; exit 1; }
+        done
+        DEFAULT_PORT=$CHECK_P
+        echo "Выбран свободный порт: $DEFAULT_PORT"
+    fi
+
+    printf "Порт веб-панели FPTN (default %s): " "$DEFAULT_PORT"
+    read_input USER_PORT "$DEFAULT_PORT"
+    USER_PORT="$REPLY"
+
+    case "$USER_PORT" in
+        ''|*[!0-9]*)
+            echo "Ошибка: порт должен быть числом от 1 до 65535. Установка отменена."
+            exit 1
+            ;;
+    esac
+    if [ "$USER_PORT" -lt 1 ] || [ "$USER_PORT" -gt 65535 ]; then
+        echo "Ошибка: порт должен быть в диапазоне 1-65535. Установка отменена."
+        exit 1
+    fi
+
+    if is_port_busy "$USER_PORT"; then
+        echo "ОШИБКА: порт $USER_PORT занят. Выберите свободный порт; установка отменена."
+        exit 1
+    fi
+    if grep -R -E "(:|[[:space:]])${USER_PORT}([[:space:]]|[;}]|$)" /opt/etc/lighttpd/lighttpd.conf /opt/etc/lighttpd/conf.d 2>/dev/null | grep -v '^[[:space:]]*#' >/dev/null 2>&1; then
+        echo "ОШИБКА: порт $USER_PORT уже упоминается в конфигурации Lighttpd. Выберите другой; установка отменена."
+        exit 1
     fi
 fi
-
-# Проверяем, свободен ли дефолтный порт
-if is_port_busy "$DEFAULT_PORT"; then
-    echo "Предупреждение: Порт $DEFAULT_PORT уже занят! / Warning: Port $DEFAULT_PORT is currently busy!"
-    CHECK_P=8089
-    while is_port_busy "$CHECK_P"; do
-        CHECK_P=$((CHECK_P + 1))
-    done
-    DEFAULT_PORT=$CHECK_P
-    echo "Автоматически выбран свободный порт / Auto-selected available port: $DEFAULT_PORT"
-fi
-
-printf "Введите порт для веб-панели FPTN / Enter FPTN web panel port (default %s): " "$DEFAULT_PORT"
-read_input USER_PORT "$DEFAULT_PORT"
-
-if is_port_busy "$USER_PORT"; then
-    echo "ВНИМАНИЕ: Выбранный порт $USER_PORT сейчас занят! / WARNING: Selected port $USER_PORT is busy!"
-fi
-
 # Проверяем наличие уже существующего конфига для сохранения настроек при обновлении
 PREV_TOKEN=""
 PREV_LTUN=""
@@ -219,14 +287,26 @@ USER_LTUN="$DEFAULT_LTUN"
 if [ -n "$PREV_TOKEN" ]; then
     printf "Найден токен [%s...]. Нажмите Enter для сохранения или введите новый / Existing token found [%s...]. Press Enter to keep or type new: " "$(echo "$PREV_TOKEN" | cut -c 1-12)" "$(echo "$PREV_TOKEN" | cut -c 1-12)"
     read_input USER_TOKEN "$PREV_TOKEN"
+    USER_TOKEN="$REPLY"
 else
     printf "Введите токен подписки FPTN (опционально) / Enter FPTN subscription token (optional): "
     read_input USER_TOKEN ""
+    USER_TOKEN="$REPLY"
+fi
+
+if [ "$INSTALL_WEB_PANEL" = "no" ] && [ -z "$USER_TOKEN" ]; then
+    echo "ОШИБКА: режим без веб-панели требует токен подписки FPTN."
+    echo "ERROR: client-only mode requires an FPTN subscription token."
+    exit 1
 fi
 
 echo ""
 echo "Параметры установки / Installation Parameters:"
-echo "  Веб-порт / Web Port:               $USER_PORT"
+if [ "$INSTALL_WEB_PANEL" = "yes" ]; then
+    echo "  Веб-порт / Web Port:               $USER_PORT (отдельный listener / dedicated listener)"
+else
+    echo "  Веб-панель не устанавливается / Web panel disabled"
+fi
 echo "  Интерфейс KeeneticOS / OS Interface: $USER_KTUN ($USER_LTUN)"
 if [ -n "$USER_TOKEN" ]; then
     echo "  Токен подписки / Subscription Token: [Указан / Specified]"
@@ -236,16 +316,178 @@ fi
 echo ""
 printf "Продолжить установку? / Continue installation? (y/n, default y): "
 read_input CONFIRM "y"
+CONFIRM="$REPLY"
 if [ "$CONFIRM" != "y" ] && [ "$CONFIRM" != "Y" ]; then
     echo "Установка отменена / Installation cancelled."
     exit 0
 fi
 
+# Safety preflight: never reconfigure a Keenetic interface that belongs to another service.
+# An existing interface is reusable only when its description identifies it as FPTN.
+if command -v ndmc >/dev/null 2>&1; then
+    _preflight_if=$(ndmc -c "show interface $USER_KTUN" 2>&1 || true)
+    if [ -n "$_preflight_if" ] &&
+       ! echo "$_preflight_if" | grep -qiE "error|no such|not found" &&
+       ! echo "$_preflight_if" | grep -qi "Fptn"; then
+        echo "ОШИБКА: интерфейс $USER_KTUN уже существует и не помечен как FPTN."
+        echo "Ничего не изменено. Выберите другое имя интерфейса и повторите установку."
+        echo "ERROR: $USER_KTUN already exists and is not marked as FPTN; refusing to reconfigure it."
+        exit 1
+    fi
+fi
+
+# FPTN routing depends on Keenetic's ndmc CLI. Fail before opkg changes packages.
+if ! command -v ndmc >/dev/null 2>&1; then
+    echo "ОШИБКА: ndmc не найден. Это установщик для KeeneticOS; установка отменена до изменения Entware."
+    echo "ERROR: ndmc is missing; aborting before modifying Entware packages."
+    exit 1
+fi
+
+# Do not silently reuse a non-FPTN interface; the earlier check should have
+# rejected it, but fail closed if the command output is ambiguous.
+if [ -z "$_preflight_if" ]; then
+    _preflight_if=$(ndmc -c "show interface $USER_KTUN" 2>&1 || true)
+fi
+if [ -n "$_preflight_if" ] &&
+   ! echo "$_preflight_if" | grep -qiE "error|no such|not found" &&
+   ! echo "$_preflight_if" | grep -qi "Fptn"; then
+    echo "ОШИБКА: не удалось безопасно подтвердить принадлежность $USER_KTUN к FPTN."
+    echo "Установка остановлена до изменений Entware."
+    exit 1
+fi
+
+# Check storage before opkg can install PHP/Lighttpd and their dependencies.
+_FREE_KB=$(df -Pk /opt 2>/dev/null | awk 'NR == 2 {print $4}')
+case "$_FREE_KB" in
+    ''|*[!0-9]*)
+        echo "Предупреждение: не удалось проверить свободное место в /opt."
+        ;;
+    *)
+        if [ "$_FREE_KB" -lt 20480 ]; then
+            echo "ОШИБКА: в /opt меньше 20 MiB свободного места ($_FREE_KB KiB)."
+            echo "Освободите место перед установкой; пакеты Entware пока не изменялись."
+            exit 1
+        fi
+        ;;
+esac
+
+# Router has no swap; reject dangerously low available RAM before opkg/binary changes.
+_MEM_AVAILABLE_KB=$(awk '/^MemAvailable:/ {print $2; found=1} END {if (!found) print 0}' /proc/meminfo 2>/dev/null)
+case "$_MEM_AVAILABLE_KB" in
+    ''|*[!0-9]*) _MEM_AVAILABLE_KB=0 ;;
+esac
+if [ "$_MEM_AVAILABLE_KB" -gt 0 ]; then
+    if [ "$_MEM_AVAILABLE_KB" -lt 32768 ]; then
+        echo "ОШИБКА: доступно меньше 32 MiB памяти ($_MEM_AVAILABLE_KB KiB); установка отменена до изменений."
+        echo "ERROR: less than 32 MiB RAM is available; aborting before changes."
+        exit 1
+    elif [ "$_MEM_AVAILABLE_KB" -lt 98304 ]; then
+        echo "ПРЕДУПРЕЖДЕНИЕ: доступно меньше 96 MiB RAM ($_MEM_AVAILABLE_KB KiB). Веб-панель и клиент могут увеличить нагрузку на память."
+    fi
+else
+    echo "Предупреждение: MemAvailable не удалось прочитать; автоматическая проверка RAM пропущена."
+fi
+
+# Create a private rollback snapshot before opkg or persistent KeeneticOS changes.
+# This is a backup, not an automatic full-config restore mechanism.
+BACKUP_STAMP=$(date +%Y%m%d-%H%M%S)
+BACKUP_DIR="/opt/var/backups/fptn-preinstall-$BACKUP_STAMP"
+umask 077
+mkdir -p "$BACKUP_DIR"
+for _backup_file in \
+    /opt/bin/fptn-client-cli \
+    /opt/bin/fptn-client-cli.pre-update.bak \
+    /opt/bin/fptn-client-cli.tmp \
+    /opt/etc/fptn-client.conf \
+    /opt/etc/fptn-version \
+    /opt/etc/fptn-servers.json \
+    /opt/etc/fptn-monitor.conf \
+    /opt/etc/fptn-web-panel.installed \
+    /opt/etc/init.d/S53fptn-client \
+    /opt/share/www/fptn/index.php \
+    /opt/etc/lighttpd/conf.d/85-fptn.conf \
+    /opt/etc/lighttpd/conf.d/85-fptn.conf.pre-fptn.bak; do
+    if [ -f "$_backup_file" ]; then
+        _relative=${_backup_file#/opt/}
+        mkdir -p "$BACKUP_DIR/$(dirname "$_relative")"
+        cp -p "$_backup_file" "$BACKUP_DIR/$_relative" || {
+            echo "ОШИБКА: не удалось сохранить $_backup_file; установка отменена до изменений."
+            rm -rf "$BACKUP_DIR"
+            exit 1
+        }
+    fi
+done
+if command -v ndmc >/dev/null 2>&1; then
+    ndmc -c "show running-config" > "$BACKUP_DIR/keenetic-running-config.txt" 2>/dev/null || true
+    chmod 600 "$BACKUP_DIR/keenetic-running-config.txt" 2>/dev/null || true
+fi
+chmod 700 "$BACKUP_DIR"
+echo "Резервная копия перед установкой / Pre-install snapshot: $BACKUP_DIR"
+
+FPTN_CREATED_INTERFACE=no
+FPTN_INSTALL_COMMITTED=no
+FPTN_LIGHTTPD_TOUCHED=no
+rollback_failed_install() {
+    [ "$FPTN_INSTALL_COMMITTED" = "yes" ] && return 0
+    echo "Установка прервалась: восстанавливаю файлы FPTN из $BACKUP_DIR."
+    for _restore_file in \
+        /opt/bin/fptn-client-cli \
+        /opt/bin/fptn-client-cli.pre-update.bak \
+        /opt/bin/fptn-client-cli.tmp \
+        /opt/etc/fptn-client.conf \
+        /opt/etc/fptn-version \
+        /opt/etc/fptn-servers.json \
+        /opt/etc/fptn-monitor.conf \
+        /opt/etc/fptn-web-panel.installed \
+        /opt/etc/init.d/S53fptn-client \
+        /opt/share/www/fptn/index.php \
+        /opt/etc/lighttpd/conf.d/85-fptn.conf \
+        /opt/etc/lighttpd/conf.d/85-fptn.conf.pre-fptn.bak; do
+        _rel=${_restore_file#/opt/}
+        _saved="$BACKUP_DIR/$_rel"
+        if [ -f "$_saved" ]; then
+            mkdir -p "$(dirname "$_restore_file")"
+            cp -p "$_saved" "$_restore_file" || echo "WARNING: could not restore $_restore_file"
+        else
+            rm -f "$_restore_file"
+        fi
+    done
+    rmdir /opt/share/www/fptn 2>/dev/null || true
+    if [ "$FPTN_CREATED_INTERFACE" = "yes" ]; then
+        _rollback_if=$(ndmc -c "show interface $USER_KTUN" 2>&1 || true)
+        if [ -n "$_rollback_if" ] && ! echo "$_rollback_if" | grep -qiE "error|no such|not found"; then
+            # The preflight confirmed this interface did not exist before this run.
+            ndmc -c "no interface $USER_KTUN" >/dev/null 2>&1 || true
+            ndmc -c "system configuration save" >/dev/null 2>&1 || true
+            echo "Removed newly created interface during failed-install cleanup."
+        fi
+    fi
+    if [ "$FPTN_LIGHTTPD_TOUCHED" = "yes" ] && [ -x /opt/etc/init.d/S80lighttpd ]; then
+        if lighttpd -tt -f /opt/etc/lighttpd/lighttpd.conf >/dev/null 2>&1; then
+            /opt/etc/init.d/S80lighttpd restart >/dev/null 2>&1 || echo "WARNING: Lighttpd restart failed after restoring its config."
+        else
+            echo "WARNING: restored Lighttpd config did not validate; not restarting shared Lighttpd."
+        fi
+    fi
+    if [ -f "$BACKUP_DIR/etc/init.d/S53fptn-client" ] &&
+       [ -f "$BACKUP_DIR/etc/fptn-client.conf" ] &&
+       grep -q "^ENABLED='yes'$" "$BACKUP_DIR/etc/fptn-client.conf"; then
+        /opt/etc/init.d/S53fptn-client start >/dev/null 2>&1 || echo "WARNING: previous FPTN service could not be restarted after rollback."
+    fi
+    echo "Rollback attempt finished. Entware packages already installed by opkg are not automatically removed."
+}
+trap 'rollback_failed_install' 0
+
 # 3. Установка необходимых системных пакетов / Install Entware packages
 echo ""
-echo "[1/7] Обновление пакетов и установка зависимостей / Updating packages & dependencies..."
+echo "[1/7] Установка зависимостей Entware / Installing Entware dependencies..."
 opkg update || true
-opkg install lighttpd lighttpd-mod-cgi php8-cgi php8-mod-openssl php8-mod-session libxml2 procps-ng-pgrep procps-ng-pkill curl ca-bundle ca-certificates
+if [ "$INSTALL_WEB_PANEL" = "yes" ]; then
+    opkg install lighttpd lighttpd-mod-cgi php8-cgi php8-mod-openssl php8-mod-session libxml2 procps-ng-pgrep procps-ng-pkill curl ca-bundle ca-certificates
+else
+    # Client-only mode deliberately does not install/restart Lighttpd or PHP.
+    opkg install procps-ng-pgrep procps-ng-pkill curl ca-bundle ca-certificates
+fi
 
 # 4. Автоопределение архитектуры и скачивание бинарника fptn-client-cli / Detect CPU & Download Binary
 echo ""
@@ -258,9 +500,10 @@ case "$RAW_ARCH" in
     armv7*)
         ARCH_SUFFIX="armv7"
         ;;
-    mips*el)
+    mips|mipsel|mips*el)
+        # uname -m на части Keenetic возвращает просто "mips", хотя Entware
+        # использует mipsel. Сначала учитываем явно настроенный soft-float feed.
         ARCH_SUFFIX="mipsel"
-        # Проверяем, использует ли Entware репозиторий soft-float (например KN-1713 / MT7628)
         if grep -Rqs 'mipselsf' /opt/etc/opkg.conf /opt/etc/opkg/*.conf 2>/dev/null; then # глушение-обосновано: часть файлов opkg может отсутствовать
             ARCH_SUFFIX="mipselsf"
         fi
@@ -273,21 +516,17 @@ esac
 
 echo "Архитектура процессора / CPU Architecture: $RAW_ARCH ($ARCH_SUFFIX)"
 
-# Останавливаем запущенную службу перед обновлением
-if [ -f "/opt/etc/init.d/S53fptn-client" ]; then
-    echo "Остановка запущенной службы / Stopping running VPN service..."
-    /opt/etc/init.d/S53fptn-client stop >/dev/null 2>&1 || true
-    sleep 1
-fi
-pkill -9 -f "/opt/bin/fptn-client-cli" >/dev/null 2>&1 || true
-rm -f /opt/bin/fptn-client-cli
-
+# Не останавливаем службу и не удаляем рабочий бинарник до проверки загрузки.
+# После проверки mv заменит файл атомарно; при ошибке старый бинарник останется.
 # Проверка валидности бинарного файла (не менее 1 МБ и отсутствие HTML ошибок)
 check_binary_valid() {
     _f="$1"
     if [ ! -s "$_f" ]; then return 1; fi
     _sz=$(wc -c < "$_f" 2>/dev/null || echo 0)
     if [ "$_sz" -lt 1000000 ]; then return 1; fi
+    # Проверяем ELF magic, а не только размер: HTML/текстовая ошибка может быть большой.
+    _magic=$(od -An -tx1 -N4 "$_f" 2>/dev/null | tr -d ' \n')
+    if [ "$_magic" != "7f454c46" ]; then return 1; fi
     if head -n 1 "$_f" | grep -qi "Not Found\|DOCTYPE\|404\|error"; then return 1; fi
     return 0
 }
@@ -301,130 +540,176 @@ DOWNLOAD_SUCCESS=no
 for _src_url in "$BIN_RAW_URL" "$BIN_RELEASE_URL" "$BIN_LATEST_URL"; do
     if download_file "$_src_url" "/opt/bin/fptn-client-cli.tmp" 180; then
         if check_binary_valid "/opt/bin/fptn-client-cli.tmp"; then
-            mv "/opt/bin/fptn-client-cli.tmp" "/opt/bin/fptn-client-cli"
-            DOWNLOAD_SUCCESS=yes
-            break
+            chmod +x "/opt/bin/fptn-client-cli.tmp"
+            # Сначала проверяем именно временный файл. Рабочий бинарник не трогаем,
+            # пока новая версия не прошла хотя бы один smoke test.
+            _smoke_code=0
+            _smoke_output=$("/opt/bin/fptn-client-cli.tmp" --help 2>&1) || _smoke_code=$?
+            if [ "$_smoke_code" -eq 0 ]; then
+                _smoke_ok=yes
+            elif [ "$_smoke_code" -ge 126 ] || echo "$_smoke_output" | grep -Eqi "not found|exec format error|no such file|error loading shared library|cannot execute"; then
+                _smoke_ok=no
+            else
+                # Некоторые CLI возвращают ненулевой код на --help; это само по себе
+                # не означает, что бинарник не запускается.
+                _smoke_ok=yes
+                echo "Предупреждение: --help вернул код $_smoke_code без явной ошибки загрузчика. / Warning: --help returned $_smoke_code without a loader error."
+            fi
+            if [ "$_smoke_ok" != "yes" ] && [ -r /opt/lib/ld.so.1 ]; then
+                _smoke_code=0
+                _smoke_output=$(/opt/lib/ld.so.1 --library-path /opt/lib /opt/bin/fptn-client-cli.tmp --help 2>&1) || _smoke_code=$?
+                if [ "$_smoke_code" -eq 0 ] || { [ "$_smoke_code" -lt 126 ] && ! echo "$_smoke_output" | grep -Eqi "not found|exec format error|no such file|error loading shared library|cannot execute"; }; then
+                    _smoke_ok=yes
+                fi
+            fi
+            if [ "$_smoke_ok" = "yes" ]; then
+                # До завершения всех проверок не останавливаем текущий туннель
+                # и не заменяем рабочий бинарник.
+                DOWNLOAD_SUCCESS=yes
+                break
+            else
+                echo "Бинарник не прошёл smoke test; текущая версия сохранена. / Binary failed smoke test; current version preserved."
+                rm -f "/opt/bin/fptn-client-cli.tmp"
+            fi
         else
             rm -f "/opt/bin/fptn-client-cli.tmp"
         fi
     fi
 done
 
-if [ "$DOWNLOAD_SUCCESS" != "yes" ] && [ ! -s "/opt/bin/fptn-client-cli" ]; then
-    echo "Ошибка: Не удалось скачать бинарный файл / Error: Failed to download valid binary!"
+if [ "$DOWNLOAD_SUCCESS" != "yes" ]; then
+    rm -f "/opt/bin/fptn-client-cli.tmp"
+    echo "Ошибка: Не удалось скачать и запустить проверенный бинарный файл. Существующий бинарник не изменён. / Error: Failed to download and run a validated binary. Existing binary was preserved."
+    exit 1
+fi
+
+# Только теперь останавливаем текущую службу и меняем бинарник. Если замена
+# не удастся, резервная копия останется доступной, а старую службу попробуем поднять.
+if [ -f "/opt/etc/init.d/S53fptn-client" ]; then
+    /opt/etc/init.d/S53fptn-client stop >/dev/null 2>&1 || true
+fi
+if [ -f "/opt/bin/fptn-client-cli" ]; then
+    cp -p /opt/bin/fptn-client-cli /opt/bin/fptn-client-cli.pre-update.bak || {
+        echo "Ошибка: Не удалось создать резервную копию текущего бинарника; обновление отменено."
+        [ ! -x /opt/etc/init.d/S53fptn-client ] || /opt/etc/init.d/S53fptn-client start >/dev/null 2>&1 || true
+        exit 1
+    }
+fi
+if ! mv "/opt/bin/fptn-client-cli.tmp" "/opt/bin/fptn-client-cli"; then
+    echo "Ошибка: Не удалось заменить бинарник; текущая версия сохранена."
+    [ ! -x /opt/etc/init.d/S53fptn-client ] || /opt/etc/init.d/S53fptn-client start >/dev/null 2>&1 || true
     exit 1
 fi
 chmod +x /opt/bin/fptn-client-cli
 echo "$REMOTE_VER" > /opt/etc/fptn-version
 
-# Дымовая проверка запуска бинарника
-if /opt/bin/fptn-client-cli --help >/dev/null 2>&1; then # глушение-обосновано: тестовый запуск справки бинарника
-    echo "Бинарник успешно проверен / Binary verification passed."
-elif [ -r /opt/lib/ld.so.1 ] && /opt/lib/ld.so.1 --library-path /opt/lib /opt/bin/fptn-client-cli --help >/dev/null 2>&1; then # глушение-обосновано: тестовый запуск через loader
-    echo "Бинарник проверен через Entware loader / Binary verified with Entware loader."
-else
-    echo "Внимание: Прямой запуск бинарника завершился с предупреждением / Notice: Binary smoke check returned non-zero."
-fi
+# Persistent KeeneticOS interface setup is deferred until all downloads and
+# FPTN config/service files are ready. This avoids leaving an orphan OpkgTun
+# when an earlier step fails.
 
-# 5. Создание и настройка TUN-интерфейса в KeeneticOS / Register TUN Interface in KeeneticOS
-echo ""
-echo "[3/7] Регистрация интерфейса $USER_KTUN в KeeneticOS / Registering $USER_KTUN in KeeneticOS..."
-if ! which ndmc >/dev/null 2>&1; then
-    echo "Внимание: Утилита ndmc CLI не найдена / Warning: ndmc CLI not found. Skip interface setup."
-else
-    # ndmc возвращает 0 и для несуществующего интерфейса, а текст ошибки пишет
-    # в stderr. Прежняя проверка по коду возврата всегда уходила в ветку «уже
-    # существует», и интерфейс не создавался.
-    # Добавляем || true, чтобы при включенном set -e скрипт не падал при ошибке ndmc.
-    EXISTING_IF=$(ndmc -c "show interface $USER_KTUN" 2>&1 || true)
-    if [ -n "$EXISTING_IF" ] && ! echo "$EXISTING_IF" | grep -qiE "error|no such|not found"; then
-        echo "Интерфейс $USER_KTUN уже существует / Interface $USER_KTUN already exists."
-    else
-        echo "Создание интерфейса $USER_KTUN типа OpkgTun / Creating OpkgTun interface $USER_KTUN..."
-        ndmc -c "interface $USER_KTUN" 2>/dev/null || ndmc -c "interface $USER_KTUN type OpkgTun" 2>/dev/null || true
-    fi
-
-    ndmc -c "interface $USER_KTUN description Fptn" 2>/dev/null || true
-    ndmc -c "interface $USER_KTUN security-level public" 2>/dev/null || true
-    # Адрес и маска должны в точности совпадать с тем, что назначает сам клиент
-    # (TUN_ADDRESS в fptn-client.conf передаётся ему как --tun-interface-ip,
-    # маска /32). При расхождении ndm уходит в цикл переконфигурации интерфейса,
-    # а conntrack перестаёт сопоставлять обратный трафик.
-    ndmc -c "interface $USER_KTUN ip address $USER_TUN_IP 255.255.255.255" 2>/dev/null || true
-    ndmc -c "interface $USER_KTUN ip mtu 1360" 2>/dev/null || true
-    ndmc -c "interface $USER_KTUN ip global 50000" 2>/dev/null || true
-    # Подгонку MSS выполняет ndm; правила iptables TCPMSS для этого не нужны
-    ndmc -c "interface $USER_KTUN ip tcp adjust-mss pmtu" 2>/dev/null || true
-    ndmc -c "access-list _WEBADMIN_$USER_KTUN permit ip 0.0.0.0 0.0.0.0 0.0.0.0 0.0.0.0" >/dev/null 2>&1 || true
-    ndmc -c "interface $USER_KTUN ip access-group _WEBADMIN_$USER_KTUN in" >/dev/null 2>&1 || true
-    ndmc -c "access-list _WEBADMIN_$USER_KTUN auto-delete" >/dev/null 2>&1 || true
-    ndmc -c "interface $USER_KTUN up" 2>/dev/null || true
-    ndmc -c "system configuration save" >/dev/null 2>&1 || true
-    echo "Интерфейс $USER_KTUN успешно настроен / Interface $USER_KTUN successfully configured."
-fi
-
-# 6. Настройка веб-сервера Lighttpd / Configure Lighttpd
-echo ""
-echo "[4/7] Настройка конфигурации Lighttpd / Configuring Lighttpd web server..."
-LIGHTTPD_CONF_DIR="/opt/etc/lighttpd/conf.d"
-mkdir -p "$LIGHTTPD_CONF_DIR"
-
-# Проверяем, задан ли уже server.port в существующих конфигах Lighttpd
-SERVER_PORT_DEFINED=no
-for _cf in /opt/etc/lighttpd/lighttpd.conf /opt/etc/lighttpd/conf.d/*.conf; do
-    if [ -f "$_cf" ] && [ "$_cf" != "$LIGHTTPD_CONF_DIR/85-fptn.conf" ]; then
-        if grep -oE "^\s*server\.port\s*[:=]" "$_cf" >/dev/null 2>&1; then
-            SERVER_PORT_DEFINED=yes
-            break
+if [ "$INSTALL_WEB_PANEL" = "yes" ]; then
+    # 6. Настройка веб-сервера Lighttpd / Configure Lighttpd
+    echo ""
+    echo "[4/7] Настройка конфигурации Lighttpd / Configuring Lighttpd web server..."
+    LIGHTTPD_CONF_DIR="/opt/etc/lighttpd/conf.d"
+    mkdir -p "$LIGHTTPD_CONF_DIR"
+    FPTN_LIGHTTPD_CONF="$LIGHTTPD_CONF_DIR/85-fptn.conf"
+    FPTN_LIGHTTPD_BACKUP="$FPTN_LIGHTTPD_CONF.pre-fptn.bak"
+    FPTN_LIGHTTPD_HAD_CONFIG=no
+    if [ -f "$FPTN_LIGHTTPD_CONF" ]; then
+        # Keep a one-time copy of a pre-existing FPTN config; never overwrite this backup.
+        if [ ! -f "$FPTN_LIGHTTPD_BACKUP" ]; then
+            cp -p "$FPTN_LIGHTTPD_CONF" "$FPTN_LIGHTTPD_BACKUP" || {
+                echo "Ошибка: не удалось сохранить прежний конфиг $FPTN_LIGHTTPD_CONF; отмена."
+                exit 1
+            }
         fi
+        FPTN_LIGHTTPD_HAD_CONFIG=yes
     fi
-done
-
-if [ "$SERVER_PORT_DEFINED" = "yes" ]; then
-    cat << EOF > "$LIGHTTPD_CONF_DIR/85-fptn.conf"
-# Настройки веб-интерфейса FPTN
-server.modules += ( "mod_cgi" )
-\$HTTP["url"] =~ "^/fptn/" {
-    cgi.assign = ( ".php" => "/opt/bin/php-cgi" )
-    static-file.exclude-extensions += ( ".php" )
-}
-EOF
-else
-    cat << EOF > "$LIGHTTPD_CONF_DIR/85-fptn.conf"
-# Настройки веб-интерфейса FPTN на порту $USER_PORT
-server.port = $USER_PORT
-server.modules += ( "mod_cgi" )
-\$HTTP["url"] =~ "^/fptn/" {
-    cgi.assign = ( ".php" => "/opt/bin/php-cgi" )
-    static-file.exclude-extensions += ( ".php" )
-}
-EOF
-fi
-
-echo "Перезапуск Lighttpd / Restarting Lighttpd..."
-/opt/etc/init.d/S80lighttpd restart || echo "Предупреждение: Не удалось перезапустить Lighttpd / Warning: Could not restart Lighttpd."
-
-# 7. Установка файлов веб-панели / Install Web Panel
-echo ""
-echo "[5/7] Копирование файлов веб-панели / Copying web panel files..."
-WWW_DIR="/opt/share/www/fptn"
-mkdir -p "$WWW_DIR"
-
-SCRIPT_DIR=$(dirname "$0")
-if [ -f "$SCRIPT_DIR/index.php" ]; then
-    cp "$SCRIPT_DIR/index.php" "$WWW_DIR/index.php"
-else
-    if ! download_file "${GITHUB_RAW_BASE}/deploy/keenetic/index.php" "$WWW_DIR/index.php" 30; then
-        echo "Ошибка: Не удалось скачать index.php / Error: Failed to download index.php"
+    
+    # Validate the existing shared web server before changing any of its files.
+    if ! lighttpd -tt -f /opt/etc/lighttpd/lighttpd.conf >/dev/null 2>&1; then
+        echo "ОШИБКА: текущая конфигурация Lighttpd не проходит проверку."
+        echo "Установщик не будет менять общий веб-сервер. Сначала исправьте текущую конфигурацию."
         exit 1
     fi
+
+    FPTN_LIGHTTPD_TOUCHED=yes
+    cat << EOF > "$LIGHTTPD_CONF_DIR/85-fptn.conf"
+# Dedicated FPTN listener; existing SmartDNS/nfqws listener and document root remain unchanged.
+server.modules += ( "mod_cgi" )
+\$SERVER["socket"] == ":$USER_PORT" {
+    server.document-root = "/opt/share/www/fptn"
+    index-file.names = ( "index.php", "index.html" )
+    cgi.assign = ( ".php" => "/opt/bin/php-cgi" )
+    static-file.exclude-extensions += ( ".php" )
+}
+EOF
+
+    # Validate the complete config before restarting a shared web server.
+    # If invalid, restore the previous FPTN snippet (or remove the new one) and abort.
+    if ! lighttpd -tt -f /opt/etc/lighttpd/lighttpd.conf >/dev/null 2>&1; then
+        echo "ОШИБКА: конфигурация Lighttpd не прошла проверку; перезапуск отменён."
+        if [ "$FPTN_LIGHTTPD_HAD_CONFIG" = "yes" ] && [ -f "$FPTN_LIGHTTPD_BACKUP" ]; then
+            cp -p "$FPTN_LIGHTTPD_BACKUP" "$FPTN_LIGHTTPD_CONF"
+        else
+            rm -f "$FPTN_LIGHTTPD_CONF"
+        fi
+        echo "Проверьте конфиги Lighttpd вручную. Остальные шаги установщика могли уже выполниться."
+        exit 1
+    fi
+    
+    echo "Перезапуск Lighttpd / Restarting Lighttpd..."
+    if ! /opt/etc/init.d/S80lighttpd restart; then
+        echo "ОШИБКА: Lighttpd не перезапустился."
+        if [ "$FPTN_LIGHTTPD_HAD_CONFIG" = "yes" ] && [ -f "$FPTN_LIGHTTPD_BACKUP" ]; then
+            cp -p "$FPTN_LIGHTTPD_BACKUP" "$FPTN_LIGHTTPD_CONF"
+        else
+            rm -f "$FPTN_LIGHTTPD_CONF"
+        fi
+        /opt/etc/init.d/S80lighttpd restart >/dev/null 2>&1 || true
+        echo "Прежний фрагмент конфигурации восстановлен, но установку нужно проверить вручную."
+        exit 1
+    fi
+    
+    # 7. Установка файлов веб-панели / Install Web Panel
+    echo ""
+    echo "[5/7] Копирование файлов веб-панели / Copying web panel files..."
+    WWW_DIR="/opt/share/www/fptn"
+    mkdir -p "$WWW_DIR"
+    
+    SCRIPT_DIR=$(dirname "$0")
+    if [ -f "$SCRIPT_DIR/index.php" ]; then
+        cp "$SCRIPT_DIR/index.php" "$WWW_DIR/index.php"
+    else
+        if ! download_file "${GITHUB_RAW_BASE}/deploy/keenetic/index.php" "$WWW_DIR/index.php" 30; then
+            echo "Ошибка: Не удалось скачать index.php / Error: Failed to download index.php"
+            exit 1
+        fi
+    fi
+    chmod 644 "$WWW_DIR/index.php"
+    touch /opt/etc/fptn-web-panel.installed
+    
+    
+else
+    echo "Веб-панель пропущена: Lighttpd и PHP не изменяются."
+    echo "Web panel skipped: Lighttpd and PHP are left untouched."
 fi
-chmod 644 "$WWW_DIR/index.php"
+
+# Serialize arbitrary values as valid POSIX shell single-quoted literals before
+# writing a config file that will later be sourced. This is essential for tokens
+# and other values containing quotes, dollar signs, backticks or whitespace.
+shell_quote() {
+    printf "'"
+    printf "%s" "$1" | sed "s/'/'\\\\''/g"
+    printf "'"
+}
 
 # 8. Создание/Обновление файла конфигурации FPTN службы / Save Configuration
 echo ""
 echo "[6/8] Сохранение конфигурации FPTN / Saving FPTN configuration..."
 CONF_PATH="/opt/etc/fptn-client.conf"
+# Client-only mode stays disabled until the user explicitly approves runtime testing.
 CONF_ENABLED="no"
 CONF_SERVERS=""
 CONF_PASS=""
@@ -470,29 +755,29 @@ fi
 
 cat << EOF > "$CONF_PATH"
 # Конфигурация клиента FPTN (Создано автоматически / Auto-generated)
-ENABLED="${CONF_ENABLED:-no}"
-TOKEN="$USER_TOKEN"
-PREFERRED_SERVER="${CONF_SERVERS}"
-TUN_INTERFACE="$USER_LTUN"
+ENABLED=$(shell_quote "${CONF_ENABLED:-no}")
+TOKEN=$(shell_quote "$USER_TOKEN")
+PREFERRED_SERVER=$(shell_quote "$CONF_SERVERS")
+TUN_INTERFACE=$(shell_quote "$USER_LTUN")
 # Должно совпадать с адресом, назначенным интерфейсу в KeeneticOS (шаг [3/7]).
-TUN_ADDRESS="$USER_TUN_IP"
-TUN_IPV6_ADDRESS="${CONF_TUN_IPV6}"
-TUN_MTU="${CONF_TUN_MTU}"
-GATEWAY_IP="${CONF_GATEWAY_IP}"
-GATEWAY_IPV6="${CONF_GATEWAY_IPV6}"
-OUT_NETWORK_INTERFACE="${CONF_OUT_IFACE}"
-SERVER_SNI="${CONF_SNI}"
-BYPASS_METHOD="${CONF_BYPASS}"
-BLACKLIST_DOMAINS="${CONF_BLACKLIST}"
-EXCLUDE_TUNNEL_NETWORKS="${CONF_EXCLUDE}"
-INCLUDE_TUNNEL_NETWORKS="${CONF_INCLUDE}"
-SPLIT_TUNNEL="${CONF_SPLIT}"
-SPLIT_TUNNEL_MODE="${CONF_SPLIT_MODE}"
-SPLIT_TUNNEL_DOMAINS="${CONF_SPLIT_DOMAINS}"
-DISABLE_AUTO_FALLBACK="${CONF_DISABLE_FALLBACK}"
-MAX_FULL_RESTARTS="${CONF_MAX_RESTARTS}"
-STARTUP_RETRY_DELAY="${CONF_STARTUP_DELAY}"
-WEB_PASSWORD="${CONF_PASS}"
+TUN_ADDRESS=$(shell_quote "$USER_TUN_IP")
+TUN_IPV6_ADDRESS=$(shell_quote "$CONF_TUN_IPV6")
+TUN_MTU=$(shell_quote "$CONF_TUN_MTU")
+GATEWAY_IP=$(shell_quote "$CONF_GATEWAY_IP")
+GATEWAY_IPV6=$(shell_quote "$CONF_GATEWAY_IPV6")
+OUT_NETWORK_INTERFACE=$(shell_quote "$CONF_OUT_IFACE")
+SERVER_SNI=$(shell_quote "$CONF_SNI")
+BYPASS_METHOD=$(shell_quote "$CONF_BYPASS")
+BLACKLIST_DOMAINS=$(shell_quote "$CONF_BLACKLIST")
+EXCLUDE_TUNNEL_NETWORKS=$(shell_quote "$CONF_EXCLUDE")
+INCLUDE_TUNNEL_NETWORKS=$(shell_quote "$CONF_INCLUDE")
+SPLIT_TUNNEL=$(shell_quote "$CONF_SPLIT")
+SPLIT_TUNNEL_MODE=$(shell_quote "$CONF_SPLIT_MODE")
+SPLIT_TUNNEL_DOMAINS=$(shell_quote "$CONF_SPLIT_DOMAINS")
+DISABLE_AUTO_FALLBACK=$(shell_quote "$CONF_DISABLE_FALLBACK")
+MAX_FULL_RESTARTS=$(shell_quote "$CONF_MAX_RESTARTS")
+STARTUP_RETRY_DELAY=$(shell_quote "$CONF_STARTUP_DELAY")
+WEB_PASSWORD=$(shell_quote "$CONF_PASS")
 EOF
 chmod 600 "$CONF_PATH"
 
@@ -502,8 +787,8 @@ if [ -n "$USER_TOKEN" ]; then
     if [ -x "/opt/bin/fptn-client-cli" ]; then
         /opt/bin/fptn-client-cli --access-token "$USER_TOKEN" --show-servers > /opt/etc/fptn-servers.json 2>/dev/null || true  # глушение-обосновано: первичный разбор токена может вернуть ошибку при невалидном токене
     fi
-    if [ ! -s "/opt/etc/fptn-servers.json" ]; then
-        # Резервный разбор через PHP CGI
+    if [ ! -s "/opt/etc/fptn-servers.json" ] && [ "$INSTALL_WEB_PANEL" = "yes" ]; then
+        # Резервный разбор через PHP CGI (only available with web panel)
         /opt/bin/php-cgi -q -r '
             $token = trim($argv[1] ?? "");
             $clean = preg_replace("/^(fptn:\/\/|fptn:)/i", "", $token);
@@ -541,6 +826,46 @@ else
 fi
 chmod 755 /opt/etc/init.d/S53fptn-client
 
+# 5. Создание и настройка TUN-интерфейса в KeeneticOS / Register TUN Interface in KeeneticOS
+FPTN_CREATED_INTERFACE=no
+FPTN_INSTALL_COMMITTED=no
+EXISTING_IF=$(ndmc -c "show interface $USER_KTUN" 2>&1 || true)
+if [ -n "$EXISTING_IF" ] && ! echo "$EXISTING_IF" | grep -qiE "error|no such|not found"; then
+    if ! echo "$EXISTING_IF" | grep -qi "Fptn"; then
+        echo "ОШИБКА: $USER_KTUN уже существует и не помечен как FPTN; настройки не изменены."
+        exit 1
+    fi
+    echo "Reusing existing FPTN interface $USER_KTUN."
+else
+    FPTN_CREATED_INTERFACE=yes
+    echo "Creating KeeneticOS interface $USER_KTUN..."
+    ndmc -c "interface $USER_KTUN" >/dev/null 2>&1 || true
+    ndmc -c "interface $USER_KTUN type OpkgTun" >/dev/null 2>&1 || true
+fi
+
+ndmc -c "interface $USER_KTUN description Fptn" >/dev/null 2>&1 || true
+ndmc -c "interface $USER_KTUN security-level public" >/dev/null 2>&1 || true
+ndmc -c "interface $USER_KTUN ip address $USER_TUN_IP 255.255.255.255" >/dev/null 2>&1 || true
+ndmc -c "interface $USER_KTUN ip mtu 1360" >/dev/null 2>&1 || true
+ndmc -c "interface $USER_KTUN ip global 50000" >/dev/null 2>&1 || true
+ndmc -c "interface $USER_KTUN ip tcp adjust-mss pmtu" >/dev/null 2>&1 || true
+ndmc -c "access-list _WEBADMIN_$USER_KTUN permit ip 0.0.0.0 0.0.0.0 0.0.0.0 0.0.0.0" >/dev/null 2>&1 || true
+ndmc -c "interface $USER_KTUN ip access-group _WEBADMIN_$USER_KTUN in" >/dev/null 2>&1 || true
+ndmc -c "access-list _WEBADMIN_$USER_KTUN auto-delete" >/dev/null 2>&1 || true
+ndmc -c "interface $USER_KTUN up" >/dev/null 2>&1 || true
+
+VERIFY_IF=$(ndmc -c "show interface $USER_KTUN" 2>&1 || true)
+if ! echo "$VERIFY_IF" | grep -qi "Fptn"; then
+    echo "ОШИБКА: не удалось подтвердить создание/настройку $USER_KTUN."
+    echo "Установка остановлена; новая запись интерфейса будет удалена, если возможно."
+    exit 1
+fi
+if ! ndmc -c "system configuration save" >/dev/null 2>&1; then
+    echo "ОШИБКА: KeeneticOS не подтвердил сохранение конфигурации."
+    exit 1
+fi
+echo "FPTN interface $USER_KTUN configured and saved."
+
 # 8. Восстановление выполняется встроенным supervisor в fptn-client-cli.
 echo ""
 echo "[8/8] Внешний watchdog и cron не устанавливаются: supervisor встроен в клиент."
@@ -562,16 +887,27 @@ echo "==========================================================="
 echo "     Установка успешно завершена / Installation Finished!"
 echo "==========================================================="
 echo ""
-echo "  1. Веб-панель доступна по адресу / Web panel URL:"
-echo "     http://${ROUTER_LAN_IP}:$USER_PORT/fptn/"
+if [ "$INSTALL_WEB_PANEL" = "yes" ]; then
+    echo "  1. Веб-панель доступна по адресу / Web panel URL:"
+    echo "     http://${ROUTER_LAN_IP}:$USER_PORT/"
+    echo ""
+    echo "  2. Запуск туннеля / How to start VPN:"
+    echo "     - Откройте веб-панель / Open FPTN Web Panel."
+    echo "     - Проверьте сервер и нажмите 'Запустить' / Click 'Start'."
+else
+    echo "  Веб-панель не устанавливалась. Lighttpd/PHP не менялись."
+    echo "  Web panel was skipped; Lighttpd/PHP were not changed."
+    echo "  Служба оставлена отключённой до отдельного подтверждения теста."
+    echo "  Service remains disabled until runtime testing is explicitly approved."
+    echo "  Туннель не запущен и не стартует автоматически после перезагрузки."
+    echo "  The tunnel is not running and will not auto-start after reboot."
+fi
 echo ""
-echo "  2. Запуск туннеля / How to start VPN:"
-echo "     - Откройте веб-панель / Open FPTN Web Panel."
-echo "     - Проверьте сервер и нажмите 'Запустить' / Click 'Start'."
-echo ""
-echo "  3. Маршрутизация трафика / Traffic Routing:"
+echo "  Маршрутизация трафика / Traffic Routing:"
 echo "     - В Keenetic Web UI в разделе 'Приоритеты подключений'"
 echo "       появится подключение '$USER_KTUN'."
 echo "     - Перетащите '$USER_KTUN' в нужную политику маршрутизации."
 echo "     - Drag connection '$USER_KTUN' into target routing policy."
 echo "==========================================================="
+FPTN_INSTALL_COMMITTED=yes
+trap - 0
