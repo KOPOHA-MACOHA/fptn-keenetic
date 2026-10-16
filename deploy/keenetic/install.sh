@@ -262,6 +262,35 @@ if [ "$CONFIRM" != "y" ] && [ "$CONFIRM" != "Y" ]; then
     exit 0
 fi
 
+# Safety preflight: never reconfigure a Keenetic interface that belongs to another service.
+# An existing interface is reusable only when its description identifies it as FPTN.
+if command -v ndmc >/dev/null 2>&1; then
+    _preflight_if=$(ndmc -c "show interface $USER_KTUN" 2>&1 || true)
+    if [ -n "$_preflight_if" ] &&
+       ! echo "$_preflight_if" | grep -qiE "error|no such|not found" &&
+       ! echo "$_preflight_if" | grep -qi "Fptn"; then
+        echo "ОШИБКА: интерфейс $USER_KTUN уже существует и не помечен как FPTN."
+        echo "Ничего не изменено. Выберите другое имя интерфейса и повторите установку."
+        echo "ERROR: $USER_KTUN already exists and is not marked as FPTN; refusing to reconfigure it."
+        exit 1
+    fi
+fi
+
+# Check storage before opkg can install PHP/Lighttpd and their dependencies.
+_FREE_KB=$(df -Pk /opt 2>/dev/null | awk 'NR == 2 {print $4}')
+case "$_FREE_KB" in
+    ''|*[!0-9]*)
+        echo "Предупреждение: не удалось проверить свободное место в /opt."
+        ;;
+    *)
+        if [ "$_FREE_KB" -lt 20480 ]; then
+            echo "ОШИБКА: в /opt меньше 20 MiB свободного места ($_FREE_KB KiB)."
+            echo "Освободите место перед установкой; пакеты Entware пока не изменялись."
+            exit 1
+        fi
+        ;;
+esac
+
 # 3. Установка необходимых системных пакетов / Install Entware packages
 echo ""
 echo "[1/7] Обновление пакетов и установка зависимостей / Updating packages & dependencies..."
@@ -424,6 +453,19 @@ echo ""
 echo "[4/7] Настройка конфигурации Lighttpd / Configuring Lighttpd web server..."
 LIGHTTPD_CONF_DIR="/opt/etc/lighttpd/conf.d"
 mkdir -p "$LIGHTTPD_CONF_DIR"
+FPTN_LIGHTTPD_CONF="$LIGHTTPD_CONF_DIR/85-fptn.conf"
+FPTN_LIGHTTPD_BACKUP="$FPTN_LIGHTTPD_CONF.pre-fptn.bak"
+FPTN_LIGHTTPD_HAD_CONFIG=no
+if [ -f "$FPTN_LIGHTTPD_CONF" ]; then
+    # Keep a one-time copy of a pre-existing FPTN config; never overwrite this backup.
+    if [ ! -f "$FPTN_LIGHTTPD_BACKUP" ]; then
+        cp -p "$FPTN_LIGHTTPD_CONF" "$FPTN_LIGHTTPD_BACKUP" || {
+            echo "Ошибка: не удалось сохранить прежний конфиг $FPTN_LIGHTTPD_CONF; отмена."
+            exit 1
+        }
+    fi
+    FPTN_LIGHTTPD_HAD_CONFIG=yes
+fi
 
 # Проверяем, задан ли уже server.port в существующих конфигах Lighttpd
 SERVER_PORT_DEFINED=no
@@ -457,8 +499,31 @@ server.modules += ( "mod_cgi" )
 EOF
 fi
 
+# Validate the complete config before restarting a shared web server.
+# If invalid, restore the previous FPTN snippet (or remove the new one) and abort.
+if ! lighttpd -tt -f /opt/etc/lighttpd/lighttpd.conf >/dev/null 2>&1; then
+    echo "ОШИБКА: конфигурация Lighttpd не прошла проверку; перезапуск отменён."
+    if [ "$FPTN_LIGHTTPD_HAD_CONFIG" = "yes" ] && [ -f "$FPTN_LIGHTTPD_BACKUP" ]; then
+        cp -p "$FPTN_LIGHTTPD_BACKUP" "$FPTN_LIGHTTPD_CONF"
+    else
+        rm -f "$FPTN_LIGHTTPD_CONF"
+    fi
+    echo "Проверьте конфиги Lighttpd вручную. Остальные шаги установщика могли уже выполниться."
+    exit 1
+fi
+
 echo "Перезапуск Lighttpd / Restarting Lighttpd..."
-/opt/etc/init.d/S80lighttpd restart || echo "Предупреждение: Не удалось перезапустить Lighttpd / Warning: Could not restart Lighttpd."
+if ! /opt/etc/init.d/S80lighttpd restart; then
+    echo "ОШИБКА: Lighttpd не перезапустился."
+    if [ "$FPTN_LIGHTTPD_HAD_CONFIG" = "yes" ] && [ -f "$FPTN_LIGHTTPD_BACKUP" ]; then
+        cp -p "$FPTN_LIGHTTPD_BACKUP" "$FPTN_LIGHTTPD_CONF"
+    else
+        rm -f "$FPTN_LIGHTTPD_CONF"
+    fi
+    /opt/etc/init.d/S80lighttpd restart >/dev/null 2>&1 || true
+    echo "Прежний фрагмент конфигурации восстановлен, но установку нужно проверить вручную."
+    exit 1
+fi
 
 # 7. Установка файлов веб-панели / Install Web Panel
 echo ""
