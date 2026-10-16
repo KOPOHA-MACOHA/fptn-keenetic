@@ -33,6 +33,7 @@ if [ "$1" = "--uninstall" ] || [ "$1" = "-u" ] || [ "$1" = "uninstall" ]; then
     FPTN_CONFIG_PRESENT=no
     if [ -f "/opt/etc/fptn-client.conf" ]; then
         FPTN_CONFIG_PRESENT=yes
+        TUN_INTERFACE=""
         . "/opt/etc/fptn-client.conf" 2>/dev/null || true
         if [ -n "$TUN_INTERFACE" ]; then
             KTUN_NAME=$(echo "$TUN_INTERFACE" | sed -E 's/opkgtun([0-9]+)/OpkgTun\1/i')
