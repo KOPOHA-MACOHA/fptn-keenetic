@@ -356,7 +356,7 @@ function download_file_to_disk($url, $dest_path, $timeout = 180) {
     $cmd = "curl -sL --fail --connect-timeout 15 --max-time " . (int)$timeout . " -o " . escapeshellarg($dest_path) . " " . escapeshellarg($url) . " 2>/dev/null";
     exec($cmd);
     if (file_exists($dest_path) && filesize($dest_path) > 1000000
-        && @file_get_contents($dest_path, false, null, 0, 4) === "\\x7fELF") {
+        && @file_get_contents($dest_path, false, null, 0, 4) === "\x7fELF") {
         return true;
     }
     @unlink($dest_path);
@@ -364,7 +364,7 @@ function download_file_to_disk($url, $dest_path, $timeout = 180) {
     $cmd_mirror = "curl -sL --fail --connect-timeout 15 --max-time " . (int)$timeout . " -o " . escapeshellarg($dest_path) . " " . escapeshellarg($mirror_url) . " 2>/dev/null";
     exec($cmd_mirror);
     if (file_exists($dest_path) && filesize($dest_path) > 1000000
-        && @file_get_contents($dest_path, false, null, 0, 4) === "\\x7fELF") {
+        && @file_get_contents($dest_path, false, null, 0, 4) === "\x7fELF") {
         return true;
     }
     @unlink($dest_path);
