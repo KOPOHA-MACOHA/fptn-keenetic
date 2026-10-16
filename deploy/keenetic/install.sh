@@ -374,6 +374,34 @@ case "$_FREE_KB" in
         ;;
 esac
 
+# Create a private rollback snapshot before opkg or persistent KeeneticOS changes.
+# This is a backup, not an automatic full-config restore mechanism.
+BACKUP_STAMP=$(date +%Y%m%d-%H%M%S)
+BACKUP_DIR="/opt/var/backups/fptn-preinstall-$BACKUP_STAMP"
+umask 077
+mkdir -p "$BACKUP_DIR"
+for _backup_file in \
+    /opt/bin/fptn-client-cli \
+    /opt/etc/fptn-client.conf \
+    /opt/etc/fptn-servers.json \
+    /opt/etc/init.d/S53fptn-client \
+    /opt/etc/lighttpd/conf.d/85-fptn.conf; do
+    if [ -f "$_backup_file" ]; then
+        _relative=$(echo "$_backup_file" | sed 's#^/opt/##; s#/#__#g')
+        cp -p "$_backup_file" "$BACKUP_DIR/$_relative" || {
+            echo "ОШИБКА: не удалось сохранить $_backup_file; установка отменена до изменений."
+            rm -rf "$BACKUP_DIR"
+            exit 1
+        }
+    fi
+done
+if command -v ndmc >/dev/null 2>&1; then
+    ndmc -c "show running-config" > "$BACKUP_DIR/keenetic-running-config.txt" 2>/dev/null || true
+    chmod 600 "$BACKUP_DIR/keenetic-running-config.txt" 2>/dev/null || true
+fi
+chmod 700 "$BACKUP_DIR"
+echo "Резервная копия перед установкой / Pre-install snapshot: $BACKUP_DIR"
+
 # 3. Установка необходимых системных пакетов / Install Entware packages
 echo ""
 echo "[1/7] Установка зависимостей Entware / Installing Entware dependencies..."
