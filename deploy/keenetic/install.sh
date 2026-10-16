@@ -168,20 +168,13 @@ download_file() {
     return 1
 }
 
-# Функция проверки занятости порта посторонними сервисами (кроме lighttpd)
+# Return busy if ANY process already listens on the requested TCP/UDP port.
+# Do not ignore Lighttpd: it may already own a socket on this port.
 is_port_busy() {
     _p="$1"
-    _listeners=$(netstat -tulnp 2>/dev/null | grep -E ":${_p}\s" 2>/dev/null || netstat -tuln 2>/dev/null | grep -E ":${_p}\s" 2>/dev/null || true)
-    if [ -n "$_listeners" ]; then
-        # Если порт занят НЕ lighttpd (например nginx, xray, adguard)
-        if echo "$_listeners" | grep -v "lighttpd" >/dev/null 2>&1; then
-            return 0
-        fi
-    fi
-    return 1
+    _listeners=$(netstat -tuln 2>/dev/null | grep -E "[:.]\${_p}[[:space:]]" 2>/dev/null || true)
+    [ -n "$_listeners" ]
 }
-
-
 
 # Функция считывания ввода пользователя с подстановкой по умолчанию
 read_input() {
@@ -198,63 +191,46 @@ read_input() {
     fi
 }
 
-# 2. Интерактивный опрос параметров / Interactive Configuration Prompt
+# 2. Select a dedicated, memorable web-panel port. Existing Lighttpd
+# services keep their current listener; FPTN gets an additional socket.
 USER_PORT=""
 if [ "$INSTALL_WEB_PANEL" = "yes" ]; then
-    # If Lighttpd already has an explicit listener, share it and mount the panel
-    # under /fptn/. Do not ask for a different port that the config would ignore.
-    EXISTING_LIGHTTPD_PORT=""
-    for _cf in /opt/etc/lighttpd/lighttpd.conf /opt/etc/lighttpd/conf.d/*.conf; do
-        if [ -f "$_cf" ] && [ "$_cf" != "/opt/etc/lighttpd/conf.d/85-fptn.conf" ]; then
-            _found_port=$(grep -Eo '^[[:space:]]*server[.]port[[:space:]]*[:=][[:space:]]*[0-9]+' "$_cf" 2>/dev/null | head -n 1 | grep -Eo '[0-9]+$' || true)
-            if [ -n "$_found_port" ]; then
-                EXISTING_LIGHTTPD_PORT="$_found_port"
-                break
-            fi
-        fi
-    done
+    DEFAULT_PORT=8080
+    if is_port_busy "$DEFAULT_PORT" ||
+       grep -R -E '(:|[[:space:]])8080([[:space:]]|[;}]|$)' /opt/etc/lighttpd/lighttpd.conf /opt/etc/lighttpd/conf.d 2>/dev/null | grep -v '^[[:space:]]*#' >/dev/null 2>&1; then
+        echo "Порт 8080 уже занят или упомянут в конфигурации Lighttpd."
+        CHECK_P=8081
+        while is_port_busy "$CHECK_P" ||
+              grep -R -E "(:|[[:space:]])${CHECK_P}([[:space:]]|[;}]|$)" /opt/etc/lighttpd/lighttpd.conf /opt/etc/lighttpd/conf.d 2>/dev/null | grep -v '^[[:space:]]*#' >/dev/null 2>&1; do
+            CHECK_P=$((CHECK_P + 1))
+            [ "$CHECK_P" -le 65535 ] || { echo "Не найден свободный порт."; exit 1; }
+        done
+        DEFAULT_PORT=$CHECK_P
+        echo "Выбран свободный порт: $DEFAULT_PORT"
+    fi
 
-    if [ -n "$EXISTING_LIGHTTPD_PORT" ]; then
-        USER_PORT="$EXISTING_LIGHTTPD_PORT"
-        echo "Найден работающий порт Lighttpd: $USER_PORT. Панель будет доступна на этом же порту по пути /fptn/."
-        echo "Existing Lighttpd listener found on port $USER_PORT; the panel will share it at /fptn/."
-    else
-        DEFAULT_PORT=8088
-        if [ -f "/opt/etc/lighttpd/conf.d/80-nfqws.conf" ]; then
-            NFQWS_PORT=$(grep -oE "server.port := [0-9]+" /opt/etc/lighttpd/conf.d/80-nfqws.conf | awk '{print $3}' | head -n 1)
-            if [ -n "$NFQWS_PORT" ]; then
-                DEFAULT_PORT=$NFQWS_PORT
-            fi
-        fi
+    printf "Порт веб-панели FPTN (default %s): " "$DEFAULT_PORT"
+    read_input USER_PORT "$DEFAULT_PORT"
+    USER_PORT="$REPLY"
 
-        if is_port_busy "$DEFAULT_PORT"; then
-            echo "Предупреждение: Порт $DEFAULT_PORT уже занят! / Warning: Port $DEFAULT_PORT is currently busy!"
-            CHECK_P=8089
-            while is_port_busy "$CHECK_P"; do
-                CHECK_P=$((CHECK_P + 1))
-            done
-            DEFAULT_PORT=$CHECK_P
-            echo "Автоматически выбран свободный порт / Auto-selected available port: $DEFAULT_PORT"
-        fi
-
-        printf "Введите порт для веб-панели FPTN / Enter FPTN web panel port (default %s): " "$DEFAULT_PORT"
-        read_input USER_PORT "$DEFAULT_PORT"
-        USER_PORT="$REPLY"
-
-        case "$USER_PORT" in
-            ''|*[!0-9]*)
-                echo "Ошибка: порт должен быть числом от 1 до 65535. Установка отменена."
-                exit 1
-                ;;
-        esac
-        if [ "$USER_PORT" -lt 1 ] || [ "$USER_PORT" -gt 65535 ]; then
-            echo "Ошибка: порт должен быть в диапазоне 1-65535. Установка отменена."
+    case "$USER_PORT" in
+        ''|*[!0-9]*)
+            echo "Ошибка: порт должен быть числом от 1 до 65535. Установка отменена."
             exit 1
-        fi
+            ;;
+    esac
+    if [ "$USER_PORT" -lt 1 ] || [ "$USER_PORT" -gt 65535 ]; then
+        echo "Ошибка: порт должен быть в диапазоне 1-65535. Установка отменена."
+        exit 1
+    fi
 
-        if is_port_busy "$USER_PORT"; then
-            echo "ВНИМАНИЕ: Выбранный порт $USER_PORT сейчас занят! / WARNING: Selected port $USER_PORT is busy!"
-        fi
+    if is_port_busy "$USER_PORT"; then
+        echo "ОШИБКА: порт $USER_PORT занят. Выберите свободный порт; установка отменена."
+        exit 1
+    fi
+    if grep -R -E "(:|[[:space:]])${USER_PORT}([[:space:]]|[;}]|$)" /opt/etc/lighttpd/lighttpd.conf /opt/etc/lighttpd/conf.d 2>/dev/null | grep -v '^[[:space:]]*#' >/dev/null 2>&1; then
+        echo "ОШИБКА: порт $USER_PORT уже упоминается в конфигурации Lighttpd. Выберите другой; установка отменена."
+        exit 1
     fi
 fi
 # Проверяем наличие уже существующего конфига для сохранения настроек при обновлении
@@ -327,7 +303,7 @@ fi
 echo ""
 echo "Параметры установки / Installation Parameters:"
 if [ "$INSTALL_WEB_PANEL" = "yes" ]; then
-    echo "  Веб-порт / Web Port:               $USER_PORT"
+    echo "  Веб-порт / Web Port:               $USER_PORT (отдельный listener / dedicated listener)"
 else
     echo "  Веб-панель не устанавливается / Web panel disabled"
 fi
@@ -658,40 +634,18 @@ if [ "$INSTALL_WEB_PANEL" = "yes" ]; then
         exit 1
     fi
 
-    # Detect an existing listener so the panel can share it at /fptn/ instead
-    # of introducing a second listener or colliding with an already-used port.
-    SERVER_PORT_DEFINED=no
-    for _cf in /opt/etc/lighttpd/lighttpd.conf /opt/etc/lighttpd/conf.d/*.conf; do
-        if [ -f "$_cf" ] && [ "$_cf" != "$LIGHTTPD_CONF_DIR/85-fptn.conf" ]; then
-            if grep -E '^[[:space:]]*server[.]port[[:space:]]*[:=]' "$_cf" >/dev/null 2>&1; then
-                SERVER_PORT_DEFINED=yes
-                break
-            fi
-        fi
-    done
-
     FPTN_LIGHTTPD_TOUCHED=yes
-    if [ "$SERVER_PORT_DEFINED" = "yes" ]; then
-        cat << EOF > "$LIGHTTPD_CONF_DIR/85-fptn.conf"
-    # Настройки веб-интерфейса FPTN
-    server.modules += ( "mod_cgi" )
-    \$HTTP["url"] =~ "^/fptn/" {
-        cgi.assign = ( ".php" => "/opt/bin/php-cgi" )
-        static-file.exclude-extensions += ( ".php" )
-    }
+    cat << EOF > "$LIGHTTPD_CONF_DIR/85-fptn.conf"
+# Dedicated FPTN listener; existing SmartDNS/nfqws listener and document root remain unchanged.
+server.modules += ( "mod_cgi" )
+\$SERVER["socket"] == ":$USER_PORT" {
+    server.document-root = "/opt/share/www/fptn"
+    index-file.names = ( "index.php", "index.html" )
+    cgi.assign = ( ".php" => "/opt/bin/php-cgi" )
+    static-file.exclude-extensions += ( ".php" )
+}
 EOF
-    else
-        cat << EOF > "$LIGHTTPD_CONF_DIR/85-fptn.conf"
-    # Настройки веб-интерфейса FPTN на порту $USER_PORT
-    server.port = $USER_PORT
-    server.modules += ( "mod_cgi" )
-    \$HTTP["url"] =~ "^/fptn/" {
-        cgi.assign = ( ".php" => "/opt/bin/php-cgi" )
-        static-file.exclude-extensions += ( ".php" )
-    }
-EOF
-    fi
-    
+
     # Validate the complete config before restarting a shared web server.
     # If invalid, restore the previous FPTN snippet (or remove the new one) and abort.
     if ! lighttpd -tt -f /opt/etc/lighttpd/lighttpd.conf >/dev/null 2>&1; then
@@ -935,7 +889,7 @@ echo "==========================================================="
 echo ""
 if [ "$INSTALL_WEB_PANEL" = "yes" ]; then
     echo "  1. Веб-панель доступна по адресу / Web panel URL:"
-    echo "     http://${ROUTER_LAN_IP}:$USER_PORT/fptn/"
+    echo "     http://${ROUTER_LAN_IP}:$USER_PORT/"
     echo ""
     echo "  2. Запуск туннеля / How to start VPN:"
     echo "     - Откройте веб-панель / Open FPTN Web Panel."
