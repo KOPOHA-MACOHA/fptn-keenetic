@@ -355,13 +355,20 @@ function download_file_to_disk($url, $dest_path, $timeout = 180) {
     @unlink($dest_path);
     $cmd = "curl -sL --fail --connect-timeout 15 --max-time " . (int)$timeout . " -o " . escapeshellarg($dest_path) . " " . escapeshellarg($url) . " 2>/dev/null";
     exec($cmd);
-    if (file_exists($dest_path) && filesize($dest_path) > 1000000) {
+    if (file_exists($dest_path) && filesize($dest_path) > 1000000
+        && @file_get_contents($dest_path, false, null, 0, 4) === "\\x7fELF") {
         return true;
     }
+    @unlink($dest_path);
     $mirror_url = "https://ghproxy.net/" . $url;
     $cmd_mirror = "curl -sL --fail --connect-timeout 15 --max-time " . (int)$timeout . " -o " . escapeshellarg($dest_path) . " " . escapeshellarg($mirror_url) . " 2>/dev/null";
     exec($cmd_mirror);
-    return file_exists($dest_path) && filesize($dest_path) > 1000000;
+    if (file_exists($dest_path) && filesize($dest_path) > 1000000
+        && @file_get_contents($dest_path, false, null, 0, 4) === "\\x7fELF") {
+        return true;
+    }
+    @unlink($dest_path);
+    return false;
 }
 
 // Функция чтения конфигурации
@@ -565,25 +572,53 @@ if (isset($_GET['ajax'])) {
         }
         file_put_contents($tmp_php, $res_php['data']);
 
-        // 3. Обновление скрипта службы S53fptn-client
+        // 3. Обновление скрипта службы скачиваем во временный файл.
+        // Не меняем рабочую службу, пока бинарник не прошёл базовую ELF-проверку.
         $init_url = "https://raw.githubusercontent.com/AntikFull/fptn-keenetic/master/deploy/keenetic/S53fptn-client";
         $res_init = http_get_contents($init_url, 15);
+        $tmp_init = "/tmp/S53fptn-client.tmp";
         if ($res_init['code'] === 200 && !empty($res_init['data'])) {
-            file_put_contents("/opt/etc/init.d/S53fptn-client", $res_init['data']);
-            chmod("/opt/etc/init.d/S53fptn-client", 0755);
+            if (file_put_contents($tmp_init, $res_init['data']) === false) {
+                @unlink($tmp_bin);
+                @unlink($tmp_php);
+                echo json_encode(['success' => false, 'message' => 'Не удалось сохранить временный файл службы.']);
+                exit;
+            }
+            chmod($tmp_init, 0755);
         }
-        
-        // 1. Останавливаем службу
+
+        // 4. Сохраняем текущий бинарник и службу, пока новый файл не проверен.
+        $backup_bin = $cli_path . '.bak';
+        if (file_exists($cli_path) && !@copy($cli_path, $backup_bin)) {
+            @unlink($tmp_bin);
+            @unlink($tmp_php);
+            @unlink($tmp_init);
+            echo json_encode(['success' => false, 'message' => 'Не удалось создать резервную копию клиента; обновление отменено.']);
+            exit;
+        }
+        // 5. Останавливаем службу только после загрузки всех обязательных файлов.
         exec("{$init_script} stop 2>&1");
-        
-        // 2. Перемещаем бинарник
+
+        // 6. Атомарно заменяем бинарник; при ошибке запуска ниже будет доступна .bak.
         if (!rename($tmp_bin, $cli_path)) {
             @unlink($tmp_bin);
             @unlink($tmp_php);
-            echo json_encode(['success' => false, 'message' => 'Не удалось перезаписать файл клиента /opt/bin/fptn-client-cli. Проверьте права доступа.']);
+            @unlink($tmp_init);
+            exec("{$init_script} start >/dev/null 2>&1");
+            echo json_encode(['success' => false, 'message' => 'Не удалось заменить бинарник; текущая версия сохранена.']);
             exit;
         }
         chmod($cli_path, 0755);
+        if (file_exists($tmp_init) && !@rename($tmp_init, "/opt/etc/init.d/S53fptn-client")) {
+            @copy($backup_bin, $cli_path);
+            @unlink($tmp_php);
+            exec("{$init_script} start >/dev/null 2>&1");
+            echo json_encode(['success' => false, 'message' => 'Не удалось обновить службу; бинарник восстановлен из резервной копии.']);
+            exit;
+        }
+        if (file_exists($tmp_init)) {
+            chmod("/opt/etc/init.d/S53fptn-client", 0755);
+        }
         
         // 3. Перечитываем конфигурацию и запускаем службу, если она должна быть включена
         // Читаем вручную конфигурационный файл
