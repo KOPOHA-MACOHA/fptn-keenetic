@@ -294,8 +294,10 @@ function http_get_contents($url, $timeout = 10) {
         curl_setopt($ch, CURLOPT_FOLLOWLOCATION, true);
         curl_setopt($ch, CURLOPT_CONNECTTIMEOUT, $timeout);
         curl_setopt($ch, CURLOPT_TIMEOUT, $timeout);
-        curl_setopt($ch, CURLOPT_SSL_VERIFYPEER, false);
-        curl_setopt($ch, CURLOPT_SSL_VERIFYHOST, false);
+        // Не отключаем проверку TLS: иначе токены и загружаемые обновления
+        // можно перехватить при атаке посредника.
+        curl_setopt($ch, CURLOPT_SSL_VERIFYPEER, true);
+        curl_setopt($ch, CURLOPT_SSL_VERIFYHOST, 2);
         curl_setopt($ch, CURLOPT_USERAGENT, 'Mozilla/5.0 (Keenetic FPTN Client)');
         $data = curl_exec($ch);
         $code = curl_getinfo($ch, CURLINFO_HTTP_CODE);
@@ -305,7 +307,7 @@ function http_get_contents($url, $timeout = 10) {
         }
     }
     
-    $cmd = "curl -sL -k --connect-timeout " . (int)$timeout . " --max-time " . (int)$timeout . " " . escapeshellarg($url) . " 2>/dev/null";
+    $cmd = "curl -sL --connect-timeout " . (int)$timeout . " --max-time " . (int)$timeout . " " . escapeshellarg($url) . " 2>/dev/null";
     $data = shell_exec($cmd);
     if ($data !== null && $data !== false && strlen($data) > 0) {
         return ['code' => 200, 'data' => $data];
@@ -318,8 +320,8 @@ function http_get_contents($url, $timeout = 10) {
             'follow_location' => 1
         ],
         'ssl' => [
-            'verify_peer' => false,
-            'verify_peer_name' => false
+            'verify_peer' => true,
+            'verify_peer_name' => true
         ]
     ]);
     $data = @file_get_contents($url, false, $ctx);
@@ -344,13 +346,13 @@ function get_installed_version() {
 // Прямое скачивание бинарников на диск во избежание исчерпания памяти php-cgi (memory_limit)
 function download_file_to_disk($url, $dest_path, $timeout = 180) {
     @unlink($dest_path);
-    $cmd = "curl -sL -k --connect-timeout 15 --max-time " . (int)$timeout . " -o " . escapeshellarg($dest_path) . " " . escapeshellarg($url) . " 2>/dev/null";
+    $cmd = "curl -sL --fail --connect-timeout 15 --max-time " . (int)$timeout . " -o " . escapeshellarg($dest_path) . " " . escapeshellarg($url) . " 2>/dev/null";
     exec($cmd);
     if (file_exists($dest_path) && filesize($dest_path) > 1000000) {
         return true;
     }
     $mirror_url = "https://ghproxy.net/" . $url;
-    $cmd_mirror = "curl -sL -k --connect-timeout 15 --max-time " . (int)$timeout . " -o " . escapeshellarg($dest_path) . " " . escapeshellarg($mirror_url) . " 2>/dev/null";
+    $cmd_mirror = "curl -sL --fail --connect-timeout 15 --max-time " . (int)$timeout . " -o " . escapeshellarg($dest_path) . " " . escapeshellarg($mirror_url) . " 2>/dev/null";
     exec($cmd_mirror);
     return file_exists($dest_path) && filesize($dest_path) > 1000000;
 }
@@ -686,12 +688,6 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             
             $is_valid_csrf = (!empty($submitted_csrf) && !empty($session_csrf) && hash_equals($session_csrf, $submitted_csrf));
             
-            // Если сессия активна, но сессионный токен пуст или пересоздался в другом процессе php-cgi — принимаем и фиксируем токен
-            if (!$is_valid_csrf && !empty($submitted_csrf)) {
-                $_SESSION['csrf_token'] = $submitted_csrf;
-                $is_valid_csrf = true;
-            }
-
             if (!$is_valid_csrf) {
                 $error = 'Ошибка безопасности: неверный CSRF токен. Перезагрузите страницу.';
             } else {
