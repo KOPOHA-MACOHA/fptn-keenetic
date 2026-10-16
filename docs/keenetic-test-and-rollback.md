@@ -14,9 +14,12 @@ This is a manual checklist, not an installer. Nothing in this document has been 
 For a first test, prefer the client-only mode so the installer does not install Lighttpd/PHP, write the FPTN web-panel config, or restart Lighttpd:
 
 ```sh
-# Do not run until the PR is merged/reviewed and you are ready to test.
-# Replace the URL with the reviewed installer source.
-sh install.sh --no-web-panel
+# EXAMPLE ONLY — DO NOT RUN YET.
+# Pin the installer and its companion files to the same reviewed commit.
+COMMIT="a385eb181c4a6df345d81fbae40f419889f2f69e"
+BASE="https://raw.githubusercontent.com/KOPOHA-MACOHA/fptn-keenetic/$COMMIT"
+curl -fsSL "$BASE/deploy/keenetic/install.sh" -o /tmp/fptn-install.sh
+FPTN_GITHUB_RAW_BASE="$BASE" sh /tmp/fptn-install.sh --no-web-panel
 ```
 
 This mode requires a valid subscription token. It still installs the client dependencies, downloads/replaces the binary, writes the client config, and creates a persistent KeeneticOS OpkgTun interface. It is therefore lower risk than the full panel install, but not risk-free.
