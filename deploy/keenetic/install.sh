@@ -405,8 +405,8 @@ if [ "$_MEM_AVAILABLE_KB" -gt 0 ]; then
         echo "ОШИБКА: доступно меньше 32 MiB памяти ($_MEM_AVAILABLE_KB KiB); установка отменена до изменений."
         echo "ERROR: less than 32 MiB RAM is available; aborting before changes."
         exit 1
-    elif [ "$_MEM_AVAILABLE_KB" -lt 65536 ]; then
-        echo "ПРЕДУПРЕЖДЕНИЕ: доступно меньше 64 MiB RAM ($_MEM_AVAILABLE_KB KiB). Клиент может увеличить нагрузку на память."
+    elif [ "$_MEM_AVAILABLE_KB" -lt 98304 ]; then
+        echo "ПРЕДУПРЕЖДЕНИЕ: доступно меньше 96 MiB RAM ($_MEM_AVAILABLE_KB KiB). Веб-панель и клиент могут увеличить нагрузку на память."
     fi
 else
     echo "Предупреждение: MemAvailable не удалось прочитать; автоматическая проверка RAM пропущена."
