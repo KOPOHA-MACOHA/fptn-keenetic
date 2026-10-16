@@ -322,7 +322,8 @@ for _src_url in "$BIN_RAW_URL" "$BIN_RELEASE_URL" "$BIN_LATEST_URL"; do
                 fi
             fi
             if [ "$_smoke_ok" = "yes" ]; then
-                mv "/opt/bin/fptn-client-cli.tmp" "/opt/bin/fptn-client-cli"
+                # До завершения всех проверок не останавливаем текущий туннель
+                # и не заменяем рабочий бинарник.
                 DOWNLOAD_SUCCESS=yes
                 break
             else
@@ -340,6 +341,25 @@ if [ "$DOWNLOAD_SUCCESS" != "yes" ]; then
     echo "Ошибка: Не удалось скачать и запустить проверенный бинарный файл. Существующий бинарник не изменён. / Error: Failed to download and run a validated binary. Existing binary was preserved."
     exit 1
 fi
+
+# Только теперь останавливаем текущую службу и меняем бинарник. Если замена
+# не удастся, резервная копия останется доступной, а старую службу попробуем поднять.
+if [ -f "/opt/etc/init.d/S53fptn-client" ]; then
+    /opt/etc/init.d/S53fptn-client stop >/dev/null 2>&1 || true
+fi
+if [ -f "/opt/bin/fptn-client-cli" ]; then
+    cp -p /opt/bin/fptn-client-cli /opt/bin/fptn-client-cli.pre-update.bak || {
+        echo "Ошибка: Не удалось создать резервную копию текущего бинарника; обновление отменено."
+        [ ! -x /opt/etc/init.d/S53fptn-client ] || /opt/etc/init.d/S53fptn-client start >/dev/null 2>&1 || true
+        exit 1
+    }
+fi
+if ! mv "/opt/bin/fptn-client-cli.tmp" "/opt/bin/fptn-client-cli"; then
+    echo "Ошибка: Не удалось заменить бинарник; текущая версия сохранена."
+    [ ! -x /opt/etc/init.d/S53fptn-client ] || /opt/etc/init.d/S53fptn-client start >/dev/null 2>&1 || true
+    exit 1
+fi
+chmod +x /opt/bin/fptn-client-cli
 echo "$REMOTE_VER" > /opt/etc/fptn-version
 
 # 5. Создание и настройка TUN-интерфейса в KeeneticOS / Register TUN Interface in KeeneticOS
