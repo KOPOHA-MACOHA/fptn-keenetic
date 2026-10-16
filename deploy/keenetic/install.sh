@@ -776,10 +776,6 @@ if [ -f "$CONF_PATH" ]; then
     CONF_STARTUP_DELAY="${STARTUP_RETRY_DELAY:-5}"
 fi
 
-if [ "$INSTALL_WEB_PANEL" = "no" ]; then
-    CONF_ENABLED="yes"
-fi
-
 cat << EOF > "$CONF_PATH"
 # Конфигурация клиента FPTN (Создано автоматически / Auto-generated)
 ENABLED=$(shell_quote "${CONF_ENABLED:-no}")
