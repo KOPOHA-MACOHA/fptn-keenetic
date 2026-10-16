@@ -10,6 +10,11 @@ on:
     types: [ published ]
   workflow_dispatch:
 
+# Keep only the newest build for a branch or pull request.
+concurrency:
+  group: build-keenetic-${{ github.ref }}
+  cancel-in-progress: true
+
 permissions:
   contents: write
 
