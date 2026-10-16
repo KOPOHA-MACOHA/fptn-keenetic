@@ -383,11 +383,16 @@ mkdir -p "$BACKUP_DIR"
 for _backup_file in \
     /opt/bin/fptn-client-cli \
     /opt/etc/fptn-client.conf \
+    /opt/etc/fptn-version \
     /opt/etc/fptn-servers.json \
+    /opt/etc/fptn-monitor.conf \
     /opt/etc/init.d/S53fptn-client \
-    /opt/etc/lighttpd/conf.d/85-fptn.conf; do
+    /opt/share/www/fptn/index.php \
+    /opt/etc/lighttpd/conf.d/85-fptn.conf \
+    /opt/etc/lighttpd/conf.d/85-fptn.conf.pre-fptn.bak; do
     if [ -f "$_backup_file" ]; then
-        _relative=$(echo "$_backup_file" | sed 's#^/opt/##; s#/#__#g')
+        _relative=${_backup_file#/opt/}
+        mkdir -p "$BACKUP_DIR/$(dirname "$_relative")"
         cp -p "$_backup_file" "$BACKUP_DIR/$_relative" || {
             echo "ОШИБКА: не удалось сохранить $_backup_file; установка отменена до изменений."
             rm -rf "$BACKUP_DIR"
