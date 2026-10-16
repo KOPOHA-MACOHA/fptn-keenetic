@@ -398,6 +398,8 @@ for _backup_file in \
     /opt/bin/fptn-client-cli \
     /opt/bin/fptn-client-cli.pre-update.bak \
     /opt/bin/fptn-client-cli.tmp \
+    /opt/bin/fptn-postflight.sh \
+    /opt/bin/fptn-postflight.sh.tmp \
     /opt/etc/fptn-client.conf \
     /opt/etc/fptn-version \
     /opt/etc/fptn-servers.json \
@@ -435,6 +437,8 @@ rollback_failed_install() {
         /opt/bin/fptn-client-cli \
         /opt/bin/fptn-client-cli.pre-update.bak \
         /opt/bin/fptn-client-cli.tmp \
+        /opt/bin/fptn-postflight.sh \
+        /opt/bin/fptn-postflight.sh.tmp \
         /opt/etc/fptn-client.conf \
         /opt/etc/fptn-version \
         /opt/etc/fptn-servers.json \
@@ -852,6 +856,27 @@ else
     fi
 fi
 chmod 755 /opt/etc/init.d/S53fptn-client
+
+# Install the read-only postflight verifier so it is available immediately after
+# setup. Prefer the checked-out copy; otherwise fetch from the same pinned source
+# as the installer. A failed download aborts and the EXIT trap restores prior files.
+POSTFLIGHT_SOURCE_DIR=$(dirname "$0")
+POSTFLIGHT_PATH="/opt/bin/fptn-postflight.sh"
+POSTFLIGHT_TMP="/opt/bin/fptn-postflight.sh.tmp"
+if [ -f "$POSTFLIGHT_SOURCE_DIR/postflight.sh" ]; then
+    cp "$POSTFLIGHT_SOURCE_DIR/postflight.sh" "$POSTFLIGHT_TMP"
+else
+    if ! download_file "${GITHUB_RAW_BASE}/deploy/keenetic/postflight.sh" "$POSTFLIGHT_TMP" 30; then
+        echo "Ошибка: не удалось получить postflight verifier; установка отменена."
+        exit 1
+    fi
+fi
+if ! sh -n "$POSTFLIGHT_TMP"; then
+    echo "Ошибка: postflight verifier не прошёл проверку синтаксиса; установка отменена."
+    exit 1
+fi
+chmod 755 "$POSTFLIGHT_TMP"
+mv -f "$POSTFLIGHT_TMP" "$POSTFLIGHT_PATH"
 
 # 5. Создание и настройка TUN-интерфейса в KeeneticOS / Register TUN Interface in KeeneticOS
 # Keep FPTN_CREATED_INTERFACE from the rollback state above; resetting it here
