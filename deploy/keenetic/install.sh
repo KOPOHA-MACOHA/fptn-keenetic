@@ -464,10 +464,11 @@ rollback_failed_install() {
     rmdir /opt/share/www/fptn 2>/dev/null || true
     if [ "$FPTN_CREATED_INTERFACE" = "yes" ]; then
         _rollback_if=$(ndmc -c "show interface $USER_KTUN" 2>&1 || true)
-        if echo "$_rollback_if" | grep -qi "Fptn"; then
+        if [ -n "$_rollback_if" ] && ! echo "$_rollback_if" | grep -qiE "error|no such|not found"; then
+            # The preflight confirmed this interface did not exist before this run.
             ndmc -c "no interface $USER_KTUN" >/dev/null 2>&1 || true
             ndmc -c "system configuration save" >/dev/null 2>&1 || true
-            echo "Removed newly created FPTN interface during failed-install cleanup."
+            echo "Removed newly created interface during failed-install cleanup."
         fi
     fi
     if [ "$FPTN_LIGHTTPD_TOUCHED" = "yes" ] && [ -x /opt/etc/init.d/S80lighttpd ]; then
