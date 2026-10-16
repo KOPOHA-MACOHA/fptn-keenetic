@@ -594,7 +594,12 @@ if (isset($_GET['ajax'])) {
             echo json_encode(['success' => false, 'message' => "Не удалось скачать новую веб-панель index.php: HTTP {$res_php['code']}"]);
             exit;
         }
-        file_put_contents($tmp_php, $res_php['data']);
+        if (file_put_contents($tmp_php, $res_php['data'], LOCK_EX) === false) {
+            @unlink($tmp_bin);
+            @unlink($tmp_php);
+            echo json_encode(['success' => false, 'message' => 'Не удалось сохранить временную копию веб-панели.']);
+            exit;
+        }
 
         // 3. Обновление скрипта службы скачиваем во временный файл.
         // Не меняем рабочую службу, пока бинарник не прошёл базовую ELF-проверку.
@@ -611,39 +616,52 @@ if (isset($_GET['ajax'])) {
             chmod($tmp_init, 0755);
         }
 
-        // 4. Сохраняем текущий бинарник и службу, пока новый файл не проверен.
-        $backup_bin = $cli_path . '.bak';
-        if (file_exists($cli_path) && !@copy($cli_path, $backup_bin)) {
+        // 4. Сохраняем все файлы, которые будут заменены. Если резервная копия
+        // не создаётся, отменяем обновление до остановки действующего туннеля.
+        $backup_bin = $cli_path . '.pre-update.bak';
+        $service_path = "/opt/etc/init.d/S53fptn-client";
+        $panel_path = "/opt/share/www/fptn/index.php";
+        $backup_init = $service_path . '.pre-update.bak';
+        $backup_php = $panel_path . '.pre-update.bak';
+        if (!file_exists($cli_path) || !@copy($cli_path, $backup_bin)
+            || !file_exists($service_path) || !@copy($service_path, $backup_init)
+            || !file_exists($panel_path) || !@copy($panel_path, $backup_php)) {
             @unlink($tmp_bin);
             @unlink($tmp_php);
             @unlink($tmp_init);
-            echo json_encode(['success' => false, 'message' => 'Не удалось создать резервную копию клиента; обновление отменено.']);
+            echo json_encode(['success' => false, 'message' => 'Не удалось создать резервные копии файлов; обновление отменено.']);
             exit;
         }
-        // 5. Останавливаем службу только после загрузки всех обязательных файлов.
-        exec("{$init_script} stop 2>&1");
 
-        // 6. Атомарно заменяем бинарник; при ошибке запуска ниже будет доступна .bak.
-        if (!rename($tmp_bin, $cli_path)) {
+        // 5. Останавливаем службу только после загрузки всех файлов и создания backup.
+        exec(escapeshellarg($init_script) . " stop 2>&1");
+
+        // 6. Заменяем бинарник и обновляемые скрипты. При любой ошибке восстанавливаем
+        // все исходные файлы до попытки снова запустить службу.
+        $update_ok = @rename($tmp_bin, $cli_path);
+        if ($update_ok && file_exists($tmp_init)) {
+            $update_ok = @rename($tmp_init, $service_path);
+        }
+        if ($update_ok) {
+            $update_ok = @rename($tmp_php, $panel_path);
+        }
+
+        if (!$update_ok) {
+            @copy($backup_bin, $cli_path);
+            @copy($backup_init, $service_path);
+            @copy($backup_php, $panel_path);
+            chmod($cli_path, 0755);
+            chmod($service_path, 0755);
             @unlink($tmp_bin);
             @unlink($tmp_php);
             @unlink($tmp_init);
-            exec("{$init_script} start >/dev/null 2>&1");
-            echo json_encode(['success' => false, 'message' => 'Не удалось заменить бинарник; текущая версия сохранена.']);
+            exec(escapeshellarg($init_script) . " start >/dev/null 2>&1");
+            echo json_encode(['success' => false, 'message' => 'Обновление не завершено: исходные файлы восстановлены из резервных копий.']);
             exit;
         }
         chmod($cli_path, 0755);
-        if (file_exists($tmp_init) && !@rename($tmp_init, "/opt/etc/init.d/S53fptn-client")) {
-            @copy($backup_bin, $cli_path);
-            @unlink($tmp_php);
-            exec("{$init_script} start >/dev/null 2>&1");
-            echo json_encode(['success' => false, 'message' => 'Не удалось обновить службу; бинарник восстановлен из резервной копии.']);
-            exit;
-        }
-        if (file_exists($tmp_init)) {
-            chmod("/opt/etc/init.d/S53fptn-client", 0755);
-        }
-        
+        chmod($service_path, 0755);
+
         // 3. Перечитываем конфигурацию и запускаем службу, если она должна быть включена
         // Читаем вручную конфигурационный файл
         $enabled = 'no';
@@ -662,8 +680,6 @@ if (isset($_GET['ajax'])) {
         // 4. Сохраняем информацию об установленной версии
         @file_put_contents($version_file, $remote_version);
         
-        // 5. Заменяем саму себя в последнюю очередь
-        rename($tmp_php, "/opt/share/www/fptn/index.php");
         
         echo json_encode(['success' => true, 'message' => 'Обновление успешно установлено!']);
         exit;
