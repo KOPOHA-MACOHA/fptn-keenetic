@@ -448,13 +448,13 @@ rollback_failed_install() {
         _saved="$BACKUP_DIR/$_rel"
         if [ -f "$_saved" ]; then
             _restore_dir=$(dirname "$_restore_file")
-            _restore_tmp="${_restore_file}.rollback."$
-            if mkdir -p "$_restore_dir" &&
+            _restore_tmp=$(mktemp "${_restore_file}.rollback.XXXXXX" 2>/dev/null) || _restore_tmp=""
+            if [ -n "$_restore_tmp" ] &&
                cp -p "$_saved" "$_restore_tmp" &&
                mv -f "$_restore_tmp" "$_restore_file"; then
                 :
             else
-                rm -f "$_restore_tmp" 2>/dev/null || true
+                [ -z "$_restore_tmp" ] || rm -f "$_restore_tmp" 2>/dev/null || true
                 ROLLBACK_RESTORE_FAILED=yes
                 echo "WARNING: could not safely restore $_restore_file from $_saved"
             fi
