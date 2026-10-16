@@ -492,9 +492,11 @@ rollback_failed_install() {
             echo "WARNING: restored Lighttpd config did not validate; not restarting shared Lighttpd."
         fi
     fi
-    if [ -f "$BACKUP_DIR/etc/init.d/S53fptn-client" ] &&
-       [ -f "$BACKUP_DIR/etc/fptn-client.conf" ] &&
-       grep -q "^ENABLED='yes'$" "$BACKUP_DIR/etc/fptn-client.conf"; then
+    if [ "$ROLLBACK_RESTORE_FAILED" = "yes" ]; then
+        echo "WARNING: rollback was incomplete. Do not assume the router is back to its previous state; inspect the files listed above and use the saved snapshot."
+    elif [ -f "$BACKUP_DIR/etc/init.d/S53fptn-client" ] &&
+         [ -f "$BACKUP_DIR/etc/fptn-client.conf" ] &&
+         grep -q "^ENABLED='yes'$" "$BACKUP_DIR/etc/fptn-client.conf"; then
         /opt/etc/init.d/S53fptn-client start >/dev/null 2>&1 || echo "WARNING: previous FPTN service could not be restarted after rollback."
     fi
     echo "Rollback attempt finished. Entware packages already installed by opkg are not automatically removed."
