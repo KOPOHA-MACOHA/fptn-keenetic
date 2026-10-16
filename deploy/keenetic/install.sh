@@ -847,7 +847,7 @@ ndmc_apply() {
         [ -z "$_ndmc_output" ] || echo "$_ndmc_output"
         return 1
     }
-    if echo "$_ndmc_output" | grep -qiE '(^|[^[:alpha:]])(error|invalid|failed|unknown command|not found)([^[:alpha:]]|$)'; then
+    if echo "$_ndmc_output" | grep -qiE '(^|[^[:alpha:]])(error|invalid|failed|unknown command|not found|ошибк|не найден|неизвестн)([^[:alpha:]]|$)'; then
         echo "ОШИБКА: KeeneticOS отклонил команду: $_ndmc_command"
         echo "$_ndmc_output"
         return 1
