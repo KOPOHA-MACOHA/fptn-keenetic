@@ -4,14 +4,20 @@
 // Исправлено: добавлены авторизация, защита от CSRF, маскирование токена и автообновление
 
 $sess_dir = '/opt/tmp/php_sessions';
+umask(0077);
 if (!is_dir($sess_dir)) {
-    @mkdir($sess_dir, 0777, true);
+    @mkdir($sess_dir, 0700, true);
+}
+if (is_dir($sess_dir)) {
+    @chmod($sess_dir, 0700);
 }
 if (is_dir($sess_dir) && is_writable($sess_dir)) {
     session_save_path($sess_dir);
 }
 ini_set('session.cookie_httponly', 1);
 ini_set('session.use_only_cookies', 1);
+ini_set('session.use_strict_mode', 1);
+ini_set('session.cookie_samesite', 'Lax');
 
 session_name('FPTN_SESS');
 session_start();
@@ -740,20 +746,27 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 
         // 1. Установка нового пароля (если он еще не задан)
         if ($action === 'setup_password' && !$password_set) {
-            $new_pass = $_POST['password'] ?? '';
-            $confirm_pass = $_POST['confirm_password'] ?? '';
-            if (strlen($new_pass) < 6) {
-                $error = 'Пароль должен быть не менее 6 символов';
-            } elseif ($new_pass !== $confirm_pass) {
-                $error = 'Пароли не совпадают';
+            $submitted_csrf = $_POST['csrf_token'] ?? '';
+            $session_csrf = $_SESSION['csrf_token'] ?? '';
+            if (empty($submitted_csrf) || empty($session_csrf) || !hash_equals($session_csrf, $submitted_csrf)) {
+                $error = 'Ошибка безопасности: неверный CSRF токен. Перезагрузите страницу.';
             } else {
-                $config['WEB_PASSWORD'] = password_hash($new_pass, PASSWORD_BCRYPT);
-                if (write_config()) {
-                    $_SESSION['auth'] = true;
-                    header("Location: " . $_SERVER['PHP_SELF']);
-                    exit;
+                $new_pass = $_POST['password'] ?? '';
+                $confirm_pass = $_POST['confirm_password'] ?? '';
+                if (strlen($new_pass) < 10) {
+                    $error = 'Пароль должен быть не менее 10 символов';
+                } elseif ($new_pass !== $confirm_pass) {
+                    $error = 'Пароли не совпадают';
                 } else {
-                    $error = 'Не удалось записать пароль в конфигурацию.';
+                    $config['WEB_PASSWORD'] = password_hash($new_pass, PASSWORD_BCRYPT);
+                    if (write_config()) {
+                        session_regenerate_id(true);
+                        $_SESSION['auth'] = true;
+                        header("Location: " . $_SERVER['PHP_SELF']);
+                        exit;
+                    } else {
+                        $error = 'Не удалось записать пароль в конфигурацию.';
+                    }
                 }
             }
         }
@@ -762,6 +775,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         elseif ($action === 'login' && $password_set) {
             $pass = $_POST['password'] ?? '';
             if (password_verify($pass, $config['WEB_PASSWORD'])) {
+                session_regenerate_id(true);
                 $_SESSION['auth'] = true;
                 header("Location: " . $_SERVER['PHP_SELF']);
                 exit;
