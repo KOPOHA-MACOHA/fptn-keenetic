@@ -96,7 +96,7 @@ if [ -f "$FPTN_LIGHTTPD_CONF" ]; then
         *)
             info "Configured FPTN panel port: $PANEL_PORT"
             if command -v netstat >/dev/null 2>&1 &&
-               netstat -lnt 2>/dev/null | awk -v suffix=":""$PANEL_PORT" '$4 ~ (suffix "$") {found=1} END {exit !found}'; then
+               netstat -lnt 2>/dev/null | grep -E "[.:]${PANEL_PORT}[[:space:]]" >/dev/null; then
                 pass "TCP listener for panel port $PANEL_PORT is present"
             else
                 fail "No TCP listener detected for panel port $PANEL_PORT"
