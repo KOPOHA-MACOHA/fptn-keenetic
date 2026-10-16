@@ -515,9 +515,10 @@ if (isset($_GET['ajax'])) {
             case 'mips':
             case 'mipsel':
                 // uname -m может возвращать "mips"; Entware feed определяет ABI точнее.
-                $arch_suffix = (shell_exec("grep -Rqs 'mipselsf' /opt/etc/opkg.conf /opt/etc/opkg/*.conf 2>/dev/null; echo $?") ?? '') === "0\n"
-                    ? 'mipselsf'
-                    : 'mipsel';
+                $softfloat_feed = trim((string)shell_exec(
+                    "if grep -Rqs 'mipselsf' /opt/etc/opkg.conf /opt/etc/opkg/*.conf 2>/dev/null; then echo yes; fi"
+                )) === 'yes';
+                $arch_suffix = $softfloat_feed ? 'mipselsf' : 'mipsel';
                 break;
             default:
                 echo json_encode(['success' => false, 'message' => 'Неподдерживаемая архитектура процессора: ' . $arch]);
