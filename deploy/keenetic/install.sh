@@ -201,47 +201,62 @@ read_input() {
 # 2. Интерактивный опрос параметров / Interactive Configuration Prompt
 USER_PORT=""
 if [ "$INSTALL_WEB_PANEL" = "yes" ]; then
-    DEFAULT_PORT=8088
-    if [ -f "/opt/etc/lighttpd/conf.d/80-nfqws.conf" ]; then
-        NFQWS_PORT=$(grep -oE "server.port := [0-9]+" /opt/etc/lighttpd/conf.d/80-nfqws.conf | awk '{print $3}')
-        if [ -n "$NFQWS_PORT" ]; then
-            DEFAULT_PORT=$NFQWS_PORT
+    # If Lighttpd already has an explicit listener, share it and mount the panel
+    # under /fptn/. Do not ask for a different port that the config would ignore.
+    EXISTING_LIGHTTPD_PORT=""
+    for _cf in /opt/etc/lighttpd/lighttpd.conf /opt/etc/lighttpd/conf.d/*.conf; do
+        if [ -f "$_cf" ] && [ "$_cf" != "/opt/etc/lighttpd/conf.d/85-fptn.conf" ]; then
+            _found_port=$(grep -Eo '^[[:space:]]*server[.]port[[:space:]]*[:=][[:space:]]*[0-9]+' "$_cf" 2>/dev/null | head -n 1 | grep -Eo '[0-9]+$' || true)
+            if [ -n "$_found_port" ]; then
+                EXISTING_LIGHTTPD_PORT="$_found_port"
+                break
+            fi
+        fi
+    done
+
+    if [ -n "$EXISTING_LIGHTTPD_PORT" ]; then
+        USER_PORT="$EXISTING_LIGHTTPD_PORT"
+        echo "Найден работающий порт Lighttpd: $USER_PORT. Панель будет доступна на этом же порту по пути /fptn/."
+        echo "Existing Lighttpd listener found on port $USER_PORT; the panel will share it at /fptn/."
+    else
+        DEFAULT_PORT=8088
+        if [ -f "/opt/etc/lighttpd/conf.d/80-nfqws.conf" ]; then
+            NFQWS_PORT=$(grep -oE "server.port := [0-9]+" /opt/etc/lighttpd/conf.d/80-nfqws.conf | awk '{print $3}' | head -n 1)
+            if [ -n "$NFQWS_PORT" ]; then
+                DEFAULT_PORT=$NFQWS_PORT
+            fi
+        fi
+
+        if is_port_busy "$DEFAULT_PORT"; then
+            echo "Предупреждение: Порт $DEFAULT_PORT уже занят! / Warning: Port $DEFAULT_PORT is currently busy!"
+            CHECK_P=8089
+            while is_port_busy "$CHECK_P"; do
+                CHECK_P=$((CHECK_P + 1))
+            done
+            DEFAULT_PORT=$CHECK_P
+            echo "Автоматически выбран свободный порт / Auto-selected available port: $DEFAULT_PORT"
+        fi
+
+        printf "Введите порт для веб-панели FPTN / Enter FPTN web panel port (default %s): " "$DEFAULT_PORT"
+        read_input USER_PORT "$DEFAULT_PORT"
+        USER_PORT="$REPLY"
+
+        case "$USER_PORT" in
+            ''|*[!0-9]*)
+                echo "Ошибка: порт должен быть числом от 1 до 65535. Установка отменена."
+                exit 1
+                ;;
+        esac
+        if [ "$USER_PORT" -lt 1 ] || [ "$USER_PORT" -gt 65535 ]; then
+            echo "Ошибка: порт должен быть в диапазоне 1-65535. Установка отменена."
+            exit 1
+        fi
+
+        if is_port_busy "$USER_PORT"; then
+            echo "ВНИМАНИЕ: Выбранный порт $USER_PORT сейчас занят! / WARNING: Selected port $USER_PORT is busy!"
         fi
     fi
-    
-    # Проверяем, свободен ли дефолтный порт
-    if is_port_busy "$DEFAULT_PORT"; then
-        echo "Предупреждение: Порт $DEFAULT_PORT уже занят! / Warning: Port $DEFAULT_PORT is currently busy!"
-        CHECK_P=8089
-        while is_port_busy "$CHECK_P"; do
-            CHECK_P=$((CHECK_P + 1))
-        done
-        DEFAULT_PORT=$CHECK_P
-        echo "Автоматически выбран свободный порт / Auto-selected available port: $DEFAULT_PORT"
-    fi
-    
-    printf "Введите порт для веб-панели FPTN / Enter FPTN web panel port (default %s): " "$DEFAULT_PORT"
-    read_input USER_PORT "$DEFAULT_PORT"
-    USER_PORT="$REPLY"
-    
-    case "$USER_PORT" in
-        ''|*[!0-9]*)
-            echo "Ошибка: порт должен быть числом от 1 до 65535. Установка отменена."
-            exit 1
-            ;;
-    esac
-    if [ "$USER_PORT" -lt 1 ] || [ "$USER_PORT" -gt 65535 ]; then
-        echo "Ошибка: порт должен быть в диапазоне 1-65535. Установка отменена."
-        exit 1
-    fi
-    
-    if is_port_busy "$USER_PORT"; then
-        echo "ВНИМАНИЕ: Выбранный порт $USER_PORT сейчас занят! / WARNING: Selected port $USER_PORT is busy!"
-    fi
-    
-    
 fi
-
 # Проверяем наличие уже существующего конфига для сохранения настроек при обновлении
 PREV_TOKEN=""
 PREV_LTUN=""
