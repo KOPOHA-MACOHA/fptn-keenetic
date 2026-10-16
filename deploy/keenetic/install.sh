@@ -575,7 +575,7 @@ if [ "$INSTALL_WEB_PANEL" = "yes" ]; then
         cgi.assign = ( ".php" => "/opt/bin/php-cgi" )
         static-file.exclude-extensions += ( ".php" )
     }
-    EOF
+EOF
     else
         cat << EOF > "$LIGHTTPD_CONF_DIR/85-fptn.conf"
     # Настройки веб-интерфейса FPTN на порту $USER_PORT
@@ -585,7 +585,7 @@ if [ "$INSTALL_WEB_PANEL" = "yes" ]; then
         cgi.assign = ( ".php" => "/opt/bin/php-cgi" )
         static-file.exclude-extensions += ( ".php" )
     }
-    EOF
+EOF
     fi
     
     # Validate the complete config before restarting a shared web server.
