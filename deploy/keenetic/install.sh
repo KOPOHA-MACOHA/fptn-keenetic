@@ -203,6 +203,17 @@ printf "Введите порт для веб-панели FPTN / Enter FPTN web
 read_input USER_PORT "$DEFAULT_PORT"
 USER_PORT="$REPLY"
 
+case "$USER_PORT" in
+    ''|*[!0-9]*)
+        echo "Ошибка: порт должен быть числом от 1 до 65535. Установка отменена."
+        exit 1
+        ;;
+esac
+if [ "$USER_PORT" -lt 1 ] || [ "$USER_PORT" -gt 65535 ]; then
+    echo "Ошибка: порт должен быть в диапазоне 1-65535. Установка отменена."
+    exit 1
+fi
+
 if is_port_busy "$USER_PORT"; then
     echo "ВНИМАНИЕ: Выбранный порт $USER_PORT сейчас занят! / WARNING: Selected port $USER_PORT is busy!"
 fi
