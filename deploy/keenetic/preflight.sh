@@ -87,11 +87,11 @@ if command -v lighttpd >/dev/null 2>&1 && [ -f /opt/etc/lighttpd/lighttpd.conf ]
         echo "Current Lighttpd config validation: FAIL (details suppressed)"
     fi
 fi
-section "Dedicated FPTN panel port check (8080-8090)"
+section "Dedicated FPTN panel port check (1111-1120)"
 if command -v netstat >/dev/null 2>&1; then
     _first_free=""
-    _p=8080
-    while [ "$_p" -le 8090 ]; do
+    _p=1111
+    while [ "$_p" -le 1120 ]; do
         _port_lines=$(netstat -tuln 2>/dev/null | grep -E "[:.]\${_p}[[:space:]]" || true)
         _config_lines=$(grep -R -E "(:|[[:space:]])\${_p}([[:space:]]|[;}]|$)" /opt/etc/lighttpd/lighttpd.conf /opt/etc/lighttpd/conf.d 2>/dev/null | grep -v '^[[:space:]]*#' || true)
         if [ -n "$_port_lines" ]; then
@@ -107,7 +107,7 @@ if command -v netstat >/dev/null 2>&1; then
     if [ -n "$_first_free" ]; then
         echo "First candidate port for FPTN: $_first_free (installer will recheck before changes)."
     else
-        echo "No candidate port in 8080-8090 appears free; choose another port manually."
+        echo "No candidate port in 1111-1120 appears free; choose another port manually."
     fi
 else
     echo "netstat is unavailable; port availability must be checked during installation."
