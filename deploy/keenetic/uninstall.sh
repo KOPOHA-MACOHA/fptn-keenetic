@@ -26,8 +26,8 @@ if [ -f "/opt/etc/fptn-client.conf" ]; then
     fi
 fi
 
-# Remember panel ownership before removing its config files. Do not restart a
-# shared Lighttpd instance when this install never managed the FPTN panel.
+# Remember panel ownership before removing its dedicated Lighttpd socket config.
+# Restart the shared Lighttpd only when the FPTN panel was actually installed.
 FPTN_PANEL_PRESENT=no
 if [ -f "/opt/etc/fptn-web-panel.installed" ] || [ -f "/opt/etc/lighttpd/conf.d/85-fptn.conf" ]; then
     FPTN_PANEL_PRESENT=yes
@@ -60,7 +60,7 @@ fi
 rm -rf /opt/share/www/fptn
 
 # 3. Перезапуск веб-сервера Lighttpd / Restart Lighttpd
-echo "[3/5] Перезапуск веб-сервера Lighttpd / Restart Lighttpd"
+echo "[3/5] Удаление отдельного listener FPTN и перезапуск Lighttpd / Remove FPTN listener and restart Lighttpd"
 if [ "$FPTN_PANEL_PRESENT" = "yes" ] && [ -x "/opt/etc/init.d/S80lighttpd" ]; then
     /opt/etc/init.d/S80lighttpd restart >/dev/null 2>&1 || true
 else
