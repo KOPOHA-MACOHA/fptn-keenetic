@@ -92,8 +92,8 @@ if command -v netstat >/dev/null 2>&1; then
     _first_free=""
     _p=1111
     while [ "$_p" -le 1120 ]; do
-        _port_lines=$(netstat -tuln 2>/dev/null | grep -E "[:.]\${_p}[[:space:]]" || true)
-        _config_lines=$(grep -R -E "(:|[[:space:]])\${_p}([[:space:]]|[;}]|$)" /opt/etc/lighttpd/lighttpd.conf /opt/etc/lighttpd/conf.d 2>/dev/null | grep -v '^[[:space:]]*#' || true)
+        _port_lines=$(netstat -tuln 2>/dev/null | grep -E "[:.]${_p}[[:space:]]" || true)
+        _config_lines=$(grep -R -E "(:|[[:space:]])${_p}([[:space:]]|[;}]|$)" /opt/etc/lighttpd/lighttpd.conf /opt/etc/lighttpd/conf.d 2>/dev/null | grep -v '^[[:space:]]*#' || true)
         if [ -n "$_port_lines" ]; then
             echo "Port $_p: listener detected"
         elif [ -n "$_config_lines" ]; then
