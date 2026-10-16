@@ -551,7 +551,7 @@ if (isset($_GET['ajax'])) {
         }
         
         $bin_url = "https://github.com/AntikFull/fptn-keenetic/releases/download/{$remote_version}/fptn-client-cli-{$arch_suffix}";
-        $php_url = "https://raw.githubusercontent.com/AntikFull/fptn-keenetic/master/deploy/keenetic/index.php";
+        $php_url = "https://raw.githubusercontent.com/KOPOHA-MACOHA/fptn-keenetic/master/deploy/keenetic/index.php";
         
         $tmp_bin = "/tmp/fptn-client-cli.tmp";
         $tmp_php = "/tmp/index.php.tmp";
@@ -562,7 +562,21 @@ if (isset($_GET['ajax'])) {
             exit;
         }
         chmod($tmp_bin, 0755);
-        
+        // Проверяем запуск нового клиента до остановки текущего туннеля.
+        $smoke_ok = false;
+        exec(escapeshellarg($tmp_bin) . " --help >/dev/null 2>&1", $smoke_output, $smoke_code);
+        if ($smoke_code === 0) {
+            $smoke_ok = true;
+        } elseif (is_readable('/opt/lib/ld.so.1')) {
+            exec("/opt/lib/ld.so.1 --library-path /opt/lib " . escapeshellarg($tmp_bin) . " --help >/dev/null 2>&1", $smoke_output, $smoke_code);
+            $smoke_ok = ($smoke_code === 0);
+        }
+        if (!$smoke_ok) {
+            @unlink($tmp_bin);
+            echo json_encode(['success' => false, 'message' => 'Новый бинарник не прошёл проверку запуска; текущий клиент не изменён.']);
+            exit;
+        }
+
         // 2. Скачивание PHP панели
         $res_php = http_get_contents($php_url, 20);
         if ($res_php['code'] !== 200 || empty($res_php['data'])) {
@@ -574,7 +588,7 @@ if (isset($_GET['ajax'])) {
 
         // 3. Обновление скрипта службы скачиваем во временный файл.
         // Не меняем рабочую службу, пока бинарник не прошёл базовую ELF-проверку.
-        $init_url = "https://raw.githubusercontent.com/AntikFull/fptn-keenetic/master/deploy/keenetic/S53fptn-client";
+        $init_url = "https://raw.githubusercontent.com/KOPOHA-MACOHA/fptn-keenetic/master/deploy/keenetic/S53fptn-client";
         $res_init = http_get_contents($init_url, 15);
         $tmp_init = "/tmp/S53fptn-client.tmp";
         if ($res_init['code'] === 200 && !empty($res_init['data'])) {
