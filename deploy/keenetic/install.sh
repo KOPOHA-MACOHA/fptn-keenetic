@@ -920,9 +920,10 @@ if [ "$INSTALL_WEB_PANEL" = "yes" ]; then
 else
     echo "  Веб-панель не устанавливалась. Lighttpd/PHP не менялись."
     echo "  Web panel was skipped; Lighttpd/PHP were not changed."
-    echo "  Служба включена для автозапуска, но туннель пока не стартовал."
-    echo "  Service is enabled for boot, but the tunnel has not been started yet."
-    echo "  Для ручного запуска: /opt/etc/init.d/S53fptn-client start"
+    echo "  Служба оставлена отключённой до отдельного подтверждения теста."
+    echo "  Service remains disabled until runtime testing is explicitly approved."
+    echo "  Туннель не запущен и не стартует автоматически после перезагрузки."
+    echo "  The tunnel is not running and will not auto-start after reboot."
 fi
 echo ""
 echo "  Маршрутизация трафика / Traffic Routing:"
