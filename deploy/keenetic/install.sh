@@ -613,7 +613,6 @@ EOF
         echo "Прежний фрагмент конфигурации восстановлен, но установку нужно проверить вручную."
         exit 1
     fi
-    touch /opt/etc/fptn-web-panel.installed
     
     # 7. Установка файлов веб-панели / Install Web Panel
     echo ""
@@ -631,6 +630,7 @@ EOF
         fi
     fi
     chmod 644 "$WWW_DIR/index.php"
+    touch /opt/etc/fptn-web-panel.installed
     
     
 else
