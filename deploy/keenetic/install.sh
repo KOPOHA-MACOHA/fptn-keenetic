@@ -636,17 +636,25 @@ if [ "$INSTALL_WEB_PANEL" = "yes" ]; then
         FPTN_LIGHTTPD_HAD_CONFIG=yes
     fi
     
-    # Проверяем, задан ли уже server.port в существующих конфигах Lighttpd
+    # Validate the existing shared web server before changing any of its files.
+    if ! lighttpd -tt -f /opt/etc/lighttpd/lighttpd.conf >/dev/null 2>&1; then
+        echo "ОШИБКА: текущая конфигурация Lighttpd не проходит проверку."
+        echo "Установщик не будет менять общий веб-сервер. Сначала исправьте текущую конфигурацию."
+        exit 1
+    fi
+
+    # Detect an existing listener so the panel can share it at /fptn/ instead
+    # of introducing a second listener or colliding with an already-used port.
     SERVER_PORT_DEFINED=no
     for _cf in /opt/etc/lighttpd/lighttpd.conf /opt/etc/lighttpd/conf.d/*.conf; do
         if [ -f "$_cf" ] && [ "$_cf" != "$LIGHTTPD_CONF_DIR/85-fptn.conf" ]; then
-            if grep -oE "^\s*server\.port\s*[:=]" "$_cf" >/dev/null 2>&1; then
+            if grep -E '^[[:space:]]*server[.]port[[:space:]]*[:=]' "$_cf" >/dev/null 2>&1; then
                 SERVER_PORT_DEFINED=yes
                 break
             fi
         fi
     done
-    
+
     FPTN_LIGHTTPD_TOUCHED=yes
     if [ "$SERVER_PORT_DEFINED" = "yes" ]; then
         cat << EOF > "$LIGHTTPD_CONF_DIR/85-fptn.conf"
