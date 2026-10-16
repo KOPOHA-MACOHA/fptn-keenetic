@@ -295,6 +295,26 @@ if command -v ndmc >/dev/null 2>&1; then
     fi
 fi
 
+# FPTN routing depends on Keenetic's ndmc CLI. Fail before opkg changes packages.
+if ! command -v ndmc >/dev/null 2>&1; then
+    echo "ОШИБКА: ndmc не найден. Это установщик для KeeneticOS; установка отменена до изменения Entware."
+    echo "ERROR: ndmc is missing; aborting before modifying Entware packages."
+    exit 1
+fi
+
+# Do not silently reuse a non-FPTN interface; the earlier check should have
+# rejected it, but fail closed if the command output is ambiguous.
+if [ -z "$_preflight_if" ]; then
+    _preflight_if=$(ndmc -c "show interface $USER_KTUN" 2>&1 || true)
+fi
+if [ -n "$_preflight_if" ] &&
+   ! echo "$_preflight_if" | grep -qiE "error|no such|not found" &&
+   ! echo "$_preflight_if" | grep -qi "Fptn"; then
+    echo "ОШИБКА: не удалось безопасно подтвердить принадлежность $USER_KTUN к FPTN."
+    echo "Установка остановлена до изменений Entware."
+    exit 1
+fi
+
 # Check storage before opkg can install PHP/Lighttpd and their dependencies.
 _FREE_KB=$(df -Pk /opt 2>/dev/null | awk 'NR == 2 {print $4}')
 case "$_FREE_KB" in
