@@ -3,6 +3,9 @@ name: Validate Keenetic scripts
 on:
   # Validation is a PR check; a separate push run would duplicate it.
   pull_request:
+    paths:
+      - 'deploy/keenetic/**'
+      - '.github/workflows/validate-keenetic.yml'
   workflow_dispatch:
 
 # Keep only the newest validation for this pull request.
@@ -24,5 +27,6 @@ jobs:
       - name: POSIX shell syntax
         run: |
           sh -n deploy/keenetic/install.sh
+          sh -n deploy/keenetic/uninstall.sh
           sh -n deploy/keenetic/S53fptn-client
           sh -n deploy/keenetic/fptn-monitor.sh
