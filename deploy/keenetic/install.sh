@@ -1,5 +1,6 @@
 #!/bin/sh
 # Интерактивный установщик FPTN-клиента для Keenetic (Entware) / Interactive FPTN Client Installer for Keenetic
+# Use --no-web-panel for a client-only install that does not install/restart Lighttpd or PHP.
 # Автор / Author: Antigravity
 # Поддержка языков / Language: Русский (RU) & English (EN)
 
@@ -10,8 +11,11 @@ export LANG="${LANG:-ru_RU.UTF-8}"
 export LC_ALL="${LC_ALL:-ru_RU.UTF-8}"
 
 echo "==========================================================="
-echo "  Установка FPTN-клиента и веб-панели для Keenetic (Entware)"
-echo "  Installing FPTN Client & Web Panel for Keenetic (Entware)"
+echo "  Установка FPTN-клиента для Keenetic (Entware)"
+echo "  Installing FPTN Client for Keenetic (Entware)"
+if [ "$INSTALL_WEB_PANEL" = "no" ]; then
+    echo "  Режим без веб-панели / Client-only mode"
+fi
 echo "==========================================================="
 echo ""
 
@@ -61,9 +65,14 @@ if [ "$1" = "--uninstall" ] || [ "$1" = "-u" ] || [ "$1" = "uninstall" ]; then
     rm -rf /opt/share/www/fptn
 
     echo "[3/5] Обновление конфигурации Lighttpd / Updating Lighttpd..."
-    if [ -f "/opt/etc/init.d/S80lighttpd" ]; then
-        /opt/etc/init.d/S80lighttpd restart >/dev/null 2>&1 || true
+    if [ -f "/opt/etc/fptn-web-panel.installed" ] || [ -f "/opt/etc/lighttpd/conf.d/85-fptn.conf" ]; then
+        if [ -f "/opt/etc/init.d/S80lighttpd" ]; then
+            /opt/etc/init.d/S80lighttpd restart >/dev/null 2>&1 || true
+        fi
+    else
+        echo "Панель FPTN не обнаружена; Lighttpd не перезапускается."
     fi
+    rm -f /opt/etc/fptn-web-panel.installed
 
     echo "[4/5] Очистка старых записей cron / Cleaning legacy crontab entries..."
     # Задание могло быть добавлено и в /opt/etc/crontab, и в пользовательский
@@ -286,6 +295,12 @@ else
     printf "Введите токен подписки FPTN (опционально) / Enter FPTN subscription token (optional): "
     read_input USER_TOKEN ""
     USER_TOKEN="$REPLY"
+fi
+
+if [ "$INSTALL_WEB_PANEL" = "no" ] && [ -z "$USER_TOKEN" ]; then
+    echo "ОШИБКА: режим без веб-панели требует токен подписки FPTN."
+    echo "ERROR: client-only mode requires an FPTN subscription token."
+    exit 1
 fi
 
 echo ""
@@ -598,6 +613,7 @@ if [ "$INSTALL_WEB_PANEL" = "yes" ]; then
         echo "Прежний фрагмент конфигурации восстановлен, но установку нужно проверить вручную."
         exit 1
     fi
+    touch /opt/etc/fptn-web-panel.installed
     
     # 7. Установка файлов веб-панели / Install Web Panel
     echo ""
