@@ -26,7 +26,7 @@ jobs:
       - name: PHP syntax
         run: php -l deploy/keenetic/index.php
       - name: Validate GitHub Actions workflows
-        run: docker run --rm -v "${{ github.workspace }}:/repo" -w /repo rhysd/actionlint:latest
+        run: docker run --rm -v "${{ github.workspace }}:/repo" -w /repo rhysd/actionlint:latest .github/workflows/upstream-release-sync.yml
       - name: POSIX shell syntax
         run: |
           sh -n deploy/keenetic/install.sh
