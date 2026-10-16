@@ -92,17 +92,20 @@ download_file() {
     _dest="$2"
     _timeout="${3:-120}"
 
-    if curl -sSL --connect-timeout 10 --max-time "$_timeout" -o "$_dest" "$_url"; then
+    if curl -sSL --fail --connect-timeout 10 --max-time "$_timeout" -o "$_dest" "$_url"; then
         if [ -s "$_dest" ]; then return 0; fi
     fi
 
-    # Пробуем каскад зеркал / Try mirrors fallback
-    for _prefix in "https://ghproxy.net/" "https://ghfast.top/" "https://cdn.jsdelivr.net/gh/AntikFull/fptn-keenetic@master/"; do
+    # Прокси получают полный исходный URL. Не подставляем зеркало upstream:
+    # оно могло бы вернуть старую панель/службу вместо файлов этого форка.
+    for _prefix in "https://ghproxy.net/" "https://ghfast.top/"; do
         _mirror_url="${_prefix}${_url}"
-        if curl -sSL --connect-timeout 10 --max-time "$_timeout" -o "$_dest" "$_mirror_url"; then
+        rm -f "$_dest"
+        if curl -sSL --fail --connect-timeout 10 --max-time "$_timeout" -o "$_dest" "$_mirror_url"; then
             if [ -s "$_dest" ]; then return 0; fi
         fi
     done
+    rm -f "$_dest"
     return 1
 }
 
