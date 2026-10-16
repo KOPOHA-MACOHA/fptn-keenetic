@@ -829,6 +829,24 @@ chmod 755 /opt/etc/init.d/S53fptn-client
 # 5. Создание и настройка TUN-интерфейса в KeeneticOS / Register TUN Interface in KeeneticOS
 FPTN_CREATED_INTERFACE=no
 FPTN_INSTALL_COMMITTED=no
+# ndmc may print command errors while returning exit status 0 on some KeeneticOS
+# builds. Treat both a non-zero status and explicit error text as failure so the
+# rollback trap can run instead of silently committing a partial interface.
+ndmc_apply() {
+    _ndmc_command="$1"
+    _ndmc_output=$(ndmc -c "$_ndmc_command" 2>&1) || {
+        echo "ОШИБКА: команда KeeneticOS не выполнена: $_ndmc_command"
+        [ -z "$_ndmc_output" ] || echo "$_ndmc_output"
+        return 1
+    }
+    if echo "$_ndmc_output" | grep -qiE '(^|[^[:alpha:]])(error|invalid|failed|unknown command|not found)([^[:alpha:]]|$)'; then
+        echo "ОШИБКА: KeeneticOS отклонил команду: $_ndmc_command"
+        echo "$_ndmc_output"
+        return 1
+    fi
+    return 0
+}
+
 EXISTING_IF=$(ndmc -c "show interface $USER_KTUN" 2>&1 || true)
 if [ -n "$EXISTING_IF" ] && ! echo "$EXISTING_IF" | grep -qiE "error|no such|not found"; then
     if ! echo "$EXISTING_IF" | grep -qi "Fptn"; then
@@ -839,31 +857,28 @@ if [ -n "$EXISTING_IF" ] && ! echo "$EXISTING_IF" | grep -qiE "error|no such|not
 else
     FPTN_CREATED_INTERFACE=yes
     echo "Creating KeeneticOS interface $USER_KTUN..."
-    ndmc -c "interface $USER_KTUN" >/dev/null 2>&1 || true
-    ndmc -c "interface $USER_KTUN type OpkgTun" >/dev/null 2>&1 || true
+    ndmc_apply "interface $USER_KTUN"
+    ndmc_apply "interface $USER_KTUN type OpkgTun"
 fi
 
-ndmc -c "interface $USER_KTUN description Fptn" >/dev/null 2>&1 || true
-ndmc -c "interface $USER_KTUN security-level public" >/dev/null 2>&1 || true
-ndmc -c "interface $USER_KTUN ip address $USER_TUN_IP 255.255.255.255" >/dev/null 2>&1 || true
-ndmc -c "interface $USER_KTUN ip mtu 1360" >/dev/null 2>&1 || true
-ndmc -c "interface $USER_KTUN ip global 50000" >/dev/null 2>&1 || true
-ndmc -c "interface $USER_KTUN ip tcp adjust-mss pmtu" >/dev/null 2>&1 || true
-ndmc -c "access-list _WEBADMIN_$USER_KTUN permit ip 0.0.0.0 0.0.0.0 0.0.0.0 0.0.0.0" >/dev/null 2>&1 || true
-ndmc -c "interface $USER_KTUN ip access-group _WEBADMIN_$USER_KTUN in" >/dev/null 2>&1 || true
-ndmc -c "access-list _WEBADMIN_$USER_KTUN auto-delete" >/dev/null 2>&1 || true
-ndmc -c "interface $USER_KTUN up" >/dev/null 2>&1 || true
+ndmc_apply "interface $USER_KTUN description Fptn"
+ndmc_apply "interface $USER_KTUN security-level public"
+ndmc_apply "interface $USER_KTUN ip address $USER_TUN_IP 255.255.255.255"
+ndmc_apply "interface $USER_KTUN ip mtu 1360"
+ndmc_apply "interface $USER_KTUN ip global 50000"
+ndmc_apply "interface $USER_KTUN ip tcp adjust-mss pmtu"
+ndmc_apply "access-list _WEBADMIN_$USER_KTUN permit ip 0.0.0.0 0.0.0.0 0.0.0.0 0.0.0.0"
+ndmc_apply "interface $USER_KTUN ip access-group _WEBADMIN_$USER_KTUN in"
+ndmc_apply "access-list _WEBADMIN_$USER_KTUN auto-delete"
+ndmc_apply "interface $USER_KTUN up"
 
 VERIFY_IF=$(ndmc -c "show interface $USER_KTUN" 2>&1 || true)
-if ! echo "$VERIFY_IF" | grep -qi "Fptn"; then
+if echo "$VERIFY_IF" | grep -qiE "error|no such|not found" || ! echo "$VERIFY_IF" | grep -qi "Fptn"; then
     echo "ОШИБКА: не удалось подтвердить создание/настройку $USER_KTUN."
-    echo "Установка остановлена; новая запись интерфейса будет удалена, если возможно."
+    echo "Установка остановлена; автоматический откат будет выполнен, если это возможно."
     exit 1
 fi
-if ! ndmc -c "system configuration save" >/dev/null 2>&1; then
-    echo "ОШИБКА: KeeneticOS не подтвердил сохранение конфигурации."
-    exit 1
-fi
+ndmc_apply "system configuration save"
 echo "FPTN interface $USER_KTUN configured and saved."
 
 # 8. Восстановление выполняется встроенным supervisor в fptn-client-cli.
