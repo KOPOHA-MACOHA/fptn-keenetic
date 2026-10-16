@@ -16,7 +16,7 @@ This is the next step before testing FPTN. It collects a snapshot only; it does 
 **Do not run yet unless you are ready to collect the baseline.** Pin the script to the reviewed immutable commit so the branch can move without changing what is executed:
 
 ```sh
-COMMIT="3a772176f38810925e8e8a0a21aba4696aab533a"
+COMMIT="73d5de4cdf2e56fbcd963634eca54ed24493e6ad"
 URL="https://raw.githubusercontent.com/KOPOHA-MACOHA/fptn-keenetic/$COMMIT/deploy/keenetic/preflight.sh"
 curl -fsSL "$URL" -o /tmp/fptn-preflight.sh && sh /tmp/fptn-preflight.sh
 ```
@@ -33,7 +33,7 @@ For the later install, use an immutable commit so the installer and downloaded c
 
 ```sh
 # EXAMPLE ONLY — DO NOT RUN YET.
-COMMIT="43dc546955b492a350a06993fe165c2274b0abe3"
+COMMIT="8b162a061bb65e9743a6fae92440130342f87e49"
 BASE="https://raw.githubusercontent.com/KOPOHA-MACOHA/fptn-keenetic/$COMMIT"
 curl -fsSL "$BASE/deploy/keenetic/install.sh" -o /tmp/fptn-install.sh
 FPTN_GITHUB_RAW_BASE="$BASE" sh /tmp/fptn-install.sh
