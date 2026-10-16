@@ -5,7 +5,8 @@ on:
   pull_request:
     paths:
       - 'deploy/keenetic/**'
-      - '.github/workflows/validate-keenetic.yml'
+      - '.github/workflows/**'
+      - 'docs/**'
   workflow_dispatch:
 
 # Keep only the newest validation for this pull request.
@@ -24,6 +25,8 @@ jobs:
           php-version: "8.2"
       - name: PHP syntax
         run: php -l deploy/keenetic/index.php
+      - name: Validate GitHub Actions workflows
+        run: docker run --rm -v "${{ github.workspace }}:/repo" -w /repo rhysd/actionlint:latest
       - name: POSIX shell syntax
         run: |
           sh -n deploy/keenetic/install.sh
