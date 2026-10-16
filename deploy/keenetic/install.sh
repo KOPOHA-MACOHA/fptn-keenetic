@@ -732,10 +732,8 @@ shell_quote() {
 echo ""
 echo "[6/8] Сохранение конфигурации FPTN / Saving FPTN configuration..."
 CONF_PATH="/opt/etc/fptn-client.conf"
+# Client-only mode stays disabled until the user explicitly approves runtime testing.
 CONF_ENABLED="no"
-if [ "$INSTALL_WEB_PANEL" = "no" ]; then
-    CONF_ENABLED="yes"
-fi
 CONF_SERVERS=""
 CONF_PASS=""
 CONF_TUN_IPV6=""
