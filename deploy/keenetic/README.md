@@ -79,7 +79,7 @@ system configuration save
 Пример фрагмента `/opt/etc/lighttpd/conf.d/85-fptn.conf`:
 ```lighttpd
 server.modules += ( "mod_cgi" )
-$SERVER["socket"] == ":8080" {
+$SERVER["socket"] == ":1111" {
     server.document-root = "/opt/share/www/fptn"
     index-file.names = ( "index.php", "index.html" )
     cgi.assign = ( ".php" => "/opt/bin/php-cgi" )
@@ -87,7 +87,7 @@ $SERVER["socket"] == ":8080" {
 }
 ```
 
-После установки панель открывается по адресу `http://192.168.1.1:8080/` (или по выбранному свободному порту). Не публикуйте этот интерфейс в интернет; используйте его из доверенной локальной сети.
+После установки панель открывается по адресу `http://192.168.1.1:1111/` (или по выбранному свободному порту). Не публикуйте этот интерфейс в интернет; используйте его из доверенной локальной сети.
 
 ### Шаг 5. Файлы панели и службы
 1. Создайте папку `/opt/share/www/fptn/` и скопируйте туда файл [index.php](index.php).
@@ -203,12 +203,12 @@ system configuration save
 
 ### Step 4. Configure Lighttpd Web Server
 
-The installer adds a dedicated Lighttpd socket on port `8080` (or chooses a free alternative if the port is occupied). The existing listener and document root used by SmartDNS and other tools remain unchanged. The panel is served from `/opt/share/www/fptn` and opens at `http://192.168.1.1:8080/` (or the selected port).
+The installer adds a dedicated Lighttpd socket on port `1111` (or chooses a free alternative if the port is occupied). The existing listener and document root used by SmartDNS and other tools remain unchanged. The panel is served from `/opt/share/www/fptn` and opens at `http://192.168.1.1:1111/` (or the selected port).
 
 Example `/opt/etc/lighttpd/conf.d/85-fptn.conf`:
 ```lighttpd
 server.modules += ( "mod_cgi" )
-$SERVER["socket"] == ":8080" {
+$SERVER["socket"] == ":1111" {
     server.document-root = "/opt/share/www/fptn"
     index-file.names = ( "index.php", "index.html" )
     cgi.assign = ( ".php" => "/opt/bin/php-cgi" )
