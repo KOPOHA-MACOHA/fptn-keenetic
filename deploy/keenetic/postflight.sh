@@ -22,7 +22,7 @@ LIGHTTPD_CONF="/opt/etc/lighttpd/lighttpd.conf"
 FPTN_LIGHTTPD_CONF="/opt/etc/lighttpd/conf.d/85-fptn.conf"
 
 if [ -f "$CONF" ]; then
-    if grep -Eq "^ENABLED=['\"]?no['\"]?$" "$CONF"; then
+    if grep -Eq '^ENABLED=no$' "$CONF"; then
         pass "FPTN config explicitly has ENABLED=no"
     else
         fail "FPTN config is missing or ENABLED is not exactly no; do not start the tunnel"
@@ -69,7 +69,7 @@ if command -v ndmc >/dev/null 2>&1 && [ -f "$CONF" ]; then
                 fail "Interface $KTUN exists but is not marked FPTN"
             fi
         else
-            if grep -Eq "^ENABLED=['\\"]?no['\\"]?$" "$CONF"; then
+            if grep -Eq '^ENABLED=no$' "$CONF"; then
                 pass "KeeneticOS interface creation deferred because FPTN is disabled"
             else
                 fail "Could not confirm KeeneticOS interface $KTUN"
