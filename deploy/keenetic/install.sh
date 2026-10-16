@@ -479,7 +479,7 @@ rollback_failed_install() {
     fi
     if [ -f "$BACKUP_DIR/etc/init.d/S53fptn-client" ] &&
        [ -f "$BACKUP_DIR/etc/fptn-client.conf" ] &&
-       grep -Eq "^ENABLED=['\\"]?yes['\\"]?$" "$BACKUP_DIR/etc/fptn-client.conf"; then
+       grep -q "^ENABLED='yes'$" "$BACKUP_DIR/etc/fptn-client.conf"; then
         /opt/etc/init.d/S53fptn-client start >/dev/null 2>&1 || echo "WARNING: previous FPTN service could not be restarted after rollback."
     fi
     echo "Rollback attempt finished. Entware packages already installed by opkg are not automatically removed."
