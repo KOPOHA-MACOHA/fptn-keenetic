@@ -597,6 +597,15 @@ else
 fi
 chmod 644 "$WWW_DIR/index.php"
 
+# Serialize arbitrary values as valid POSIX shell single-quoted literals before
+# writing a config file that will later be sourced. This is essential for tokens
+# and other values containing quotes, dollar signs, backticks or whitespace.
+shell_quote() {
+    printf "'"
+    printf "%s" "$1" | sed "s/'/'\\\\''/g"
+    printf "'"
+}
+
 # 8. Создание/Обновление файла конфигурации FPTN службы / Save Configuration
 echo ""
 echo "[6/8] Сохранение конфигурации FPTN / Saving FPTN configuration..."
@@ -646,29 +655,29 @@ fi
 
 cat << EOF > "$CONF_PATH"
 # Конфигурация клиента FPTN (Создано автоматически / Auto-generated)
-ENABLED="${CONF_ENABLED:-no}"
-TOKEN="$USER_TOKEN"
-PREFERRED_SERVER="${CONF_SERVERS}"
-TUN_INTERFACE="$USER_LTUN"
+ENABLED=$(shell_quote "${CONF_ENABLED:-no}")
+TOKEN=$(shell_quote "$USER_TOKEN")
+PREFERRED_SERVER=$(shell_quote "$CONF_SERVERS")
+TUN_INTERFACE=$(shell_quote "$USER_LTUN")
 # Должно совпадать с адресом, назначенным интерфейсу в KeeneticOS (шаг [3/7]).
-TUN_ADDRESS="$USER_TUN_IP"
-TUN_IPV6_ADDRESS="${CONF_TUN_IPV6}"
-TUN_MTU="${CONF_TUN_MTU}"
-GATEWAY_IP="${CONF_GATEWAY_IP}"
-GATEWAY_IPV6="${CONF_GATEWAY_IPV6}"
-OUT_NETWORK_INTERFACE="${CONF_OUT_IFACE}"
-SERVER_SNI="${CONF_SNI}"
-BYPASS_METHOD="${CONF_BYPASS}"
-BLACKLIST_DOMAINS="${CONF_BLACKLIST}"
-EXCLUDE_TUNNEL_NETWORKS="${CONF_EXCLUDE}"
-INCLUDE_TUNNEL_NETWORKS="${CONF_INCLUDE}"
-SPLIT_TUNNEL="${CONF_SPLIT}"
-SPLIT_TUNNEL_MODE="${CONF_SPLIT_MODE}"
-SPLIT_TUNNEL_DOMAINS="${CONF_SPLIT_DOMAINS}"
-DISABLE_AUTO_FALLBACK="${CONF_DISABLE_FALLBACK}"
-MAX_FULL_RESTARTS="${CONF_MAX_RESTARTS}"
-STARTUP_RETRY_DELAY="${CONF_STARTUP_DELAY}"
-WEB_PASSWORD="${CONF_PASS}"
+TUN_ADDRESS=$(shell_quote "$USER_TUN_IP")
+TUN_IPV6_ADDRESS=$(shell_quote "$CONF_TUN_IPV6")
+TUN_MTU=$(shell_quote "$CONF_TUN_MTU")
+GATEWAY_IP=$(shell_quote "$CONF_GATEWAY_IP")
+GATEWAY_IPV6=$(shell_quote "$CONF_GATEWAY_IPV6")
+OUT_NETWORK_INTERFACE=$(shell_quote "$CONF_OUT_IFACE")
+SERVER_SNI=$(shell_quote "$CONF_SNI")
+BYPASS_METHOD=$(shell_quote "$CONF_BYPASS")
+BLACKLIST_DOMAINS=$(shell_quote "$CONF_BLACKLIST")
+EXCLUDE_TUNNEL_NETWORKS=$(shell_quote "$CONF_EXCLUDE")
+INCLUDE_TUNNEL_NETWORKS=$(shell_quote "$CONF_INCLUDE")
+SPLIT_TUNNEL=$(shell_quote "$CONF_SPLIT")
+SPLIT_TUNNEL_MODE=$(shell_quote "$CONF_SPLIT_MODE")
+SPLIT_TUNNEL_DOMAINS=$(shell_quote "$CONF_SPLIT_DOMAINS")
+DISABLE_AUTO_FALLBACK=$(shell_quote "$CONF_DISABLE_FALLBACK")
+MAX_FULL_RESTARTS=$(shell_quote "$CONF_MAX_RESTARTS")
+STARTUP_RETRY_DELAY=$(shell_quote "$CONF_STARTUP_DELAY")
+WEB_PASSWORD=$(shell_quote "$CONF_PASS")
 EOF
 chmod 600 "$CONF_PATH"
 
