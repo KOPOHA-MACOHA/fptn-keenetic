@@ -1,0 +1,92 @@
+name: Track upstream FPTN releases
+
+on:
+  schedule:
+    - cron: "17 9 * * 1"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+  pull-requests: write
+  issues: write
+
+concurrency:
+  group: upstream-release-sync
+  cancel-in-progress: false
+
+jobs:
+  sync-upstream-release:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out fork default branch
+        uses: actions/checkout@v4
+        with:
+          ref: master
+          fetch-depth: 0
+
+      - name: Find and merge latest upstream release
+        id: sync
+        shell: bash
+        run: |
+          set -euo pipefail
+          tag="$(curl -fsSL https://api.github.com/repos/fptn-project/fptn/releases/latest | python3 -c 'import json,sys; print(json.load(sys.stdin)["tag_name"])')"
+          if [[ -z "$tag" || ! "$tag" =~ ^[0-9]+\.[0-9]+\.[0-9]+([.-][0-9A-Za-z.-]+)?$ ]]; then
+            echo "Unexpected upstream release tag: $tag" >&2
+            exit 1
+          fi
+          echo "tag=$tag" >> "$GITHUB_OUTPUT"
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git remote add upstream https://github.com/fptn-project/fptn.git
+          git fetch --no-tags upstream "refs/tags/$tag:refs/tags/upstream/$tag"
+
+          if git merge-base --is-ancestor "refs/tags/upstream/$tag" HEAD; then
+            echo "result=already-current" >> "$GITHUB_OUTPUT"
+            echo "Upstream release $tag is already an ancestor of master."
+            exit 0
+          fi
+
+          branch="automation/upstream-fptn-$tag"
+          echo "branch=$branch" >> "$GITHUB_OUTPUT"
+          git switch -c "$branch"
+          if git merge --no-edit --no-ff "refs/tags/upstream/$tag"; then
+            git push origin "$branch"
+            echo "result=pull-request" >> "$GITHUB_OUTPUT"
+          else
+            git merge --abort || true
+            echo "result=conflict" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Open upstream sync pull request
+        if: steps.sync.outputs.result == 'pull-request'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ steps.sync.outputs.tag }}
+          BRANCH: ${{ steps.sync.outputs.branch }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          existing="$(gh pr list --base master --head "$BRANCH" --state open --json number --jq 'length')"
+          if [ "$existing" -eq 0 ]; then
+            gh pr create \
+              --base master \
+              --head "$BRANCH" \
+              --title "Sync upstream FPTN release $TAG" \
+              --body "Automated merge of upstream release [`$TAG`](https://github.com/fptn-project/fptn/releases/tag/$TAG) into the Keenetic fork.\n\nThis PR does not install or deploy anything to a router. Review conflicts and Keenetic-specific changes, run CI, then merge only after the MIPS/Entware binary and web-panel integration have been checked."
+          fi
+
+      - name: Report upstream merge conflicts
+        if: steps.sync.outputs.result == 'conflict'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ steps.sync.outputs.tag }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          title="Upstream FPTN sync conflict: $TAG"
+          existing="$(gh issue list --state open --search "\"$title\" in:title" --json number --jq 'length')"
+          if [ "$existing" -eq 0 ]; then
+            gh issue create \
+              --title "$title" \
+              --body "The scheduled upstream sync could not merge release [$TAG](https://github.com/fptn-project/fptn/releases/tag/$TAG) cleanly into the fork's `master`. No branch was pushed and no files were changed on the default branch. Resolve the merge manually, preserving Keenetic/Entware-specific installer, service, web-panel and build changes. Do not deploy the result to a router until the MIPS binary is rebuilt and validated."
+          fi
