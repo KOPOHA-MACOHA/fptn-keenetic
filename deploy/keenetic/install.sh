@@ -398,6 +398,8 @@ for _backup_file in \
     /opt/bin/fptn-client-cli \
     /opt/bin/fptn-client-cli.pre-update.bak \
     /opt/bin/fptn-client-cli.tmp \
+    /opt/bin/fptn-postflight.sh \
+    /opt/bin/fptn-postflight.sh.tmp \
     /opt/etc/fptn-client.conf \
     /opt/etc/fptn-version \
     /opt/etc/fptn-servers.json \
@@ -430,10 +432,13 @@ FPTN_LIGHTTPD_TOUCHED=no
 rollback_failed_install() {
     [ "$FPTN_INSTALL_COMMITTED" = "yes" ] && return 0
     echo "Установка прервалась: восстанавливаю файлы FPTN из $BACKUP_DIR."
+    ROLLBACK_RESTORE_FAILED=no
     for _restore_file in \
         /opt/bin/fptn-client-cli \
         /opt/bin/fptn-client-cli.pre-update.bak \
         /opt/bin/fptn-client-cli.tmp \
+        /opt/bin/fptn-postflight.sh \
+        /opt/bin/fptn-postflight.sh.tmp \
         /opt/etc/fptn-client.conf \
         /opt/etc/fptn-version \
         /opt/etc/fptn-servers.json \
@@ -446,10 +451,22 @@ rollback_failed_install() {
         _rel=${_restore_file#/opt/}
         _saved="$BACKUP_DIR/$_rel"
         if [ -f "$_saved" ]; then
-            mkdir -p "$(dirname "$_restore_file")"
-            cp -p "$_saved" "$_restore_file" || echo "WARNING: could not restore $_restore_file"
+            _restore_dir=$(dirname "$_restore_file")
+            _restore_tmp=$(mktemp "${_restore_file}.rollback.XXXXXX" 2>/dev/null) || _restore_tmp=""
+            if [ -n "$_restore_tmp" ] &&
+               cp -p "$_saved" "$_restore_tmp" &&
+               mv -f "$_restore_tmp" "$_restore_file"; then
+                :
+            else
+                [ -z "$_restore_tmp" ] || rm -f "$_restore_tmp" 2>/dev/null || true
+                ROLLBACK_RESTORE_FAILED=yes
+                echo "WARNING: could not safely restore $_restore_file from $_saved"
+            fi
         else
-            rm -f "$_restore_file"
+            if ! rm -f "$_restore_file"; then
+                ROLLBACK_RESTORE_FAILED=yes
+                echo "WARNING: could not remove newly created file $_restore_file"
+            fi
         fi
     done
     rmdir /opt/share/www/fptn 2>/dev/null || true
@@ -457,21 +474,33 @@ rollback_failed_install() {
         _rollback_if=$(ndmc -c "show interface $USER_KTUN" 2>&1 || true)
         if [ -n "$_rollback_if" ] && ! echo "$_rollback_if" | grep -qiE "error|no such|not found"; then
             # The preflight confirmed this interface did not exist before this run.
+            # Bring it down before deleting it, then verify deletion before claiming success.
+            ndmc -c "interface $USER_KTUN down" >/dev/null 2>&1 || true
             ndmc -c "no interface $USER_KTUN" >/dev/null 2>&1 || true
-            ndmc -c "system configuration save" >/dev/null 2>&1 || true
-            echo "Removed newly created interface during failed-install cleanup."
+            _rollback_after=$(ndmc -c "show interface $USER_KTUN" 2>&1 || true)
+            if [ -z "$_rollback_after" ] || echo "$_rollback_after" | grep -qiE "error|no such|not found"; then
+                ndmc -c "system configuration save" >/dev/null 2>&1 || echo "WARNING: could not save KeeneticOS config after interface removal."
+                echo "Removed newly created interface during failed-install cleanup."
+            else
+                echo "WARNING: newly created interface $USER_KTUN still appears to exist after rollback attempt."
+                echo "$_rollback_after"
+            fi
         fi
     fi
     if [ "$FPTN_LIGHTTPD_TOUCHED" = "yes" ] && [ -x /opt/etc/init.d/S80lighttpd ]; then
-        if lighttpd -tt -f /opt/etc/lighttpd/lighttpd.conf >/dev/null 2>&1; then
+        if [ "$ROLLBACK_RESTORE_FAILED" = "yes" ]; then
+            echo "WARNING: at least one file restore failed; leaving shared Lighttpd running to avoid applying a possibly partial rollback."
+        elif lighttpd -tt -f /opt/etc/lighttpd/lighttpd.conf >/dev/null 2>&1; then
             /opt/etc/init.d/S80lighttpd restart >/dev/null 2>&1 || echo "WARNING: Lighttpd restart failed after restoring its config."
         else
             echo "WARNING: restored Lighttpd config did not validate; not restarting shared Lighttpd."
         fi
     fi
-    if [ -f "$BACKUP_DIR/etc/init.d/S53fptn-client" ] &&
-       [ -f "$BACKUP_DIR/etc/fptn-client.conf" ] &&
-       grep -q "^ENABLED='yes'$" "$BACKUP_DIR/etc/fptn-client.conf"; then
+    if [ "$ROLLBACK_RESTORE_FAILED" = "yes" ]; then
+        echo "WARNING: rollback was incomplete. Do not assume the router is back to its previous state; inspect the files listed above and use the saved snapshot."
+    elif [ -f "$BACKUP_DIR/etc/init.d/S53fptn-client" ] &&
+         [ -f "$BACKUP_DIR/etc/fptn-client.conf" ] &&
+         grep -q "^ENABLED='yes'$" "$BACKUP_DIR/etc/fptn-client.conf"; then
         /opt/etc/init.d/S53fptn-client start >/dev/null 2>&1 || echo "WARNING: previous FPTN service could not be restarted after rollback."
     fi
     echo "Rollback attempt finished. Entware packages already installed by opkg are not automatically removed."
@@ -709,7 +738,9 @@ shell_quote() {
 echo ""
 echo "[6/8] Сохранение конфигурации FPTN / Saving FPTN configuration..."
 CONF_PATH="/opt/etc/fptn-client.conf"
-# Client-only mode stays disabled until the user explicitly approves runtime testing.
+# Every install/update stays disabled until the user explicitly enables runtime testing.
+# Do not inherit ENABLED=yes from an older config: this installer must never start
+# or re-enable the tunnel implicitly.
 CONF_ENABLED="no"
 CONF_SERVERS=""
 CONF_PASS=""
@@ -732,7 +763,7 @@ CONF_STARTUP_DELAY="5"
 
 if [ -f "$CONF_PATH" ]; then
     . "$CONF_PATH" 2>/dev/null || true
-    CONF_ENABLED=$(grep -E "^ENABLED=" "$CONF_PATH" | cut -d'=' -f2- | tr -d "\"'" || echo "no")
+    # Intentionally do not read old ENABLED; it is forced to "no" above.
     CONF_SERVERS=$(grep -E "^PREFERRED_SERVER=" "$CONF_PATH" | cut -d'=' -f2- | tr -d "\"'" || echo "")
     CONF_PASS=$(grep -E "^WEB_PASSWORD=" "$CONF_PATH" | cut -d'=' -f2- | tr -d "\"'" || echo "")
     CONF_TUN_IPV6="${TUN_IPV6_ADDRESS:-}"
@@ -826,45 +857,87 @@ else
 fi
 chmod 755 /opt/etc/init.d/S53fptn-client
 
-# 5. Создание и настройка TUN-интерфейса в KeeneticOS / Register TUN Interface in KeeneticOS
-FPTN_CREATED_INTERFACE=no
-FPTN_INSTALL_COMMITTED=no
-EXISTING_IF=$(ndmc -c "show interface $USER_KTUN" 2>&1 || true)
-if [ -n "$EXISTING_IF" ] && ! echo "$EXISTING_IF" | grep -qiE "error|no such|not found"; then
-    if ! echo "$EXISTING_IF" | grep -qi "Fptn"; then
-        echo "ОШИБКА: $USER_KTUN уже существует и не помечен как FPTN; настройки не изменены."
+# Install the read-only postflight verifier so it is available immediately after
+# setup. Prefer the checked-out copy; otherwise fetch from the same pinned source
+# as the installer. A failed download aborts and the EXIT trap restores prior files.
+POSTFLIGHT_SOURCE_DIR=$(dirname "$0")
+POSTFLIGHT_PATH="/opt/bin/fptn-postflight.sh"
+POSTFLIGHT_TMP="/opt/bin/fptn-postflight.sh.tmp"
+if [ -f "$POSTFLIGHT_SOURCE_DIR/postflight.sh" ]; then
+    cp "$POSTFLIGHT_SOURCE_DIR/postflight.sh" "$POSTFLIGHT_TMP"
+else
+    if ! download_file "${GITHUB_RAW_BASE}/deploy/keenetic/postflight.sh" "$POSTFLIGHT_TMP" 30; then
+        echo "Ошибка: не удалось получить postflight verifier; установка отменена."
         exit 1
     fi
-    echo "Reusing existing FPTN interface $USER_KTUN."
+fi
+if ! sh -n "$POSTFLIGHT_TMP"; then
+    echo "Ошибка: postflight verifier не прошёл проверку синтаксиса; установка отменена."
+    exit 1
+fi
+chmod 755 "$POSTFLIGHT_TMP"
+mv -f "$POSTFLIGHT_TMP" "$POSTFLIGHT_PATH"
+
+# 5. Создание и настройка TUN-интерфейса в KeeneticOS / Register TUN Interface in KeeneticOS
+# The client config is always written with ENABLED=no during installation.
+# Do not create or persist a KeeneticOS interface for an inactive tunnel. The
+# init script configures it only when the user explicitly starts FPTN.
+if [ "${CONF_ENABLED:-no}" = "yes" ]; then
+    # Keep FPTN_CREATED_INTERFACE from the rollback state above; resetting it here
+    # would prevent cleanup if a later ndmc command failed.
+    # ndmc may print command errors while returning exit status 0 on some KeeneticOS
+    # builds. Treat both a non-zero status and explicit error text as failure.
+    ndmc_apply() {
+        _ndmc_command="$1"
+        _ndmc_output=$(ndmc -c "$_ndmc_command" 2>&1) || {
+            echo "ОШИБКА: команда KeeneticOS не выполнена: $_ndmc_command"
+            [ -z "$_ndmc_output" ] || echo "$_ndmc_output"
+            return 1
+        }
+        if echo "$_ndmc_output" | grep -qiE '(^|[^[:alpha:]])(error|invalid|failed|unknown command|not found|ошибк|не найден|неизвестн)([^[:alpha:]]|$)'; then
+            echo "ОШИБКА: KeeneticOS отклонил команду: $_ndmc_command"
+            echo "$_ndmc_output"
+            return 1
+        fi
+        return 0
+    }
+
+    EXISTING_IF=$(ndmc -c "show interface $USER_KTUN" 2>&1 || true)
+    if [ -n "$EXISTING_IF" ] && ! echo "$EXISTING_IF" | grep -qiE "error|no such|not found"; then
+        if ! echo "$EXISTING_IF" | grep -qi "Fptn"; then
+            echo "ОШИБКА: $USER_KTUN уже существует и не помечен как FPTN; настройки не изменены."
+            exit 1
+        fi
+        echo "Reusing existing FPTN interface $USER_KTUN."
+    else
+        FPTN_CREATED_INTERFACE=yes
+        echo "Creating KeeneticOS interface $USER_KTUN..."
+        ndmc_apply "interface $USER_KTUN"
+        ndmc_apply "interface $USER_KTUN type OpkgTun"
+    fi
+
+    ndmc_apply "interface $USER_KTUN description Fptn"
+    ndmc_apply "interface $USER_KTUN security-level public"
+    ndmc_apply "interface $USER_KTUN ip address $USER_TUN_IP 255.255.255.255"
+    ndmc_apply "interface $USER_KTUN ip mtu 1360"
+    ndmc_apply "interface $USER_KTUN ip global 50000"
+    ndmc_apply "interface $USER_KTUN ip tcp adjust-mss pmtu"
+    ndmc_apply "access-list _WEBADMIN_$USER_KTUN permit ip 0.0.0.0 0.0.0.0 0.0.0.0 0.0.0.0"
+    ndmc_apply "interface $USER_KTUN ip access-group _WEBADMIN_$USER_KTUN in"
+    ndmc_apply "access-list _WEBADMIN_$USER_KTUN auto-delete"
+    ndmc_apply "interface $USER_KTUN up"
+
+    VERIFY_IF=$(ndmc -c "show interface $USER_KTUN" 2>&1 || true)
+    if echo "$VERIFY_IF" | grep -qiE "error|no such|not found" || ! echo "$VERIFY_IF" | grep -qi "Fptn"; then
+        echo "ОШИБКА: не удалось подтвердить создание/настройку $USER_KTUN."
+        echo "Установка остановлена; автоматический откат будет выполнен, если это возможно."
+        exit 1
+    fi
+    ndmc_apply "system configuration save"
+    echo "FPTN interface $USER_KTUN configured and saved."
 else
-    FPTN_CREATED_INTERFACE=yes
-    echo "Creating KeeneticOS interface $USER_KTUN..."
-    ndmc -c "interface $USER_KTUN" >/dev/null 2>&1 || true
-    ndmc -c "interface $USER_KTUN type OpkgTun" >/dev/null 2>&1 || true
+    echo "FPTN is disabled; deferring KeeneticOS interface creation until explicit start."
 fi
-
-ndmc -c "interface $USER_KTUN description Fptn" >/dev/null 2>&1 || true
-ndmc -c "interface $USER_KTUN security-level public" >/dev/null 2>&1 || true
-ndmc -c "interface $USER_KTUN ip address $USER_TUN_IP 255.255.255.255" >/dev/null 2>&1 || true
-ndmc -c "interface $USER_KTUN ip mtu 1360" >/dev/null 2>&1 || true
-ndmc -c "interface $USER_KTUN ip global 50000" >/dev/null 2>&1 || true
-ndmc -c "interface $USER_KTUN ip tcp adjust-mss pmtu" >/dev/null 2>&1 || true
-ndmc -c "access-list _WEBADMIN_$USER_KTUN permit ip 0.0.0.0 0.0.0.0 0.0.0.0 0.0.0.0" >/dev/null 2>&1 || true
-ndmc -c "interface $USER_KTUN ip access-group _WEBADMIN_$USER_KTUN in" >/dev/null 2>&1 || true
-ndmc -c "access-list _WEBADMIN_$USER_KTUN auto-delete" >/dev/null 2>&1 || true
-ndmc -c "interface $USER_KTUN up" >/dev/null 2>&1 || true
-
-VERIFY_IF=$(ndmc -c "show interface $USER_KTUN" 2>&1 || true)
-if ! echo "$VERIFY_IF" | grep -qi "Fptn"; then
-    echo "ОШИБКА: не удалось подтвердить создание/настройку $USER_KTUN."
-    echo "Установка остановлена; новая запись интерфейса будет удалена, если возможно."
-    exit 1
-fi
-if ! ndmc -c "system configuration save" >/dev/null 2>&1; then
-    echo "ОШИБКА: KeeneticOS не подтвердил сохранение конфигурации."
-    exit 1
-fi
-echo "FPTN interface $USER_KTUN configured and saved."
 
 # 8. Восстановление выполняется встроенным supervisor в fptn-client-cli.
 echo ""
