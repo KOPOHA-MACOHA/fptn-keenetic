@@ -380,6 +380,23 @@ case "$_FREE_KB" in
         ;;
 esac
 
+# Router has no swap; reject dangerously low available RAM before opkg/binary changes.
+_MEM_AVAILABLE_KB=$(awk '/^MemAvailable:/ {print $2; found=1} END {if (!found) print 0}' /proc/meminfo 2>/dev/null)
+case "$_MEM_AVAILABLE_KB" in
+    ''|*[!0-9]*) _MEM_AVAILABLE_KB=0 ;;
+esac
+if [ "$_MEM_AVAILABLE_KB" -gt 0 ]; then
+    if [ "$_MEM_AVAILABLE_KB" -lt 32768 ]; then
+        echo "ОШИБКА: доступно меньше 32 MiB памяти ($_MEM_AVAILABLE_KB KiB); установка отменена до изменений."
+        echo "ERROR: less than 32 MiB RAM is available; aborting before changes."
+        exit 1
+    elif [ "$_MEM_AVAILABLE_KB" -lt 65536 ]; then
+        echo "ПРЕДУПРЕЖДЕНИЕ: доступно меньше 64 MiB RAM ($_MEM_AVAILABLE_KB KiB). Клиент может увеличить нагрузку на память."
+    fi
+else
+    echo "Предупреждение: MemAvailable не удалось прочитать; автоматическая проверка RAM пропущена."
+fi
+
 # Create a private rollback snapshot before opkg or persistent KeeneticOS changes.
 # This is a backup, not an automatic full-config restore mechanism.
 BACKUP_STAMP=$(date +%Y%m%d-%H%M%S)
@@ -459,6 +476,11 @@ rollback_failed_install() {
         else
             echo "WARNING: restored Lighttpd config did not validate; not restarting shared Lighttpd."
         fi
+    fi
+    if [ -f "$BACKUP_DIR/etc/init.d/S53fptn-client" ] &&
+       [ -f "$BACKUP_DIR/etc/fptn-client.conf" ] &&
+       grep -Eq "^ENABLED=['\\"]?yes['\\"]?$" "$BACKUP_DIR/etc/fptn-client.conf"; then
+        /opt/etc/init.d/S53fptn-client start >/dev/null 2>&1 || echo "WARNING: previous FPTN service could not be restarted after rollback."
     fi
     echo "Rollback attempt finished. Entware packages already installed by opkg are not automatically removed."
 }
