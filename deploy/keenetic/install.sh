@@ -298,9 +298,21 @@ DOWNLOAD_SUCCESS=no
 for _src_url in "$BIN_RAW_URL" "$BIN_RELEASE_URL" "$BIN_LATEST_URL"; do
     if download_file "$_src_url" "/opt/bin/fptn-client-cli.tmp" 180; then
         if check_binary_valid "/opt/bin/fptn-client-cli.tmp"; then
-            mv "/opt/bin/fptn-client-cli.tmp" "/opt/bin/fptn-client-cli"
-            DOWNLOAD_SUCCESS=yes
-            break
+            chmod +x "/opt/bin/fptn-client-cli.tmp"
+            # Сначала проверяем именно временный файл. Рабочий бинарник не трогаем,
+            # пока новая версия не прошла хотя бы один smoke test.
+            if "/opt/bin/fptn-client-cli.tmp" --help >/dev/null 2>&1; then # глушение-обосновано: smoke test справки до замены
+                mv "/opt/bin/fptn-client-cli.tmp" "/opt/bin/fptn-client-cli"
+                DOWNLOAD_SUCCESS=yes
+                break
+            elif [ -r /opt/lib/ld.so.1 ] && /opt/lib/ld.so.1 --library-path /opt/lib /opt/bin/fptn-client-cli.tmp --help >/dev/null 2>&1; then # глушение-обосновано: smoke test через Entware loader
+                mv "/opt/bin/fptn-client-cli.tmp" "/opt/bin/fptn-client-cli"
+                DOWNLOAD_SUCCESS=yes
+                break
+            else
+                echo "Бинарник не прошёл smoke test; текущая версия сохранена. / Binary failed smoke test; current version preserved."
+                rm -f "/opt/bin/fptn-client-cli.tmp"
+            fi
         else
             rm -f "/opt/bin/fptn-client-cli.tmp"
         fi
@@ -309,20 +321,10 @@ done
 
 if [ "$DOWNLOAD_SUCCESS" != "yes" ]; then
     rm -f "/opt/bin/fptn-client-cli.tmp"
-    echo "Ошибка: Не удалось скачать проверенный бинарный файл. Существующий бинарник не изменён. / Error: Failed to download a validated binary. Existing binary was preserved."
+    echo "Ошибка: Не удалось скачать и запустить проверенный бинарный файл. Существующий бинарник не изменён. / Error: Failed to download and run a validated binary. Existing binary was preserved."
     exit 1
 fi
-chmod +x /opt/bin/fptn-client-cli
 echo "$REMOTE_VER" > /opt/etc/fptn-version
-
-# Дымовая проверка запуска бинарника
-if /opt/bin/fptn-client-cli --help >/dev/null 2>&1; then # глушение-обосновано: тестовый запуск справки бинарника
-    echo "Бинарник успешно проверен / Binary verification passed."
-elif [ -r /opt/lib/ld.so.1 ] && /opt/lib/ld.so.1 --library-path /opt/lib /opt/bin/fptn-client-cli --help >/dev/null 2>&1; then # глушение-обосновано: тестовый запуск через loader
-    echo "Бинарник проверен через Entware loader / Binary verified with Entware loader."
-else
-    echo "Внимание: Прямой запуск бинарника завершился с предупреждением / Notice: Binary smoke check returned non-zero."
-fi
 
 # 5. Создание и настройка TUN-интерфейса в KeeneticOS / Register TUN Interface in KeeneticOS
 echo ""
