@@ -29,8 +29,10 @@ GITHUB_RAW_BASE="https://raw.githubusercontent.com/KOPOHA-MACOHA/fptn-keenetic/m
 if [ "$1" = "--uninstall" ] || [ "$1" = "-u" ] || [ "$1" = "uninstall" ]; then
     echo "Запуск процесса удаления FPTN... / Starting FPTN uninstallation..."
     
-    KTUN_NAME="OpkgTun1"
+    KTUN_NAME=""
+    FPTN_CONFIG_PRESENT=no
     if [ -f "/opt/etc/fptn-client.conf" ]; then
+        FPTN_CONFIG_PRESENT=yes
         . "/opt/etc/fptn-client.conf" 2>/dev/null || true
         if [ -n "$TUN_INTERFACE" ]; then
             KTUN_NAME=$(echo "$TUN_INTERFACE" | sed -E 's/opkgtun([0-9]+)/OpkgTun\1/i')
@@ -47,7 +49,14 @@ if [ "$1" = "--uninstall" ] || [ "$1" = "-u" ] || [ "$1" = "uninstall" ]; then
     pkill -9 -f "fptn-watchdog" >/dev/null 2>&1 || true
 
     echo "[2/5] Удаление бинарников и файлов веб-панели / Removing binary & web files..."
-    rm -f /opt/bin/fptn-client-cli /opt/bin/fptn-watchdog.sh /opt/bin/fptn-ndm-setup.sh /opt/etc/fptn-client.conf /opt/etc/init.d/S53fptn-client /opt/etc/fptn-watchdog.sh /opt/etc/lighttpd/conf.d/85-fptn.conf
+    rm -f /opt/bin/fptn-client-cli /opt/bin/fptn-watchdog.sh /opt/bin/fptn-ndm-setup.sh /opt/etc/fptn-client.conf /opt/etc/init.d/S53fptn-client /opt/etc/fptn-watchdog.sh
+    # Restore the pre-FPTN Lighttpd fragment if the installer saved one.
+    if [ -f /opt/etc/lighttpd/conf.d/85-fptn.conf.pre-fptn.bak ]; then
+        cp -p /opt/etc/lighttpd/conf.d/85-fptn.conf.pre-fptn.bak /opt/etc/lighttpd/conf.d/85-fptn.conf
+        rm -f /opt/etc/lighttpd/conf.d/85-fptn.conf.pre-fptn.bak
+    else
+        rm -f /opt/etc/lighttpd/conf.d/85-fptn.conf
+    fi
     rm -rf /opt/share/www/fptn
 
     echo "[3/5] Обновление конфигурации Lighttpd / Updating Lighttpd..."
@@ -67,10 +76,20 @@ if [ "$1" = "--uninstall" ] || [ "$1" = "-u" ] || [ "$1" = "uninstall" ]; then
         fi
     done
 
-    echo "[5/5] Удаление интерфейса $KTUN_NAME в KeeneticOS / Removing $KTUN_NAME interface..."
-    if which ndmc >/dev/null 2>&1; then
-        ndmc -c "no interface $KTUN_NAME" 2>/dev/null || true
-        ndmc -c "system configuration save" 2>/dev/null || true
+    if [ -n "$KTUN_NAME" ] && [ "$FPTN_CONFIG_PRESENT" = "yes" ]; then
+        echo "[5/5] Проверка интерфейса FPTN $KTUN_NAME / Checking FPTN interface..."
+        if command -v ndmc >/dev/null 2>&1; then
+            _uninstall_if=$(ndmc -c "show interface $KTUN_NAME" 2>&1 || true)
+            if echo "$_uninstall_if" | grep -qi "Fptn"; then
+                ndmc -c "no interface $KTUN_NAME" 2>/dev/null || true
+                ndmc -c "system configuration save" 2>/dev/null || true
+            else
+                echo "Интерфейс $KTUN_NAME не помечен как FPTN; оставляю его нетронутым."
+                echo "Interface not marked FPTN; leaving it untouched."
+            fi
+        fi
+    else
+        echo "[5/5] Конфигурация FPTN не найдена; интерфейсы KeeneticOS не изменяются."
     fi
 
     echo ""
