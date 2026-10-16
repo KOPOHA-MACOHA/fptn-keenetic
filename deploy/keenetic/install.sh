@@ -195,11 +195,11 @@ read_input() {
 # services keep their current listener; FPTN gets an additional socket.
 USER_PORT=""
 if [ "$INSTALL_WEB_PANEL" = "yes" ]; then
-    DEFAULT_PORT=8080
+    DEFAULT_PORT=1111
     if is_port_busy "$DEFAULT_PORT" ||
-       grep -R -E '(:|[[:space:]])8080([[:space:]]|[;}]|$)' /opt/etc/lighttpd/lighttpd.conf /opt/etc/lighttpd/conf.d 2>/dev/null | grep -v '^[[:space:]]*#' >/dev/null 2>&1; then
-        echo "Порт 8080 уже занят или упомянут в конфигурации Lighttpd."
-        CHECK_P=8081
+       grep -R -E "(:|[[:space:]])${DEFAULT_PORT}([[:space:]]|[;}]|$)" /opt/etc/lighttpd/lighttpd.conf /opt/etc/lighttpd/conf.d 2>/dev/null | grep -v '^[[:space:]]*#' >/dev/null 2>&1; then
+        echo "Порт $DEFAULT_PORT уже занят или упомянут в конфигурации Lighttpd."
+        CHECK_P=$((DEFAULT_PORT + 1))
         while is_port_busy "$CHECK_P" ||
               grep -R -E "(:|[[:space:]])${CHECK_P}([[:space:]]|[;}]|$)" /opt/etc/lighttpd/lighttpd.conf /opt/etc/lighttpd/conf.d 2>/dev/null | grep -v '^[[:space:]]*#' >/dev/null 2>&1; do
             CHECK_P=$((CHECK_P + 1))
