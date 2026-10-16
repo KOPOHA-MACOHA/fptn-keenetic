@@ -38,13 +38,10 @@ if [ -x /opt/bin/opkg ]; then
         sed -E 's/ - .*$/ [version redacted]/'
 fi
 
-section "Current CPU summary"
-# Keep this short; do not dump full process command lines (they may contain tokens).
-if command -v top >/dev/null 2>&1; then
-    top -bn1 2>/dev/null | head -n 5
-else
-    echo "top not available; skipped."
-fi
+section "Current load and CPU counters"
+# Do not run top: some implementations print full process arguments, which may contain tokens.
+cat /proc/loadavg 2>/dev/null
+grep '^cpu ' /proc/stat 2>/dev/null
 
 section "Relevant service processes (names only)"
 if command -v pidof >/dev/null 2>&1; then
