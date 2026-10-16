@@ -74,7 +74,7 @@ fi
 section "Lighttpd configuration summary (selected directives only)"
 for _f in /opt/etc/lighttpd/lighttpd.conf /opt/etc/lighttpd/conf.d/*.conf; do
     [ -f "$_f" ] || continue
-    grep -E '^[[:space:]]*server[.](port|bind|document-root)[[:space:]]*[:=]' "$_f" 2>/dev/null |
+    grep -E '^[[:space:]]*server[.](port|bind|document-root)[[:space:]]*[:=]|^[[:space:]]*\\\$SERVER\\["socket"\\]' "$_f" 2>/dev/null |
         sed "s#^#$(_f_label=$(basename "$_f"); printf '%s' "$_f_label") : #"
 done
 for _f in /opt/etc/init.d/S80lighttpd /opt/etc/lighttpd/lighttpd.conf /opt/etc/lighttpd/conf.d/85-fptn.conf; do
