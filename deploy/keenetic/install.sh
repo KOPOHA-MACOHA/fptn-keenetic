@@ -370,8 +370,8 @@ for _src_url in "$BIN_RAW_URL" "$BIN_RELEASE_URL" "$BIN_LATEST_URL"; do
             chmod +x "/opt/bin/fptn-client-cli.tmp"
             # Сначала проверяем именно временный файл. Рабочий бинарник не трогаем,
             # пока новая версия не прошла хотя бы один smoke test.
-            _smoke_output=$("/opt/bin/fptn-client-cli.tmp" --help 2>&1)
-            _smoke_code=$?
+            _smoke_code=0
+            _smoke_output=$("/opt/bin/fptn-client-cli.tmp" --help 2>&1) || _smoke_code=$?
             if [ "$_smoke_code" -eq 0 ]; then
                 _smoke_ok=yes
             elif [ "$_smoke_code" -ge 126 ] || echo "$_smoke_output" | grep -Eqi "not found|exec format error|no such file|error loading shared library|cannot execute"; then
@@ -383,8 +383,8 @@ for _src_url in "$BIN_RAW_URL" "$BIN_RELEASE_URL" "$BIN_LATEST_URL"; do
                 echo "Предупреждение: --help вернул код $_smoke_code без явной ошибки загрузчика. / Warning: --help returned $_smoke_code without a loader error."
             fi
             if [ "$_smoke_ok" != "yes" ] && [ -r /opt/lib/ld.so.1 ]; then
-                _smoke_output=$(/opt/lib/ld.so.1 --library-path /opt/lib /opt/bin/fptn-client-cli.tmp --help 2>&1)
-                _smoke_code=$?
+                _smoke_code=0
+                _smoke_output=$(/opt/lib/ld.so.1 --library-path /opt/lib /opt/bin/fptn-client-cli.tmp --help 2>&1) || _smoke_code=$?
                 if [ "$_smoke_code" -eq 0 ] || { [ "$_smoke_code" -lt 126 ] && ! echo "$_smoke_output" | grep -Eqi "not found|exec format error|no such file|error loading shared library|cannot execute"; }; then
                     _smoke_ok=yes
                 fi
