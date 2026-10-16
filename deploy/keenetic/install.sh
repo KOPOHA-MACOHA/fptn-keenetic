@@ -448,7 +448,7 @@ rollback_failed_install() {
         _saved="$BACKUP_DIR/$_rel"
         if [ -f "$_saved" ]; then
             _restore_dir=$(dirname "$_restore_file")
-            _restore_tmp="$_restore_file.rollback.$"
+            _restore_tmp="${_restore_file}.rollback."$
             if mkdir -p "$_restore_dir" &&
                cp -p "$_saved" "$_restore_tmp" &&
                mv -f "$_restore_tmp" "$_restore_file"; then
@@ -734,7 +734,9 @@ shell_quote() {
 echo ""
 echo "[6/8] Сохранение конфигурации FPTN / Saving FPTN configuration..."
 CONF_PATH="/opt/etc/fptn-client.conf"
-# Client-only mode stays disabled until the user explicitly approves runtime testing.
+# Every install/update stays disabled until the user explicitly enables runtime testing.
+# Do not inherit ENABLED=yes from an older config: this installer must never start
+# or re-enable the tunnel implicitly.
 CONF_ENABLED="no"
 CONF_SERVERS=""
 CONF_PASS=""
@@ -757,7 +759,7 @@ CONF_STARTUP_DELAY="5"
 
 if [ -f "$CONF_PATH" ]; then
     . "$CONF_PATH" 2>/dev/null || true
-    CONF_ENABLED=$(grep -E "^ENABLED=" "$CONF_PATH" | cut -d'=' -f2- | tr -d "\"'" || echo "no")
+    # Intentionally do not read old ENABLED; it is forced to "no" above.
     CONF_SERVERS=$(grep -E "^PREFERRED_SERVER=" "$CONF_PATH" | cut -d'=' -f2- | tr -d "\"'" || echo "")
     CONF_PASS=$(grep -E "^WEB_PASSWORD=" "$CONF_PATH" | cut -d'=' -f2- | tr -d "\"'" || echo "")
     CONF_TUN_IPV6="${TUN_IPV6_ADDRESS:-}"
@@ -852,8 +854,8 @@ fi
 chmod 755 /opt/etc/init.d/S53fptn-client
 
 # 5. Создание и настройка TUN-интерфейса в KeeneticOS / Register TUN Interface in KeeneticOS
-FPTN_CREATED_INTERFACE=no
-FPTN_INSTALL_COMMITTED=no
+# Keep FPTN_CREATED_INTERFACE from the rollback state above; resetting it here
+# would prevent cleanup if a later ndmc command failed.
 # ndmc may print command errors while returning exit status 0 on some KeeneticOS
 # builds. Treat both a non-zero status and explicit error text as failure so the
 # rollback trap can run instead of silently committing a partial interface.
