@@ -71,8 +71,20 @@ if command -v ndmc >/dev/null 2>&1; then
     done
 fi
 
-section "Lighttpd configuration presence (no contents)"
+section "Lighttpd configuration summary (selected directives only)"
+for _f in /opt/etc/lighttpd/lighttpd.conf /opt/etc/lighttpd/conf.d/*.conf; do
+    [ -f "$_f" ] || continue
+    grep -E '^[[:space:]]*server[.](port|bind|document-root)[[:space:]]*[:=]' "$_f" 2>/dev/null |
+        sed "s#^#$(_f_label=$(basename "$_f"); printf '%s' "$_f_label") : #"
+done
 for _f in /opt/etc/init.d/S80lighttpd /opt/etc/lighttpd/lighttpd.conf /opt/etc/lighttpd/conf.d/85-fptn.conf; do
     [ ! -e "$_f" ] || printf 'present: %s\n' "$_f"
 done
+if command -v lighttpd >/dev/null 2>&1 && [ -f /opt/etc/lighttpd/lighttpd.conf ]; then
+    if lighttpd -tt -f /opt/etc/lighttpd/lighttpd.conf >/dev/null 2>&1; then
+        echo "Current Lighttpd config validation: PASS"
+    else
+        echo "Current Lighttpd config validation: FAIL (details suppressed)"
+    fi
+fi
 echo "Read-only preflight complete. No changes were made."
