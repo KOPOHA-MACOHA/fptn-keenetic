@@ -87,14 +87,27 @@ if command -v lighttpd >/dev/null 2>&1 && [ -f /opt/etc/lighttpd/lighttpd.conf ]
         echo "Current Lighttpd config validation: FAIL (details suppressed)"
     fi
 fi
-section "Dedicated FPTN panel port check (8080)"
+section "Dedicated FPTN panel port check (8080-8090)"
 if command -v netstat >/dev/null 2>&1; then
-    _port_lines=$(netstat -tuln 2>/dev/null | grep -E '[:.]8080[[:space:]]' || true)
-    if [ -n "$_port_lines" ]; then
-        echo "Port 8080 appears to have an existing listener:"
-        printf '%s\n' "$_port_lines"
+    _first_free=""
+    _p=8080
+    while [ "$_p" -le 8090 ]; do
+        _port_lines=$(netstat -tuln 2>/dev/null | grep -E "[:.]\${_p}[[:space:]]" || true)
+        _config_lines=$(grep -R -E "(:|[[:space:]])\${_p}([[:space:]]|[;}]|$)" /opt/etc/lighttpd/lighttpd.conf /opt/etc/lighttpd/conf.d 2>/dev/null | grep -v '^[[:space:]]*#' || true)
+        if [ -n "$_port_lines" ]; then
+            echo "Port $_p: listener detected"
+        elif [ -n "$_config_lines" ]; then
+            echo "Port $_p: referenced in Lighttpd configuration"
+        else
+            echo "Port $_p: no listener/config reference detected"
+            [ -n "$_first_free" ] || _first_free="$_p"
+        fi
+        _p=$((_p + 1))
+    done
+    if [ -n "$_first_free" ]; then
+        echo "First candidate port for FPTN: $_first_free (installer will recheck before changes)."
     else
-        echo "No listener on port 8080 was detected (installer will recheck before changes)."
+        echo "No candidate port in 8080-8090 appears free; choose another port manually."
     fi
 else
     echo "netstat is unavailable; port availability must be checked during installation."
