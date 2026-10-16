@@ -10,6 +10,15 @@ set -e
 export LANG="${LANG:-ru_RU.UTF-8}"
 export LC_ALL="${LC_ALL:-ru_RU.UTF-8}"
 
+AUTO_ACCEPT="no"
+INSTALL_WEB_PANEL="yes"
+for _arg in "$@"; do
+    case "$_arg" in
+        -y|--auto) AUTO_ACCEPT="yes" ;;
+        --no-web-panel) INSTALL_WEB_PANEL="no" ;;
+    esac
+done
+
 echo "==========================================================="
 echo "  Установка FPTN-клиента для Keenetic (Entware)"
 echo "  Installing FPTN Client for Keenetic (Entware)"
@@ -45,6 +54,11 @@ if [ "$1" = "--uninstall" ] || [ "$1" = "-u" ] || [ "$1" = "uninstall" ]; then
         fi
     fi
 
+    FPTN_PANEL_PRESENT=no
+    if [ -f "/opt/etc/fptn-web-panel.installed" ] || [ -f "/opt/etc/lighttpd/conf.d/85-fptn.conf" ]; then
+        FPTN_PANEL_PRESENT=yes
+    fi
+
     echo "[1/5] Остановка служб FPTN / Stopping FPTN services..."
     if [ -f "/opt/etc/init.d/S53fptn-client" ]; then
         /opt/etc/init.d/S53fptn-client stop >/dev/null 2>&1 || true
@@ -66,10 +80,8 @@ if [ "$1" = "--uninstall" ] || [ "$1" = "-u" ] || [ "$1" = "uninstall" ]; then
     rm -rf /opt/share/www/fptn
 
     echo "[3/5] Обновление конфигурации Lighttpd / Updating Lighttpd..."
-    if [ -f "/opt/etc/fptn-web-panel.installed" ] || [ -f "/opt/etc/lighttpd/conf.d/85-fptn.conf" ]; then
-        if [ -f "/opt/etc/init.d/S80lighttpd" ]; then
-            /opt/etc/init.d/S80lighttpd restart >/dev/null 2>&1 || true
-        fi
+    if [ "$FPTN_PANEL_PRESENT" = "yes" ] && [ -x "/opt/etc/init.d/S80lighttpd" ]; then
+        /opt/etc/init.d/S80lighttpd restart >/dev/null 2>&1 || true
     else
         echo "Панель FPTN не обнаружена; Lighttpd не перезапускается."
     fi
@@ -169,14 +181,7 @@ is_port_busy() {
     return 1
 }
 
-AUTO_ACCEPT="no"
-INSTALL_WEB_PANEL="yes"
-for _arg in "$@"; do
-    case "$_arg" in
-        -y|--auto) AUTO_ACCEPT="yes" ;;
-        --no-web-panel) INSTALL_WEB_PANEL="no" ;;
-    esac
-done
+
 
 # Функция считывания ввода пользователя с подстановкой по умолчанию
 read_input() {
