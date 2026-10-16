@@ -4,16 +4,9 @@ on:
   push:
     branches: [ master, main ]
     tags: [ '*' ]
-  pull_request:
-    branches: [ master, main ]
-    # Installer/docs-only commits do not need three cross-architecture C++ builds.
-    paths:
-      - 'src/**'
-      - 'depends/**'
-      - '.conan/**'
-      - 'conanfile.py'
-      - 'CMakeLists.txt'
-      - '.github/workflows/build-keenetic.yml'
+  # Cross-architecture builds run on mainline changes or by manual dispatch.
+  # PR checks use the lightweight script validator; dispatch this workflow manually
+  # when a PR changes C++/build inputs to avoid repeated three-architecture builds.
   release:
     types: [ published ]
   workflow_dispatch:
