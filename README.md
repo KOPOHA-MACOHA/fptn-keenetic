@@ -46,7 +46,7 @@ curl -fsSL https://raw.githubusercontent.com/AntikFull/fptn-keenetic/master/depl
 
 After the installation is complete, open the web panel in your browser:
 ```
-http://192.168.1.1:8088/fptn/
+http://192.168.1.1:8080/
 ```
 *(If you selected a different port during installation, use it instead of `8088`)*.
 
