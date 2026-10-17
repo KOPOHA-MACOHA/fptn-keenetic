@@ -734,7 +734,6 @@ if [ "$INSTALL_WEB_PANEL" = "yes" ]; then
     FPTN_LIGHTTPD_TOUCHED=yes
     cat << EOF > "$LIGHTTPD_CONF_DIR/85-fptn.conf"
 # Dedicated FPTN listener; existing SmartDNS/nfqws listener and document root remain unchanged.
-server.modules += ( "mod_cgi" )
 \$SERVER["socket"] == ":$USER_PORT" {
     server.document-root = "/opt/share/www/fptn"
     index-file.names = ( "index.php", "index.html" )
@@ -743,8 +742,10 @@ server.modules += ( "mod_cgi" )
 }
 EOF
 
+    # mod_cgi must be loaded in global scope before cgi.assign is parsed.
+    sed -i '1i server.modules += ( "mod_cgi" )' "$LIGHTTPD_CONF_DIR/85-fptn.conf"
+
     # Validate the complete config before restarting a shared web server.
-    # If invalid, restore the previous FPTN snippet (or remove the new one) and abort.
     if ! lighttpd -tt -f /opt/etc/lighttpd/lighttpd.conf >/dev/null 2>&1; then
         echo "ОШИБКА: конфигурация Lighttpd не прошла проверку; перезапуск отменён."
         if [ "$FPTN_LIGHTTPD_HAD_CONFIG" = "yes" ] && [ -f "$FPTN_LIGHTTPD_BACKUP" ]; then
@@ -755,15 +756,29 @@ EOF
         echo "Проверьте конфиги Lighttpd вручную. Остальные шаги установщика могли уже выполниться."
         exit 1
     fi
-    
+
     echo "Перезапуск Lighttpd / Restarting Lighttpd..."
-    LIGHTTPD_RESTART_LOG="/opt/var/tmp/fptn-lighttpd-restart-$.log"
-    if ! /opt/etc/init.d/S80lighttpd restart >"$LIGHTTPD_RESTART_LOG" 2>&1; then
-        echo "ОШИБКА: Lighttpd не перезапустился. Вывод init-скрипта:"
+    LIGHTTPD_RESTART_LOG="/opt/var/tmp/fptn-lighttpd-restart-$$.log"
+    _lighttpd_restart_rc=0
+    /opt/etc/init.d/S80lighttpd restart >"$LIGHTTPD_RESTART_LOG" 2>&1 || _lighttpd_restart_rc=$?
+
+    # rc.func may return a failure code despite a successful daemon start.
+    # Verify that the requested FPTN listener is actually accepting TCP.
+    _lighttpd_listener=no
+    if netstat -lnt 2>/dev/null | grep -E "[:.]\${USER_PORT}[[:space:]]" >/dev/null 2>&1; then
+        _lighttpd_listener=yes
+    fi
+
+    if [ "$_lighttpd_restart_rc" -ne 0 ] && [ "$_lighttpd_listener" = "yes" ]; then
+        echo "Предупреждение: init-скрипт вернул код $_lighttpd_restart_rc, но порт $USER_PORT слушается; продолжаю."
+        cat "$LIGHTTPD_RESTART_LOG" 2>/dev/null || true
+    elif [ "$_lighttpd_restart_rc" -ne 0 ] || [ "$_lighttpd_listener" != "yes" ]; then
+        echo "ОШИБКА: Lighttpd не поднял listener на порту $USER_PORT. Код init-скрипта: $_lighttpd_restart_rc"
+        echo "Вывод init-скрипта:"
         cat "$LIGHTTPD_RESTART_LOG" 2>/dev/null || true
         echo "Последние записи журнала Lighttpd:"
         tail -n 60 /opt/var/log/lighttpd/error.log 2>/dev/null || true
-        echo "Дополнительная проверка конфигурации:"
+        echo "Проверка конфигурации:"
         lighttpd -tt -f /opt/etc/lighttpd/lighttpd.conf 2>&1 || true
         rm -f "$LIGHTTPD_RESTART_LOG"
         if [ "$FPTN_LIGHTTPD_HAD_CONFIG" = "yes" ] && [ -f "$FPTN_LIGHTTPD_BACKUP" ]; then
@@ -776,7 +791,7 @@ EOF
         exit 1
     fi
     rm -f "$LIGHTTPD_RESTART_LOG"
-    
+
     # 7. Установка файлов веб-панели / Install Web Panel
     echo ""
     echo "[5/7] Копирование файлов веб-панели / Copying web panel files..."
