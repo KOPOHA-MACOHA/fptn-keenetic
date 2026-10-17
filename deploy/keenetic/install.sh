@@ -604,8 +604,8 @@ check_binary_valid() {
 echo "Скачивание бинарника из проверенного релиза / Downloading binary from verified release..."
 # This release is mirrored by .github/workflows/mirror-keenetic-binaries.yml.
 # Pin the expected SHA-256 per architecture; never trust size/ELF magic alone.
-BIN_RELEASE_TAG="fptn-binaries-\${REMOTE_VER}"
-BIN_RELEASE_URL="https://github.com/KOPOHA-MACOHA/fptn-keenetic/releases/download/\${BIN_RELEASE_TAG}/fptn-client-cli-\${ARCH_SUFFIX}"
+BIN_RELEASE_TAG="fptn-binaries-${REMOTE_VER}"
+BIN_RELEASE_URL="https://github.com/KOPOHA-MACOHA/fptn-keenetic/releases/download/${BIN_RELEASE_TAG}/fptn-client-cli-${ARCH_SUFFIX}"
 
 case "$ARCH_SUFFIX" in
     aarch64) EXPECTED_BIN_SHA256="ac86bca380095aabc1923670f427ade2716e8a3a87cfe84b15e16ac0ff801846" ;;
