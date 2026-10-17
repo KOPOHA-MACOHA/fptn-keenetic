@@ -58,6 +58,8 @@ jobs:
         run: |
           curl -fSL --connect-timeout 15 --max-time 240 --retry 5 --retry-all-errors https://musl.cc/mipsel-linux-muslsf-cross.tgz -o /tmp/mipsel-linux-muslsf-cross.tgz
           sudo tar -xzf /tmp/mipsel-linux-muslsf-cross.tgz -C /opt
+          # Fix absolute libtool paths embedded in the relocatable toolchain archive.
+          sudo find /opt/mipsel-linux-muslsf-cross -name '*.la' -type f -exec sed -i 's|/mipsel-linux-muslsf/lib|/opt/mipsel-linux-muslsf-cross/mipsel-linux-muslsf/lib|g' {} +
           echo "/opt/mipsel-linux-muslsf-cross/bin" >> "$GITHUB_PATH"
 
       - name: Cache Conan Packages
