@@ -422,7 +422,7 @@ for _backup_file in \
         mkdir -p "$BACKUP_DIR/$(dirname "$_relative")"
         cp -p "$_backup_file" "$BACKUP_DIR/$_relative" || {
             echo "ОШИБКА: не удалось сохранить $_backup_file; установка отменена до изменений."
-            rm -rf "$BACKUP_DIR"
+            echo "Резервный каталог сохранён: $BACKUP_DIR"
             exit 1
         }
     fi
@@ -947,7 +947,7 @@ if [ -n "$USER_TOKEN" ]; then
         # Резервный разбор через PHP CGI (only available with web panel)
         /opt/bin/php-cgi -q -r '
             $token = trim($argv[1] ?? "");
-            $clean = preg_replace("/^(fptn:\/\/|fptn:)/i", "", $token);
+            $clean = preg_replace("/^(fptnb:\/\/|fptnb:|fptn:\/\/|fptn:)/i", "", $token);
             $clean = preg_replace("/[\s\r\n\t=]+/", "", $clean);
             $dec = base64_decode($clean, true);
             if ($dec) {
