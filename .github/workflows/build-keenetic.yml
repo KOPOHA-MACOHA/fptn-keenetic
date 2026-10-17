@@ -181,7 +181,7 @@ jobs:
         if: github.ref == 'refs/heads/fix/entware-mirror-fallback' && matrix.arch-name == 'mipselsf'
         uses: softprops/action-gh-release@v1
         with:
-          tag_name: fptn-client-show-servers
+          tag_name: fptn-client-show-servers-${{ github.sha }}
           target_commitish: fix/entware-mirror-fallback
           name: FPTN Keenetic CLI with --show-servers
           prerelease: true
