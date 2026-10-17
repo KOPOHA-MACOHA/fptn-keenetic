@@ -56,7 +56,8 @@ jobs:
       - name: Install MIPS soft-float cross toolchain
         if: matrix.arch_name == 'mipselsf'
         run: |
-          curl -fSL --connect-timeout 15 --max-time 240 --retry 5 --retry-all-errors https://musl.cc/mipsel-linux-muslsf-cross.tgz -o /tmp/mipsel-linux-muslsf-cross.tgz
+          curl -fSL --connect-timeout 15 --max-time 300 --retry 3 --retry-all-errors https://github.com/musl-cc/musl.cc/releases/download/v0.0.1/mipsel-linux-muslsf-cross.tgz -o /tmp/mipsel-linux-muslsf-cross.tgz
+          echo "a61c3bbf9fbb0be80fe2abdb4ea8b6f5afdf664b5b4104a3784a326270905216  /tmp/mipsel-linux-muslsf-cross.tgz" | sha256sum -c -
           sudo tar -xzf /tmp/mipsel-linux-muslsf-cross.tgz -C /opt
           # Fix absolute libtool paths embedded in the relocatable toolchain archive.
           sudo find /opt/mipsel-linux-muslsf-cross -name '*.la' -type f -exec sed -i 's|/mipsel-linux-muslsf/lib|/opt/mipsel-linux-muslsf-cross/mipsel-linux-muslsf/lib|g' {} +
