@@ -60,12 +60,13 @@ jobs:
           445233d486e4da2570819307feb83f8e19d2ee7d74564dcd69d8a6bc3c33c748  fptn-client-cli-mipsel
           ef807bfe14e5527d6dd2f8234be13fee0158c9fef89ff2205d8003961d249bea  fptn-client-cli-mipselsf
           EOF
+          : > verify/actual-SHA256SUMS
           while read -r expected filename; do
             echo "Checking ${base}/${filename}"
             curl --fail --location --retry 2 --connect-timeout 15 --max-time 240 \
               --output "verify/${filename}" "${base}/${filename}"
-            printf '%s  %s\n' "$expected" "verify/${filename}" >> verify/actual-SHA256SUMS
             test "$(wc -c < "verify/${filename}")" -gt 1000000
             test "$(od -An -tx1 -N4 "verify/${filename}" | tr -d ' \n')" = "7f454c46"
+            printf '%s  %s\n' "$expected" "$filename" >> verify/actual-SHA256SUMS
           done < verify/SHA256SUMS
           (cd verify && sha256sum -c actual-SHA256SUMS)
