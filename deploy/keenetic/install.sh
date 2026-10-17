@@ -513,8 +513,8 @@ echo "[1/7] Установка зависимостей Entware / Installing Ent
 
 # Use a temporary opkg config with mirrors for the two official Entware feeds.
 # Keep the user's persistent opkg configuration and all custom feeds unchanged.
-OPKG_CONFIG_FILE="/tmp/fptn-opkg-\$\$.conf"
-OPKG_LISTS_DIR="/tmp/fptn-opkg-lists-\$\$"
+OPKG_CONFIG_FILE="/tmp/fptn-opkg-$.conf"
+OPKG_LISTS_DIR="/tmp/fptn-opkg-lists-$"
 mkdir -p "$OPKG_LISTS_DIR"
 write_opkg_mirror_config() {
     _mirror_base="$1"
