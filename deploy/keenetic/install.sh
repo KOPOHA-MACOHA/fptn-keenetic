@@ -724,6 +724,13 @@ if [ "$INSTALL_WEB_PANEL" = "yes" ]; then
         exit 1
     fi
 
+    # Create the document root before starting Lighttpd. Some builds fail startup
+    # when a configured server.document-root does not exist.
+    mkdir -p "/opt/share/www/fptn" || {
+        echo "Ошибка: не удалось создать каталог веб-панели /opt/share/www/fptn."
+        exit 1
+    }
+
     FPTN_LIGHTTPD_TOUCHED=yes
     cat << EOF > "$LIGHTTPD_CONF_DIR/85-fptn.conf"
 # Dedicated FPTN listener; existing SmartDNS/nfqws listener and document root remain unchanged.
@@ -750,17 +757,25 @@ EOF
     fi
     
     echo "Перезапуск Lighttpd / Restarting Lighttpd..."
-    if ! /opt/etc/init.d/S80lighttpd restart; then
-        echo "ОШИБКА: Lighttpd не перезапустился."
+    LIGHTTPD_RESTART_LOG="/opt/var/tmp/fptn-lighttpd-restart-$.log"
+    if ! /opt/etc/init.d/S80lighttpd restart >"$LIGHTTPD_RESTART_LOG" 2>&1; then
+        echo "ОШИБКА: Lighttpd не перезапустился. Вывод init-скрипта:"
+        cat "$LIGHTTPD_RESTART_LOG" 2>/dev/null || true
+        echo "Последние записи журнала Lighttpd:"
+        tail -n 60 /opt/var/log/lighttpd/error.log 2>/dev/null || true
+        echo "Дополнительная проверка конфигурации:"
+        lighttpd -tt -f /opt/etc/lighttpd/lighttpd.conf 2>&1 || true
+        rm -f "$LIGHTTPD_RESTART_LOG"
         if [ "$FPTN_LIGHTTPD_HAD_CONFIG" = "yes" ] && [ -f "$FPTN_LIGHTTPD_BACKUP" ]; then
             cp -p "$FPTN_LIGHTTPD_BACKUP" "$FPTN_LIGHTTPD_CONF"
         else
             rm -f "$FPTN_LIGHTTPD_CONF"
         fi
         /opt/etc/init.d/S80lighttpd restart >/dev/null 2>&1 || true
-        echo "Прежний фрагмент конфигурации восстановлен, но установку нужно проверить вручную."
+        echo "Прежний фрагмент конфигурации восстановлен; установку остановил. Бэкапы сохранены."
         exit 1
     fi
+    rm -f "$LIGHTTPD_RESTART_LOG"
     
     # 7. Установка файлов веб-панели / Install Web Panel
     echo ""
