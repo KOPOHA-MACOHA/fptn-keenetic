@@ -81,14 +81,29 @@ function parse_fptn_token_direct($token) {
         $GLOBALS['fptn_token_parse_diagnostic'] = 'Содержимое декодировано, но это невалидный JSON ('.json_last_error_msg().').';
         return null;
     }
+    // Compatibility with the old panel's locally generated token schema.
+    // Those tokens contain host/port/user fields instead of the official servers array.
+    if ((!isset($json['servers']) || !is_array($json['servers']) || empty($json['servers']))
+        && !empty($json['host']) && !empty($json['port'])) {
+        $json = [
+            'service_name' => $json['service_name'] ?? $json['host'],
+            'username' => $json['username'] ?? ($json['user'] ?? ''),
+            'servers' => [[
+                'name' => $json['host'],
+                'host' => $json['host'],
+                'port' => (int)$json['port'],
+                'md5_fingerprint' => $json['md5_fingerprint'] ?? ''
+            ]]
+        ];
+    }
     if (empty($json['servers']) || !is_array($json['servers'])) {
-        $GLOBALS['fptn_token_parse_diagnostic'] = 'JSON распознан, но в нём нет непустого массива servers; возможно, формат токена изменился.';
+        $GLOBALS['fptn_token_parse_diagnostic'] = 'JSON распознан, но в нём нет непустого массива servers; формат токена не распознан.';
         return null;
     }
     $GLOBALS['fptn_token_parse_diagnostic'] = 'Токен успешно разобран встроенным парсером.';
     return [
         'service_name' => $json['service_name'] ?? 'FPTN',
-        'username' => $json['username'] ?? '',
+        'username' => $json['username'] ?? ($json['user'] ?? ''),
         'servers' => $json['servers']
     ];
 }
@@ -262,14 +277,24 @@ function delete_server_user($username) {
 }
 
 function generate_user_token($host, $port, $username, $password, $fingerprint = '') {
+    // The FPTN client interprets fptnb: as Brotli-compressed data. This panel
+    // creates plain JSON, so use the uncompressed fptn: format and the schema
+    // consumed by ConfigFile::Parse().
     $token_data = [
-        'host' => $host,
-        'port' => (int)$port,
-        'user' => $username,
-        'password' => $password,
-        'md5_fingerprint' => $fingerprint
+        'version' => 1,
+        'service_name' => (string)$host,
+        'username' => (string)$username,
+        'password' => (string)$password,
+        'servers' => [[
+            'name' => (string)$host,
+            'host' => (string)$host,
+            'port' => (int)$port,
+            'md5_fingerprint' => (string)$fingerprint
+        ]],
+        'censored_zone_servers' => []
     ];
-    return 'fptnb:' . base64_encode(json_encode($token_data));
+    $json = json_encode($token_data, JSON_UNESCAPED_SLASHES);
+    return 'fptn:' . rtrim(base64_encode($json), '=');
 }
 
 // Вспомогательная функция для HTTP запросов с каскадным фоллбэком (cURL -> CLI curl -> stream_context)
