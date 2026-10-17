@@ -2,7 +2,7 @@ name: Build FPTN Client for Keenetic
 
 on:
   push:
-    branches: [ master, main, fix/entware-mirror-fallback, build/mipselsf-show-servers ]
+    branches: [ master, main, fix/entware-mirror-fallback ]
     tags: [ '*' ]
   # Cross-architecture builds run on mainline changes or by manual dispatch.
   # PR checks use the lightweight script validator; dispatch this workflow manually
