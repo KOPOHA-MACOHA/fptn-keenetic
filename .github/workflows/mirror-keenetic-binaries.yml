@@ -1,0 +1,48 @@
+name: Mirror Keenetic client binaries
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - fix/entware-mirror-fallback
+    paths:
+      - ".github/workflows/mirror-keenetic-binaries.yml"
+
+permissions:
+  contents: write
+
+jobs:
+  mirror-release-assets:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Download published client binaries from upstream release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          mkdir -p dist
+          gh release download v1.3.2-keenetic \
+            --repo AntikFull/fptn-keenetic \
+            --pattern 'fptn-client-cli-*' \
+            --dir dist
+          for arch in aarch64 armv7 mipsel mipselsf; do
+            test -s "dist/fptn-client-cli-$arch"
+          done
+          file dist/fptn-client-cli-*
+          sha256sum dist/fptn-client-cli-*
+
+      - name: Publish mirrored binaries in this repository
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPOSITORY: ${{ github.repository }}
+        run: |
+          set -euo pipefail
+          tag="fptn-binaries-v1.3.2-keenetic"
+          if gh release view "$tag" --repo "$REPOSITORY" >/dev/null 2>&1; then
+            gh release upload "$tag" dist/fptn-client-cli-* --repo "$REPOSITORY" --clobber
+          else
+            gh release create "$tag" dist/fptn-client-cli-* \
+              --repo "$REPOSITORY" \
+              --title "Keenetic client binaries v1.3.2" \
+              --notes "Mirrored client CLI binaries for supported Keenetic/Entware architectures. Source release: https://github.com/AntikFull/fptn-keenetic/releases/tag/v1.3.2-keenetic"
+          fi
