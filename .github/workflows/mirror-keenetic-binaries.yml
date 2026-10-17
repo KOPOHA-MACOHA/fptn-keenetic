@@ -46,3 +46,26 @@ jobs:
               --title "Keenetic client binaries v1.3.2" \
               --notes "Mirrored client CLI binaries for supported Keenetic/Entware architectures. Source release: https://github.com/AntikFull/fptn-keenetic/releases/tag/v1.3.2-keenetic"
           fi
+
+      - name: Verify public release download URLs and checksums
+        env:
+          REPOSITORY: ${{ github.repository }}
+        run: |
+          set -euo pipefail
+          base="https://github.com/${REPOSITORY}/releases/download/fptn-binaries-v1.3.2-keenetic"
+          mkdir -p verify
+          cat > verify/SHA256SUMS <<'EOF'
+          ac86bca380095aabc1923670f427ade2716e8a3a87cfe84b15e16ac0ff801846  fptn-client-cli-aarch64
+          36adce6367e6df7844eea6be201399e62c5b2b62ca29429134d2e255d1f838b3  fptn-client-cli-armv7
+          445233d486e4da2570819307feb83f8e19d2ee7d74564dcd69d8a6bc3c33c748  fptn-client-cli-mipsel
+          ef807bfe14e5527d6dd2f8234be13fee0158c9fef89ff2205d8003961d249bea  fptn-client-cli-mipselsf
+          EOF
+          while read -r expected filename; do
+            echo "Checking ${base}/${filename}"
+            curl --fail --location --retry 2 --connect-timeout 15 --max-time 240 \
+              --output "verify/${filename}" "${base}/${filename}"
+            printf '%s  %s\n' "$expected" "verify/${filename}" >> verify/actual-SHA256SUMS
+            test "$(wc -c < "verify/${filename}")" -gt 1000000
+            test "$(od -An -tx1 -N4 "verify/${filename}" | tr -d ' \n')" = "7f454c46"
+          done < verify/SHA256SUMS
+          (cd verify && sha256sum -c actual-SHA256SUMS)
