@@ -48,7 +48,9 @@ function parse_fptn_token_direct($token) {
         return null;
     }
     $decompressed = false;
-    if ($is_brotli) {
+    if ($is_brotli && !is_array(json_decode($decoded, true))) {
+        // Some locally generated fptnb: tokens contain plain Base64 JSON; only
+        // invoke Brotli when the decoded payload is not already valid JSON.
         if (function_exists('brotli_uncompress')) {
             $decompressed = @brotli_uncompress($decoded);
         }
@@ -91,7 +93,7 @@ function parse_fptn_token_direct($token) {
     ];
 }
 
-function parse_token_via_cli($token) {
+function parse_token_via_cli_DISABLED($token) {
     global $cli_path;
     if (!file_exists($cli_path) || !is_executable($cli_path)) {
         $GLOBALS['fptn_token_cli_diagnostic'] = 'CLI отсутствует или не имеет права на выполнение.';
@@ -155,12 +157,8 @@ function get_token_servers_info($token) {
         @file_put_contents($servers_file, json_encode($info, JSON_PRETTY_PRINT | JSON_UNESCAPED_UNICODE), LOCK_EX);
         return $info;
     }
-    $cli_info = parse_token_via_cli($token);
-    if ($cli_info) {
-        $cli_info['token_sha256'] = $token_hash;
-        @file_put_contents($servers_file, json_encode($cli_info, JSON_PRETTY_PRINT | JSON_UNESCAPED_UNICODE), LOCK_EX);
-        return $cli_info;
-    }
+    // Never invoke fptn-client-cli to inspect a token: the CLI has no
+    // --show-servers option and a normal invocation may start a tunnel.
     return null;
 }
 
