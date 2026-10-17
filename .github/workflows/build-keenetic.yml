@@ -61,11 +61,12 @@ jobs:
           curl -fSL --connect-timeout 15 --max-time 300 --retry 3 --retry-all-errors https://downloads.openwrt.org/releases/23.05.5/targets/ramips/mt7621/openwrt-toolchain-23.05.5-ramips-mt7621_gcc-12.3.0_musl.Linux-x86_64.tar.xz -o /tmp/openwrt-toolchain.tar.xz
           echo "bb08478a46869009a2a8b85f88e266cc6b6d3ccefc34de61907ead2a986e08c9  /tmp/openwrt-toolchain.tar.xz" | sha256sum -c -
           sudo tar -xJf /tmp/openwrt-toolchain.tar.xz -C /opt
-          TOOLCHAIN_BIN="$(find /opt -type f -name 'mipsel-openwrt-linux-musl-g++' -printf '%h\\n' | head -n 1)"
-          test -n "$TOOLCHAIN_BIN"
+          TOOLCHAIN_CXX="$(find /opt -name 'mipsel-openwrt-linux-musl-g++' -print -quit)"
+          test -x "$TOOLCHAIN_CXX"
+          TOOLCHAIN_BIN="$(dirname "$TOOLCHAIN_CXX")"
           echo "$TOOLCHAIN_BIN" >> "$GITHUB_PATH"
-          "$TOOLCHAIN_BIN/mipsel-openwrt-linux-musl-g++" --version
-          "$TOOLCHAIN_BIN/mipsel-openwrt-linux-musl-g++" -dumpmachine
+          "$TOOLCHAIN_CXX" --version
+          "$TOOLCHAIN_CXX" -dumpmachine
 
       - name: Verify MIPS soft-float compiler
         if: matrix.arch_name == 'mipselsf'
