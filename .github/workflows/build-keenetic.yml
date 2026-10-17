@@ -71,9 +71,9 @@ jobs:
       - name: Verify MIPS soft-float compiler
         if: matrix.arch_name == 'mipselsf'
         run: |
-          mipsel-linux-muslsf-g++ --version
-          mipsel-linux-muslsf-g++ -dumpmachine
-          mipsel-linux-muslsf-g++ -dumpspecs | head -n 3
+          mipsel-openwrt-linux-musl-g++ --version
+          mipsel-openwrt-linux-musl-g++ -dumpmachine
+          mipsel-openwrt-linux-musl-g++ -dumpspecs | head -n 3
 
       - name: Cache Conan Packages
         id: cache-conan
