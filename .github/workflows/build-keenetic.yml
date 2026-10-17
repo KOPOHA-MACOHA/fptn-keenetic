@@ -30,9 +30,9 @@ jobs:
           - arch_name: mipselsf
             conan-arch: mips
             apt-packages: ""
-            cc: mipsel-linux-muslsf-gcc
-            cxx: mipsel-linux-muslsf-g++
-            strip: mipsel-linux-muslsf-strip
+            cc: mipsel-openwrt-linux-musl-gcc
+            cxx: mipsel-openwrt-linux-musl-g++
+            strip: mipsel-openwrt-linux-musl-strip
             flags: '["-DOPENSSL_PTHREADS", "-pthread", "-march=mips32r2"]'
             asmflags: "-DOPENSSL_PTHREADS -pthread -march=mips32r2"
             linkflags: '["-pthread", "-latomic"]'
@@ -56,12 +56,16 @@ jobs:
       - name: Install MIPS soft-float cross toolchain
         if: matrix.arch_name == 'mipselsf'
         run: |
-          curl -fSL --connect-timeout 15 --max-time 300 --retry 3 --retry-all-errors https://github.com/musl-cc/musl.cc/releases/download/v0.0.1/mipsel-linux-muslsf-cross.tgz -o /tmp/mipsel-linux-muslsf-cross.tgz
-          echo "a61c3bbf9fbb0be80fe2abdb4ea8b6f5afdf664b5b4104a3784a326270905216  /tmp/mipsel-linux-muslsf-cross.tgz" | sha256sum -c -
-          sudo tar -xzf /tmp/mipsel-linux-muslsf-cross.tgz -C /opt
-          # Fix absolute libtool paths embedded in the relocatable toolchain archive.
-          sudo find /opt/mipsel-linux-muslsf-cross -name '*.la' -type f -exec sed -i 's|/mipsel-linux-muslsf/lib|/opt/mipsel-linux-muslsf-cross/mipsel-linux-muslsf/lib|g' {} +
-          echo "/opt/mipsel-linux-muslsf-cross/bin" >> "$GITHUB_PATH"
+          # Use the OpenWrt mt7621 toolchain: GCC 12.3 with the router-compatible
+          # mipsel_24kc + musl ABI. The old musl.cc GCC 11.2 ICEs on C++20 coroutines.
+          curl -fSL --connect-timeout 15 --max-time 300 --retry 3 --retry-all-errors https://downloads.openwrt.org/releases/23.05.5/targets/ramips/mt7621/openwrt-toolchain-23.05.5-ramips-mt7621_gcc-12.3.0_musl.Linux-x86_64.tar.xz -o /tmp/openwrt-toolchain.tar.xz
+          echo "bb08478a46869009a2a8b85f88e266cc6b6d3ccefc34de61907ead2a986e08c9  /tmp/openwrt-toolchain.tar.xz" | sha256sum -c -
+          sudo tar -xJf /tmp/openwrt-toolchain.tar.xz -C /opt
+          TOOLCHAIN_BIN="$(find /opt -type f -name 'mipsel-openwrt-linux-musl-g++' -printf '%h\\n' | head -n 1)"
+          test -n "$TOOLCHAIN_BIN"
+          echo "$TOOLCHAIN_BIN" >> "$GITHUB_PATH"
+          "$TOOLCHAIN_BIN/mipsel-openwrt-linux-musl-g++" --version
+          "$TOOLCHAIN_BIN/mipsel-openwrt-linux-musl-g++" -dumpmachine
 
       - name: Verify MIPS soft-float compiler
         if: matrix.arch_name == 'mipselsf'
@@ -89,7 +93,7 @@ jobs:
           os=Linux
           arch=${{ matrix.conan-arch }}
           compiler=gcc
-          compiler.version=11
+          compiler.version=12
           compiler.libcxx=libstdc++11
           compiler.cppstd=gnu20
           build_type=Release
