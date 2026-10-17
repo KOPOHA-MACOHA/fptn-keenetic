@@ -601,21 +601,39 @@ check_binary_valid() {
     return 0
 }
 
-echo "Скачивание скомпилированного бинарника / Downloading compiled binary..."
-BIN_RAW_URL="${GITHUB_RAW_BASE}/deploy/keenetic/bin/fptn-client-cli-${ARCH_SUFFIX}"
-# Binary assets are mirrored into this fork by .github/workflows/mirror-keenetic-binaries.yml.
-# Keep the installer independent of upstream's release URL availability.
-BIN_RELEASE_TAG="fptn-binaries-${REMOTE_VER}"
-BIN_RELEASE_URL="https://github.com/KOPOHA-MACOHA/fptn-keenetic/releases/download/${BIN_RELEASE_TAG}/fptn-client-cli-${ARCH_SUFFIX}"
-BIN_LATEST_URL="https://github.com/KOPOHA-MACOHA/fptn-keenetic/releases/latest/download/fptn-client-cli-${ARCH_SUFFIX}"
+echo "Скачивание бинарника из проверенного релиза / Downloading binary from verified release..."
+# This release is mirrored by .github/workflows/mirror-keenetic-binaries.yml.
+# Pin the expected SHA-256 per architecture; never trust size/ELF magic alone.
+BIN_RELEASE_TAG="fptn-binaries-\${REMOTE_VER}"
+BIN_RELEASE_URL="https://github.com/KOPOHA-MACOHA/fptn-keenetic/releases/download/\${BIN_RELEASE_TAG}/fptn-client-cli-\${ARCH_SUFFIX}"
+
+case "$ARCH_SUFFIX" in
+    aarch64) EXPECTED_BIN_SHA256="ac86bca380095aabc1923670f427ade2716e8a3a87cfe84b15e16ac0ff801846" ;;
+    armv7)   EXPECTED_BIN_SHA256="36adce6367e6df7844eea6be201399e62c5b2b62ca29429134d2e255d1f838b3" ;;
+    mipsel)  EXPECTED_BIN_SHA256="445233d486e4da2570819307feb83f8e19d2ee7d74564dcd69d8a6bc3c33c748" ;;
+    mipselsf) EXPECTED_BIN_SHA256="ef807bfe14e5527d6dd2f8234be13fee0158c9fef89ff2205d8003961d249bea" ;;
+    *)
+        echo "Ошибка: для архитектуры $ARCH_SUFFIX нет закреплённой контрольной суммы."
+        exit 1
+        ;;
+esac
+
+if ! command -v sha256sum >/dev/null 2>&1; then
+    echo "Ошибка: sha256sum не найден; невозможно проверить целостность бинарника. Установка отменена."
+    exit 1
+fi
 
 DOWNLOAD_SUCCESS=no
-for _src_url in "$BIN_RAW_URL" "$BIN_RELEASE_URL" "$BIN_LATEST_URL"; do
-    if download_file "$_src_url" "/opt/bin/fptn-client-cli.tmp" 180; then
-        if check_binary_valid "/opt/bin/fptn-client-cli.tmp"; then
+echo "Источник бинарника / Binary source: $BIN_RELEASE_URL"
+if download_file "$BIN_RELEASE_URL" "/opt/bin/fptn-client-cli.tmp" 240; then
+    if check_binary_valid "/opt/bin/fptn-client-cli.tmp"; then
+        _actual_bin_sha256=$(sha256sum "/opt/bin/fptn-client-cli.tmp" | awk '{print $1}')
+        if [ "$_actual_bin_sha256" != "$EXPECTED_BIN_SHA256" ]; then
+            echo "Ошибка: SHA-256 бинарника не совпадает. Ожидалось $EXPECTED_BIN_SHA256, получено $_actual_bin_sha256."
+            rm -f "/opt/bin/fptn-client-cli.tmp"
+        else
             chmod +x "/opt/bin/fptn-client-cli.tmp"
-            # Сначала проверяем именно временный файл. Рабочий бинарник не трогаем,
-            # пока новая версия не прошла хотя бы один smoke test.
+            # Smoke-test the temporary file; don't touch the installed binary yet.
             _smoke_code=0
             _smoke_output=$("/opt/bin/fptn-client-cli.tmp" --help 2>&1) || _smoke_code=$?
             if [ "$_smoke_code" -eq 0 ]; then
@@ -623,10 +641,8 @@ for _src_url in "$BIN_RAW_URL" "$BIN_RELEASE_URL" "$BIN_LATEST_URL"; do
             elif [ "$_smoke_code" -ge 126 ] || echo "$_smoke_output" | grep -Eqi "not found|exec format error|no such file|error loading shared library|cannot execute"; then
                 _smoke_ok=no
             else
-                # Некоторые CLI возвращают ненулевой код на --help; это само по себе
-                # не означает, что бинарник не запускается.
                 _smoke_ok=yes
-                echo "Предупреждение: --help вернул код $_smoke_code без явной ошибки загрузчика. / Warning: --help returned $_smoke_code without a loader error."
+                echo "Предупреждение: --help вернул код $_smoke_code без явной ошибки загрузчика."
             fi
             if [ "$_smoke_ok" != "yes" ] && [ -r /opt/lib/ld.so.1 ]; then
                 _smoke_code=0
@@ -636,73 +652,23 @@ for _src_url in "$BIN_RAW_URL" "$BIN_RELEASE_URL" "$BIN_LATEST_URL"; do
                 fi
             fi
             if [ "$_smoke_ok" = "yes" ]; then
-                # До завершения всех проверок не останавливаем текущий туннель
-                # и не заменяем рабочий бинарник.
                 DOWNLOAD_SUCCESS=yes
-                break
             else
-                echo "Бинарник не прошёл smoke test; текущая версия сохранена. / Binary failed smoke test; current version preserved."
+                echo "Бинарник не прошёл smoke test; текущая версия сохранена."
                 rm -f "/opt/bin/fptn-client-cli.tmp"
             fi
-        else
-            rm -f "/opt/bin/fptn-client-cli.tmp"
         fi
-    fi
-done
-
-# Fallback for networks where GitHub release download URLs return 404:
-# resolve the matching asset ID from the public release metadata, then use the API.
-if [ "$DOWNLOAD_SUCCESS" != "yes" ]; then
-    echo "Пробую GitHub Releases API / Trying GitHub Releases API..."
-    BIN_ASSET_ID=$(curl -fsSL --connect-timeout 10 --max-time 30 "https://api.github.com/repos/KOPOHA-MACOHA/fptn-keenetic/releases/tags/${BIN_RELEASE_TAG}" 2>/dev/null |
-        awk -v target="fptn-client-cli-${ARCH_SUFFIX}" '
-            /"id": [0-9]+,/ { id=$2; gsub(/,/, "", id) }
-            $0 ~ "\"name\": \"" target "\"" { print id; exit }
-        ')
-    case "$BIN_ASSET_ID" in
-        ''|*[!0-9]*) BIN_ASSET_ID="" ;;
-    esac
-    if [ -n "$BIN_ASSET_ID" ]; then
-        BIN_API_URL="https://api.github.com/repos/KOPOHA-MACOHA/fptn-keenetic/releases/assets/${BIN_ASSET_ID}"
-        for _asset_url in "$BIN_API_URL" "https://ghproxy.net/${BIN_API_URL}" "https://ghfast.top/${BIN_API_URL}"; do
-            echo "Источник бинарника / Binary asset source: $_asset_url"
-            rm -f "/opt/bin/fptn-client-cli.tmp"
-            if curl -sSL --fail --connect-timeout 10 --max-time 180 -H "Accept: application/octet-stream" -o "/opt/bin/fptn-client-cli.tmp" "$_asset_url"; then
-                if check_binary_valid "/opt/bin/fptn-client-cli.tmp"; then
-                    chmod +x "/opt/bin/fptn-client-cli.tmp"
-                    _smoke_code=0
-                    _smoke_output=$("/opt/bin/fptn-client-cli.tmp" --help 2>&1) || _smoke_code=$?
-                    if [ "$_smoke_code" -eq 0 ]; then
-                        _smoke_ok=yes
-                    elif [ "$_smoke_code" -ge 126 ] || echo "$_smoke_output" | grep -Eqi "not found|exec format error|no such file|error loading shared library|cannot execute"; then
-                        _smoke_ok=no
-                    else
-                        _smoke_ok=yes
-                        echo "Предупреждение: --help вернул код $_smoke_code без явной ошибки загрузчика."
-                    fi
-                    if [ "$_smoke_ok" != "yes" ] && [ -r /opt/lib/ld.so.1 ]; then
-                        _smoke_code=0
-                        _smoke_output=$(/opt/lib/ld.so.1 --library-path /opt/lib /opt/bin/fptn-client-cli.tmp --help 2>&1) || _smoke_code=$?
-                        if [ "$_smoke_code" -eq 0 ] || { [ "$_smoke_code" -lt 126 ] && ! echo "$_smoke_output" | grep -Eqi "not found|exec format error|no such file|error loading shared library|cannot execute"; }; then
-                            _smoke_ok=yes
-                        fi
-                    fi
-                    if [ "$_smoke_ok" = "yes" ]; then
-                        DOWNLOAD_SUCCESS=yes
-                        break
-                    fi
-                    echo "Бинарник из API не прошёл проверку запуска; пробую следующий источник."
-                fi
-            fi
-        done
     else
-        echo "Не удалось определить ID asset в GitHub Releases API."
+        echo "Ошибка: скачанный файл не похож на корректный ELF-бинарник."
+        rm -f "/opt/bin/fptn-client-cli.tmp"
     fi
+else
+    echo "Ошибка: не удалось скачать бинарник из проверенного релиза."
 fi
 
 if [ "$DOWNLOAD_SUCCESS" != "yes" ]; then
     rm -f "/opt/bin/fptn-client-cli.tmp"
-    echo "Ошибка: Не удалось скачать и запустить проверенный бинарный файл. Существующий бинарник не изменён. / Error: Failed to download and run a validated binary. Existing binary was preserved."
+    echo "Ошибка: бинарник не прошёл проверку загрузки, SHA-256 и запуска. Существующий бинарник не изменён."
     exit 1
 fi
 
