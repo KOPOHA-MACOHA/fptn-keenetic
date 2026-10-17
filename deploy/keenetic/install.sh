@@ -941,9 +941,8 @@ chmod 600 "$CONF_PATH"
 # Генерация списка серверов, если токен был указан при установке
 if [ -n "$USER_TOKEN" ]; then
     echo "Формирование списка серверов из токена / Generating server list from token..."
-    if [ -x "/opt/bin/fptn-client-cli" ]; then
-        /opt/bin/fptn-client-cli --access-token "$USER_TOKEN" --show-servers > /opt/etc/fptn-servers.json 2>/dev/null || true  # глушение-обосновано: первичный разбор токена может вернуть ошибку при невалидном токене
-    fi
+    # Do not invoke the client to inspect a token: --show-servers is not a
+    # supported option and a normal invocation may start a tunnel.
     if [ ! -s "/opt/etc/fptn-servers.json" ] && [ "$INSTALL_WEB_PANEL" = "yes" ]; then
         # Резервный разбор через PHP CGI (only available with web panel)
         /opt/bin/php-cgi -q -r '
