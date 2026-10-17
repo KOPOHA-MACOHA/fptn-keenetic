@@ -33,7 +33,7 @@ jobs:
             cc: mipsel-linux-muslsf-gcc
             cxx: mipsel-linux-muslsf-g++
             strip: mipsel-linux-muslsf-strip
-            flags: '["-DOPENSSL_PTHREADS", "-pthread", "-fcoroutines", "-march=mips32r2"]'
+            flags: '["-DOPENSSL_PTHREADS", "-pthread", "-march=mips32r2"]'
             asmflags: "-DOPENSSL_PTHREADS -pthread -march=mips32r2"
             linkflags: '["-pthread", "-latomic"]'
             cmake-linker-flags: "-static -pthread -Wl,--whole-archive -lpthread -latomic -Wl,--no-whole-archive"
@@ -63,12 +63,19 @@ jobs:
           sudo find /opt/mipsel-linux-muslsf-cross -name '*.la' -type f -exec sed -i 's|/mipsel-linux-muslsf/lib|/opt/mipsel-linux-muslsf-cross/mipsel-linux-muslsf/lib|g' {} +
           echo "/opt/mipsel-linux-muslsf-cross/bin" >> "$GITHUB_PATH"
 
+      - name: Verify MIPS soft-float compiler
+        if: matrix.arch_name == 'mipselsf'
+        run: |
+          mipsel-linux-muslsf-g++ --version
+          mipsel-linux-muslsf-g++ -dumpmachine
+          mipsel-linux-muslsf-g++ -dumpspecs | head -n 3
+
       - name: Cache Conan Packages
         id: cache-conan
         uses: actions/cache@v3
         with:
           path: ~/.conan2/p
-          key: conan-v2-${{ matrix.arch_name }}-${{ hashFiles('conanfile.py', '.conan/**', '.github/workflows/build-keenetic.yml') }}
+          key: conan-v2-${{ matrix.arch_name }}-${{ hashFiles('conanfile.py', '.conan/**') }}
           restore-keys: |
             conan-v2-${{ matrix.arch_name }}-
 
