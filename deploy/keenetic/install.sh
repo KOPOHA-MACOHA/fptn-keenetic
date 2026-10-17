@@ -191,14 +191,20 @@ read_input() {
     fi
 }
 
-# 2. Select a dedicated, memorable web-panel port. Existing Lighttpd
-# services keep their current listener; FPTN gets an additional socket.
+# 2. Select the FPTN web-panel port. On upgrades, reuse the port in the existing FPTN fragment.
 USER_PORT=""
+EXISTING_FPTN_PORT=""
+if [ -f /opt/etc/lighttpd/conf.d/85-fptn.conf ]; then
+    EXISTING_FPTN_PORT=$(sed -n 's/.*socket.*":\([0-9][0-9]*\)".*/\1/p' /opt/etc/lighttpd/conf.d/85-fptn.conf | head -n 1)
+fi
 if [ "$INSTALL_WEB_PANEL" = "yes" ]; then
     DEFAULT_PORT=1111
-    if is_port_busy "$DEFAULT_PORT" ||
-       grep -R -E "(:|[[:space:]])${DEFAULT_PORT}([[:space:]]|[;}]|$)" /opt/etc/lighttpd/lighttpd.conf /opt/etc/lighttpd/conf.d 2>/dev/null | grep -v '^[[:space:]]*#' >/dev/null 2>&1; then
-        echo "Порт $DEFAULT_PORT уже занят или упомянут в конфигурации Lighttpd."
+    if [ -n "$EXISTING_FPTN_PORT" ] && [ "$EXISTING_FPTN_PORT" -ge 1 ] 2>/dev/null && [ "$EXISTING_FPTN_PORT" -le 65535 ] 2>/dev/null; then
+        DEFAULT_PORT="$EXISTING_FPTN_PORT"
+        echo "Обнаружена существующая панель FPTN на порту $DEFAULT_PORT; обновляю её на том же порту."
+    elif is_port_busy "$DEFAULT_PORT" ||
+         grep -R -E "(:|[[:space:]])${DEFAULT_PORT}([[:space:]]|[;}]|$)" /opt/etc/lighttpd/lighttpd.conf /opt/etc/lighttpd/conf.d 2>/dev/null | grep -v '^[[:space:]]*#' >/dev/null 2>&1; then
+        echo "Порт $DEFAULT_PORT занят или упомянут в конфигурации Lighttpd."
         CHECK_P=$((DEFAULT_PORT + 1))
         while is_port_busy "$CHECK_P" ||
               grep -R -E "(:|[[:space:]])${CHECK_P}([[:space:]]|[;}]|$)" /opt/etc/lighttpd/lighttpd.conf /opt/etc/lighttpd/conf.d 2>/dev/null | grep -v '^[[:space:]]*#' >/dev/null 2>&1; do
@@ -224,11 +230,13 @@ if [ "$INSTALL_WEB_PANEL" = "yes" ]; then
         exit 1
     fi
 
-    if is_port_busy "$USER_PORT"; then
+    # The existing FPTN listener is allowed only when retaining its current port.
+    if [ "$USER_PORT" != "$EXISTING_FPTN_PORT" ] && is_port_busy "$USER_PORT"; then
         echo "ОШИБКА: порт $USER_PORT занят. Выберите свободный порт; установка отменена."
         exit 1
     fi
-    if grep -R -E "(:|[[:space:]])${USER_PORT}([[:space:]]|[;}]|$)" /opt/etc/lighttpd/lighttpd.conf /opt/etc/lighttpd/conf.d 2>/dev/null | grep -v '^[[:space:]]*#' >/dev/null 2>&1; then
+    if [ "$USER_PORT" != "$EXISTING_FPTN_PORT" ] &&
+       grep -R -E "(:|[[:space:]])${USER_PORT}([[:space:]]|[;}]|$)" /opt/etc/lighttpd/lighttpd.conf /opt/etc/lighttpd/conf.d 2>/dev/null | grep -v '^[[:space:]]*#' >/dev/null 2>&1; then
         echo "ОШИБКА: порт $USER_PORT уже упоминается в конфигурации Lighttpd. Выберите другой; установка отменена."
         exit 1
     fi
