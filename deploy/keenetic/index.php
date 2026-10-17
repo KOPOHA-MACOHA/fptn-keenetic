@@ -398,8 +398,39 @@ function read_config() {
 }
 
 read_config();
-$password_set = !empty($config['WEB_PASSWORD']);
-$authenticated = !$password_set || (isset($_SESSION['auth']) && $_SESSION['auth'] === true);
+
+// Match nfqws2 web-panel authentication: validate the supplied Entware account
+// against /opt/etc/shadow (or passwd if shadow is unavailable). Never expose hashes.
+function authenticate_entware_user($username, $password) {
+    if (!is_string($username) || !is_string($password)
+        || !preg_match('/^[a-zA-Z0-9_.-]+$/', $username)) {
+        return false;
+    }
+    $shadow_file = '/opt/etc/shadow';
+    $passwd_file = '/opt/etc/passwd';
+    $auth_file = is_readable($shadow_file) ? $shadow_file : $passwd_file;
+    if (!is_readable($auth_file)) {
+        return false;
+    }
+    $users = @file($auth_file, FILE_IGNORE_NEW_LINES | FILE_SKIP_EMPTY_LINES);
+    if ($users === false) return false;
+    foreach ($users as $line) {
+        $parts = explode(':', $line);
+        if (count($parts) < 2 || $parts[0] !== $username) continue;
+        $stored_hash = $parts[1];
+        if ($stored_hash === '' || $stored_hash === '!' || $stored_hash === '*'
+            || strpos($stored_hash, '!') === 0 || strpos($stored_hash, '*') === 0) {
+            return false;
+        }
+        $calculated = crypt($password, $stored_hash);
+        return is_string($calculated) && hash_equals($stored_hash, $calculated);
+    }
+    return false;
+}
+
+// No separately stored panel password: use the same Entware account authentication as nfqws2.
+$password_set = true;
+$authenticated = isset($_SESSION['auth']) && $_SESSION['auth'] === true;
 
 // Обработка AJAX запросов (проверка обновлений, автообновление статуса и запуск обновления)
 if (isset($_GET['ajax'])) {
@@ -773,14 +804,17 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 
         // 2. Вход (если пароль задан)
         elseif ($action === 'login' && $password_set) {
+            $username = $_POST['username'] ?? '';
             $pass = $_POST['password'] ?? '';
-            if (password_verify($pass, $config['WEB_PASSWORD'])) {
+            $legacy_password_ok = !empty($config['WEB_PASSWORD'])
+                && password_verify($pass, $config['WEB_PASSWORD']);
+            if ($legacy_password_ok || authenticate_entware_user($username, $pass)) {
                 session_regenerate_id(true);
                 $_SESSION['auth'] = true;
                 header("Location: " . $_SERVER['PHP_SELF']);
                 exit;
             } else {
-                $error = 'Неверный пароль';
+                $error = 'Неверный логин или пароль Entware';
             }
         }
 
@@ -1483,7 +1517,7 @@ if (!empty($config['TOKEN'])) {
                     <input type="hidden" name="action" value="setup_password">
                     <input type="hidden" name="csrf_token" value="<?php echo htmlspecialchars($_SESSION['csrf_token'] ?? ''); ?>">
                     <div class="form-group">
-                        <label for="new_pass">Новый пароль (минимум 6 символов)</label>
+                        <label for="new_pass">Новый пароль (минимум 10 символов)</label>
                         <input type="password" id="new_pass" name="password" required autocomplete="new-password">
                     </div>
                     <div class="form-group">
@@ -1505,8 +1539,12 @@ if (!empty($config['TOKEN'])) {
                     <input type="hidden" name="action" value="login">
                     <input type="hidden" name="csrf_token" value="<?php echo htmlspecialchars($_SESSION['csrf_token'] ?? ''); ?>">
                     <div class="form-group">
-                        <label for="login_pass">Пароль администратора</label>
-                        <input type="password" id="login_pass" name="password" required autofocus autocomplete="current-password">
+                        <label for="login_user">Пользователь Entware</label>
+                        <input type="text" id="login_user" name="username" value="root" required autofocus autocomplete="username">
+                    </div>
+                    <div class="form-group">
+                        <label for="login_pass">Пароль Entware</label>
+                        <input type="password" id="login_pass" name="password" required autocomplete="current-password">
                     </div>
                     <button type="submit" class="btn btn-primary btn-full">Войти</button>
                 </form>
