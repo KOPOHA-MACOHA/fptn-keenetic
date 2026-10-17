@@ -22,7 +22,6 @@ permissions:
 jobs:
   build:
     name: Build for ${{ matrix.arch_name }}
-    if: github.ref != 'refs/heads/fix/entware-mirror-fallback' || matrix.arch_name == 'mipselsf'
     runs-on: ubuntu-22.04
     strategy:
       fail-fast: false
