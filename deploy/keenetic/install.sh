@@ -765,7 +765,7 @@ EOF
     # rc.func may return a failure code despite a successful daemon start.
     # Verify that the requested FPTN listener is actually accepting TCP.
     _lighttpd_listener=no
-    if netstat -lnt 2>/dev/null | grep -E "[:.]\${USER_PORT}[[:space:]]" >/dev/null 2>&1; then
+    if netstat -lnt 2>/dev/null | grep -E "[:.]${USER_PORT}[[:space:]]" >/dev/null 2>&1; then
         _lighttpd_listener=yes
     fi
 
