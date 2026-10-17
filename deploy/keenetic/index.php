@@ -107,6 +107,11 @@ function parse_token_via_cli($token) {
         $ret = 0;
         @exec($cmd, $output, $ret);
         $raw = implode("\n", $output);
+        // Keep only a short, redacted diagnostic. Never return raw CLI output to the browser.
+        $safe_diag = str_replace((string)$token, '[TOKEN REDACTED]', $raw);
+        $safe_diag = preg_replace('/[A-Za-z0-9+\/_=-]{48,}/', '[LONG VALUE REDACTED]', $safe_diag);
+        $safe_diag = preg_replace('/[^\p{L}\p{N}\s.,:;_()\[\]{}\-\/]+/u', '?', $safe_diag);
+        $safe_diag = trim(substr(preg_replace('/\s+/', ' ', $safe_diag), 0, 220));
         if ($ret === 0 && $raw !== '') {
             $start = strpos($raw, '{');
             $end = strrpos($raw, '}');
@@ -121,7 +126,7 @@ function parse_token_via_cli($token) {
                 $attempts[] = 'попытка '.($index + 1).': код 0, но JSON со списком серверов не найден';
             }
         } else {
-            $attempts[] = 'попытка '.($index + 1).': код завершения '.(int)$ret.($raw !== '' ? ', вывод ошибки присутствует' : ', вывода нет');
+            $attempts[] = 'попытка '.($index + 1).': код завершения '.(int)$ret.($safe_diag !== '' ? ', сообщение: '.$safe_diag : ', вывода нет');
         }
     }
     $GLOBALS['fptn_token_cli_diagnostic'] = 'CLI не смог разобрать токен ('.implode('; ', $attempts).'). Текст вывода скрыт, чтобы не раскрыть данные токена.';
