@@ -724,20 +724,44 @@ if [ "$INSTALL_WEB_PANEL" = "yes" ]; then
         exit 1
     fi
 
-    # Create the document root before starting Lighttpd. Some builds fail startup
-    # when a configured server.document-root does not exist.
-    mkdir -p "/opt/share/www/fptn" || {
-        echo "Ошибка: не удалось создать каталог веб-панели /opt/share/www/fptn."
+    # Prepare the document root and entry point before enabling the listener.
+    # PHP CGI on some Entware builds needs explicit path-info handling and an
+    # unset doc_root; use a dedicated wrapper so other PHP sites are unaffected.
+    WWW_DIR="/opt/share/www/fptn"
+    mkdir -p "$WWW_DIR" || {
+        echo "Ошибка: не удалось создать каталог веб-панели $WWW_DIR."
         exit 1
     }
+
+    SCRIPT_DIR=$(dirname "$0")
+    if [ -f "$SCRIPT_DIR/index.php" ]; then
+        cp "$SCRIPT_DIR/index.php" "$WWW_DIR/index.php"
+    else
+        if ! download_file "\${GITHUB_RAW_BASE}/deploy/keenetic/index.php" "$WWW_DIR/index.php" 30; then
+            echo "Ошибка: Не удалось скачать index.php / Error: Failed to download index.php"
+            exit 1
+        fi
+    fi
+    chmod 644 "$WWW_DIR/index.php"
+    if [ ! -s "$WWW_DIR/index.php" ]; then
+        echo "Ошибка: файл веб-панели $WWW_DIR/index.php отсутствует или пуст."
+        exit 1
+    fi
+
+    FPTN_PHP_WRAPPER="/opt/bin/fptn-php-cgi"
+    cat > "$FPTN_PHP_WRAPPER" << 'FPTN_PHP_WRAPPER_EOF'
+#!/bin/sh
+exec /opt/bin/php-cgi -d cgi.fix_pathinfo=1 -d doc_root= "$@"
+FPTN_PHP_WRAPPER_EOF
+    chmod 755 "$FPTN_PHP_WRAPPER"
 
     FPTN_LIGHTTPD_TOUCHED=yes
     cat << EOF > "$LIGHTTPD_CONF_DIR/85-fptn.conf"
 # Dedicated FPTN listener; existing SmartDNS/nfqws listener and document root remain unchanged.
 \$SERVER["socket"] == ":$USER_PORT" {
-    server.document-root = "/opt/share/www/fptn"
+    server.document-root = "$WWW_DIR"
     index-file.names = ( "index.php", "index.html" )
-    cgi.assign = ( ".php" => "/opt/bin/php-cgi" )
+    cgi.assign = ( ".php" => "$FPTN_PHP_WRAPPER" )
     static-file.exclude-extensions += ( ".php" )
 }
 EOF
@@ -792,22 +816,9 @@ EOF
     fi
     rm -f "$LIGHTTPD_RESTART_LOG"
 
-    # 7. Установка файлов веб-панели / Install Web Panel
+    # 7. Entry point was downloaded and validated before Lighttpd restart.
     echo ""
-    echo "[5/7] Копирование файлов веб-панели / Copying web panel files..."
-    WWW_DIR="/opt/share/www/fptn"
-    mkdir -p "$WWW_DIR"
-    
-    SCRIPT_DIR=$(dirname "$0")
-    if [ -f "$SCRIPT_DIR/index.php" ]; then
-        cp "$SCRIPT_DIR/index.php" "$WWW_DIR/index.php"
-    else
-        if ! download_file "${GITHUB_RAW_BASE}/deploy/keenetic/index.php" "$WWW_DIR/index.php" 30; then
-            echo "Ошибка: Не удалось скачать index.php / Error: Failed to download index.php"
-            exit 1
-        fi
-    fi
-    chmod 644 "$WWW_DIR/index.php"
+    echo "[5/7] Проверка файлов веб-панели / Verifying web panel files..."
     touch /opt/etc/fptn-web-panel.installed
     
     
