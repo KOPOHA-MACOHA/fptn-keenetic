@@ -510,13 +510,54 @@ trap 'rollback_failed_install' 0
 # 3. Установка необходимых системных пакетов / Install Entware packages
 echo ""
 echo "[1/7] Установка зависимостей Entware / Installing Entware dependencies..."
-opkg update || true
+
+# Use a temporary opkg config with mirrors for the two official Entware feeds.
+# Keep the user's persistent opkg configuration and all custom feeds unchanged.
+OPKG_CONFIG_FILE="/tmp/fptn-opkg-$.conf"
+OPKG_LISTS_DIR="/tmp/fptn-opkg-lists-$"
+mkdir -p "$OPKG_LISTS_DIR"
+write_opkg_mirror_config() {
+    _mirror_base="$1"
+    cat > "$OPKG_CONFIG_FILE" <<EOF_OPKG
+src/gz entware ${_mirror_base}/mipselsf-k3.4
+src/gz keendev ${_mirror_base}/mipselsf-k3.4/keenetic
+dest root /
+lists_dir ext ${OPKG_LISTS_DIR}
+arch all 100
+arch mipsel-3.4 150
+arch mipsel-3.4_kn 200
+EOF_OPKG
+}
+cleanup_opkg_mirror_config() {
+    rm -f "$OPKG_CONFIG_FILE" "$OPKG_LISTS_DIR"/*
+    rmdir "$OPKG_LISTS_DIR" 2>/dev/null || true
+}
+# Preserve the installer's rollback handler while also cleaning temporary opkg files.
+trap 'cleanup_opkg_mirror_config; rollback_failed_install' 0
+
+OPKG_MIRROR_OK=no
+for _mirror_base in "https://mirrors.nju.edu.cn/entware" "https://entware.diversion.ch"; do
+    echo "Проверка зеркала Entware / Testing Entware mirror: $_mirror_base"
+    write_opkg_mirror_config "$_mirror_base"
+    /opt/bin/opkg -f "$OPKG_CONFIG_FILE" update || true
+    if [ -s "$OPKG_LISTS_DIR/entware" ] && [ -s "$OPKG_LISTS_DIR/keendev" ]; then
+        OPKG_MIRROR_OK=yes
+        break
+    fi
+done
+if [ "$OPKG_MIRROR_OK" != "yes" ]; then
+    echo "ОШИБКА: не удалось скачать индексы Entware и keendev с зеркал."
+    echo "Установка остановлена до установки пакетов."
+    exit 1
+fi
+
 if [ "$INSTALL_WEB_PANEL" = "yes" ]; then
-    opkg install lighttpd lighttpd-mod-cgi php8-cgi php8-mod-openssl php8-mod-session libxml2 procps-ng-pgrep procps-ng-pkill curl ca-bundle ca-certificates
+    /opt/bin/opkg -f "$OPKG_CONFIG_FILE" install lighttpd lighttpd-mod-cgi php8-cgi php8-mod-openssl php8-mod-session libxml2 procps-ng-pgrep procps-ng-pkill curl ca-bundle ca-certificates
 else
     # Client-only mode deliberately does not install/restart Lighttpd or PHP.
-    opkg install procps-ng-pgrep procps-ng-pkill curl ca-bundle ca-certificates
+    /opt/bin/opkg -f "$OPKG_CONFIG_FILE" install procps-ng-pgrep procps-ng-pkill curl ca-bundle ca-certificates
 fi
+cleanup_opkg_mirror_config
 
 # 4. Автоопределение архитектуры и скачивание бинарника fptn-client-cli / Detect CPU & Download Binary
 echo ""
