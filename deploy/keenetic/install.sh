@@ -613,7 +613,13 @@ check_binary_valid() {
 echo "Скачивание бинарника из проверенного релиза / Downloading binary from verified release..."
 # This release is mirrored by .github/workflows/mirror-keenetic-binaries.yml.
 # Pin the expected SHA-256 per architecture; never trust size/ELF magic alone.
-BIN_RELEASE_TAG="fptn-binaries-${REMOTE_VER}"
+# MIPS soft-float uses the custom CLI build that includes --show-servers.
+# Other architectures keep the upstream release mirror and its pinned hashes.
+if [ "$ARCH_SUFFIX" = "mipselsf" ]; then
+    BIN_RELEASE_TAG="fptn-client-show-servers"
+else
+    BIN_RELEASE_TAG="fptn-binaries-${REMOTE_VER}"
+fi
 BIN_RELEASE_URL="https://github.com/KOPOHA-MACOHA/fptn-keenetic/releases/download/${BIN_RELEASE_TAG}/fptn-client-cli-${ARCH_SUFFIX}"
 
 case "$ARCH_SUFFIX" in
