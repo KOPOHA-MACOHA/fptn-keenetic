@@ -60,12 +60,12 @@ jobs:
             cmake-linker-flags: "-static -pthread -Wl,--whole-archive -lpthread -latomic -Wl,--no-whole-archive"
           - arch_name: mipselsf
             conan-arch: mips
-            apt-packages: gcc-mipsel-linux-gnu g++-mipsel-linux-gnu
-            cc: mipsel-linux-gnu-gcc
-            cxx: mipsel-linux-gnu-g++
-            strip: mipsel-linux-gnu-strip
-            flags: '["-DOPENSSL_PTHREADS", "-pthread", "-fcoroutines", "-march=mips32r2", "-msoft-float"]'
-            asmflags: "-DOPENSSL_PTHREADS -pthread -march=mips32r2 -msoft-float"
+            apt-packages: ""
+            cc: mipsel-linux-muslsf-gcc
+            cxx: mipsel-linux-muslsf-g++
+            strip: mipsel-linux-muslsf-strip
+            flags: '["-DOPENSSL_PTHREADS", "-pthread", "-fcoroutines", "-march=mips32r2"]'
+            asmflags: "-DOPENSSL_PTHREADS -pthread -march=mips32r2"
             linkflags: '["-pthread", "-latomic"]'
             cmake-linker-flags: "-static -pthread -Wl,--whole-archive -lpthread -latomic -Wl,--no-whole-archive"
 
@@ -83,6 +83,13 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y build-essential cmake ninja-build pkg-config ${{ matrix.apt-packages }}
           pip install conan
+
+      - name: Install MIPS soft-float cross toolchain
+        if: matrix.arch_name == 'mipselsf'
+        run: |
+          curl -fsSL --retry 3 https://musl.cc/mipsel-linux-muslsf-cross.tgz -o /tmp/mipsel-linux-muslsf-cross.tgz
+          sudo tar -xzf /tmp/mipsel-linux-muslsf-cross.tgz -C /opt
+          echo "/opt/mipsel-linux-muslsf-cross/bin" >> "$GITHUB_PATH"
 
       - name: Cache Conan Packages
         id: cache-conan
