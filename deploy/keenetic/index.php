@@ -856,10 +856,21 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                                 $message .= ' Служба автоматически перезапущена.';
                             }
                         } else {
+                            // The FPTN client itself can parse Brotli-compressed fptnb: tokens.
+                            // The panel must not reject a token only because PHP lacks Brotli.
+                            // Clear any server preference that may refer to the previous token;
+                            // an empty PREFERRED_SERVER lets the client choose from all servers.
                             $config['TOKEN'] = $token;
+                            $config['PREFERRED_SERVER'] = '';
+                            $config['DISABLE_AUTO_FALLBACK'] = 'no';
                             write_config();
-                            $direct_diag = $GLOBALS['fptn_token_parse_diagnostic'] ?? 'Встроенный парсер не вернул подробности.';
-                            $error = 'Токен сохранён, но панель не смогла извлечь список серверов. Диагностика: ' . htmlspecialchars($direct_diag, ENT_QUOTES, 'UTF-8') . ' Клиентский CLI не поддерживает безопасный режим просмотра серверов, поэтому панель не запускает его для проверки токена.';
+                            $direct_diag = $GLOBALS['fptn_token_parse_diagnostic'] ?? 'Список серверов недоступен для панели.';
+                            $message = 'Токен сохранён. Панель не смогла прочитать список серверов (' . htmlspecialchars($direct_diag, ENT_QUOTES, 'UTF-8') . '), поэтому включён автовыбор сервера. Сам клиент FPTN разбирает токен самостоятельно.';
+                            if ($service_running) {
+                                $cmd = $init_script . ' restart 2>&1';
+                                exec($cmd, $restart_output, $restart_return);
+                                $message .= ' Служба перезапущена.';
+                            }
                         }
                     }
                 }
