@@ -93,48 +93,6 @@ function parse_fptn_token_direct($token) {
     ];
 }
 
-function parse_token_via_cli_DISABLED($token) {
-    global $cli_path;
-    if (!file_exists($cli_path) || !is_executable($cli_path)) {
-        $GLOBALS['fptn_token_cli_diagnostic'] = 'CLI отсутствует или не имеет права на выполнение.';
-        return null;
-    }
-    $commands = [
-        escapeshellcmd($cli_path) . " --access-token " . escapeshellarg($token) . " --show-servers 2>&1",
-        "/opt/lib/ld.so.1 --library-path /opt/lib " . escapeshellcmd($cli_path) . " --access-token " . escapeshellarg($token) . " --show-servers 2>&1"
-    ];
-    $attempts = [];
-    foreach ($commands as $index => $cmd) {
-        $output = [];
-        $ret = 0;
-        @exec($cmd, $output, $ret);
-        $raw = implode("\n", $output);
-        // Keep only a short, redacted diagnostic. Never return raw CLI output to the browser.
-        $safe_diag = str_replace((string)$token, '[TOKEN REDACTED]', $raw);
-        $safe_diag = preg_replace('/[A-Za-z0-9+\/_=-]{48,}/', '[LONG VALUE REDACTED]', $safe_diag);
-        $safe_diag = preg_replace('/[^\p{L}\p{N}\s.,:;_()\[\]{}\-\/]+/u', '?', $safe_diag);
-        $safe_diag = trim(substr(preg_replace('/\s+/', ' ', $safe_diag), 0, 220));
-        if ($ret === 0 && $raw !== '') {
-            $start = strpos($raw, '{');
-            $end = strrpos($raw, '}');
-            if ($start !== false && $end !== false && $end > $start) {
-                $parsed = json_decode(substr($raw, $start, $end - $start + 1), true);
-                if (is_array($parsed) && !empty($parsed['servers']) && is_array($parsed['servers'])) {
-                    $GLOBALS['fptn_token_cli_diagnostic'] = 'CLI успешно получил список серверов.';
-                    return $parsed;
-                }
-                $attempts[] = 'попытка '.($index + 1).': JSON не содержит ожидаемый массив servers';
-            } else {
-                $attempts[] = 'попытка '.($index + 1).': код 0, но JSON со списком серверов не найден';
-            }
-        } else {
-            $attempts[] = 'попытка '.($index + 1).': код завершения '.(int)$ret.($safe_diag !== '' ? ', сообщение: '.$safe_diag : ', вывода нет');
-        }
-    }
-    $GLOBALS['fptn_token_cli_diagnostic'] = 'CLI не смог разобрать токен ('.implode('; ', $attempts).'). Текст вывода скрыт, чтобы не раскрыть данные токена.';
-    return null;
-}
-
 function get_token_servers_info($token) {
     global $servers_file;
     if (empty($token)) {
@@ -157,8 +115,7 @@ function get_token_servers_info($token) {
         @file_put_contents($servers_file, json_encode($info, JSON_PRETTY_PRINT | JSON_UNESCAPED_UNICODE), LOCK_EX);
         return $info;
     }
-    // Never invoke fptn-client-cli to inspect a token: the CLI has no
-    // --show-servers option and a normal invocation may start a tunnel.
+    // Do not invoke fptn-client-cli for inspection: it has no safe read-only mode.
     return null;
 }
 
@@ -859,10 +816,6 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                     } else {
                         @unlink($servers_file);
                         $parsed = parse_fptn_token_direct($token);
-                        if (!$parsed) {
-                            $parsed = parse_token_via_cli($token);
-                        }
-
                         if ($parsed && !empty($parsed['servers']) && is_array($parsed['servers'])) {
                             $parsed['token_sha256'] = hash('sha256', $token);
                             @file_put_contents($servers_file, json_encode($parsed, JSON_PRETTY_PRINT | JSON_UNESCAPED_UNICODE), LOCK_EX);
@@ -881,8 +834,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                             $config['TOKEN'] = $token;
                             write_config();
                             $direct_diag = $GLOBALS['fptn_token_parse_diagnostic'] ?? 'Встроенный парсер не вернул подробности.';
-                            $cli_diag = $GLOBALS['fptn_token_cli_diagnostic'] ?? 'CLI-парсер не вернул подробности.';
-                            $error = 'Токен записан, но список серверов не удалось получить. Диагностика: встроенный парсер: ' . htmlspecialchars($direct_diag, ENT_QUOTES, 'UTF-8') . ' CLI: ' . htmlspecialchars($cli_diag, ENT_QUOTES, 'UTF-8');
+                            $error = 'Токен сохранён, но панель не смогла извлечь список серверов. Диагностика: ' . htmlspecialchars($direct_diag, ENT_QUOTES, 'UTF-8') . ' Клиентский CLI не поддерживает безопасный режим просмотра серверов, поэтому панель не запускает его для проверки токена.';
                         }
                     }
                 }
