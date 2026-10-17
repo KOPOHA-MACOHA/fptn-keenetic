@@ -603,8 +603,11 @@ check_binary_valid() {
 
 echo "Скачивание скомпилированного бинарника / Downloading compiled binary..."
 BIN_RAW_URL="${GITHUB_RAW_BASE}/deploy/keenetic/bin/fptn-client-cli-${ARCH_SUFFIX}"
-BIN_RELEASE_URL="https://github.com/AntikFull/fptn-keenetic/releases/download/${REMOTE_VER}/fptn-client-cli-${ARCH_SUFFIX}"
-BIN_LATEST_URL="https://github.com/AntikFull/fptn-keenetic/releases/latest/download/fptn-client-cli-${ARCH_SUFFIX}"
+# Binary assets are mirrored into this fork by .github/workflows/mirror-keenetic-binaries.yml.
+# Keep the installer independent of upstream's release URL availability.
+BIN_RELEASE_TAG="fptn-binaries-${REMOTE_VER}"
+BIN_RELEASE_URL="https://github.com/KOPOHA-MACOHA/fptn-keenetic/releases/download/${BIN_RELEASE_TAG}/fptn-client-cli-${ARCH_SUFFIX}"
+BIN_LATEST_URL="https://github.com/KOPOHA-MACOHA/fptn-keenetic/releases/latest/download/fptn-client-cli-${ARCH_SUFFIX}"
 
 DOWNLOAD_SUCCESS=no
 for _src_url in "$BIN_RAW_URL" "$BIN_RELEASE_URL" "$BIN_LATEST_URL"; do
@@ -651,7 +654,7 @@ done
 # resolve the matching asset ID from the public release metadata, then use the API.
 if [ "$DOWNLOAD_SUCCESS" != "yes" ]; then
     echo "Пробую GitHub Releases API / Trying GitHub Releases API..."
-    BIN_ASSET_ID=$(curl -fsSL --connect-timeout 10 --max-time 30 "https://api.github.com/repos/AntikFull/fptn-keenetic/releases/tags/${REMOTE_VER}" 2>/dev/null |
+    BIN_ASSET_ID=$(curl -fsSL --connect-timeout 10 --max-time 30 "https://api.github.com/repos/KOPOHA-MACOHA/fptn-keenetic/releases/tags/${BIN_RELEASE_TAG}" 2>/dev/null |
         awk -v target="fptn-client-cli-${ARCH_SUFFIX}" '
             /"id": [0-9]+,/ { id=$2; gsub(/,/, "", id) }
             $0 ~ "\"name\": \"" target "\"" { print id; exit }
@@ -660,7 +663,7 @@ if [ "$DOWNLOAD_SUCCESS" != "yes" ]; then
         ''|*[!0-9]*) BIN_ASSET_ID="" ;;
     esac
     if [ -n "$BIN_ASSET_ID" ]; then
-        BIN_API_URL="https://api.github.com/repos/AntikFull/fptn-keenetic/releases/assets/${BIN_ASSET_ID}"
+        BIN_API_URL="https://api.github.com/repos/KOPOHA-MACOHA/fptn-keenetic/releases/assets/${BIN_ASSET_ID}"
         for _asset_url in "$BIN_API_URL" "https://ghproxy.net/${BIN_API_URL}" "https://ghfast.top/${BIN_API_URL}"; do
             echo "Источник бинарника / Binary asset source: $_asset_url"
             rm -f "/opt/bin/fptn-client-cli.tmp"
