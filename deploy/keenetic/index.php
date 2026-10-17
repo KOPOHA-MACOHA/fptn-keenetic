@@ -806,9 +806,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         elseif ($action === 'login' && $password_set) {
             $username = $_POST['username'] ?? '';
             $pass = $_POST['password'] ?? '';
-            $legacy_password_ok = !empty($config['WEB_PASSWORD'])
-                && password_verify($pass, $config['WEB_PASSWORD']);
-            if ($legacy_password_ok || authenticate_entware_user($username, $pass)) {
+            if (authenticate_entware_user($username, $pass)) {
                 session_regenerate_id(true);
                 $_SESSION['auth'] = true;
                 header("Location: " . $_SERVER['PHP_SELF']);
