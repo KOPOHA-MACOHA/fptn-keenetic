@@ -34,83 +34,97 @@ $init_script = "/opt/etc/init.d/S53fptn-client";
 
 function parse_fptn_token_direct($token) {
     $token = trim((string)$token);
-    if (empty($token)) {
+    $GLOBALS['fptn_token_parse_diagnostic'] = 'Проверка токена не выполнена.';
+    if ($token === '') {
+        $GLOBALS['fptn_token_parse_diagnostic'] = 'Токен пустой.';
         return null;
     }
     $is_brotli = (stripos($token, 'fptnb:') === 0 || stripos($token, 'fptnb//') === 0);
-    // Удаляем стандартные URI-схемы и спецсимволы
     $clean = preg_replace('/^(fptnb:\/\/|fptnb:|fptn:\/\/|fptn:)/i', '', $token);
     $clean = preg_replace('/[\s\r\n\t=]+/', '', $clean);
-    
     $decoded = base64_decode($clean, true);
-    if ($decoded !== false) {
-        $decompressed = false;
-        if ($is_brotli) {
-            if (function_exists('brotli_uncompress')) {
-                $decompressed = @brotli_uncompress($decoded);
-            }
-            if ($decompressed === false) {
-                // Попытка распаковки через системную утилиту brotli
-                $descriptors = [
-                    0 => ['pipe', 'r'],
-                    1 => ['pipe', 'w'],
-                    2 => ['pipe', 'w']
-                ];
-                $process = @proc_open('brotli -d -c 2>/dev/null', $descriptors, $pipes);
-                if (is_resource($process)) {
-                    fwrite($pipes[0], $decoded);
-                    fclose($pipes[0]);
-                    $decompressed = stream_get_contents($pipes[1]);
-                    fclose($pipes[1]);
-                    fclose($pipes[2]);
-                    proc_close($process);
-                }
-            }
-        } else {
-            $decompressed = $decoded;
-        }
-
-        if ($decompressed) {
-            $json = json_decode($decompressed, true);
-            if ($json && !empty($json['servers']) && is_array($json['servers'])) {
-                return [
-                    'service_name' => $json['service_name'] ?? 'FPTN',
-                    'username' => $json['username'] ?? '',
-                    'servers' => $json['servers']
-                ];
-            }
-        }
+    if ($decoded === false) {
+        $GLOBALS['fptn_token_parse_diagnostic'] = 'Токен не декодируется как Base64 после удаления префикса.';
+        return null;
     }
-    return null;
+    $decompressed = false;
+    if ($is_brotli) {
+        if (function_exists('brotli_uncompress')) {
+            $decompressed = @brotli_uncompress($decoded);
+        }
+        if ($decompressed === false && function_exists('proc_open')) {
+            $descriptors = [0 => ['pipe', 'r'], 1 => ['pipe', 'w'], 2 => ['pipe', 'w']];
+            $process = @proc_open('brotli -d -c 2>/dev/null', $descriptors, $pipes);
+            if (is_resource($process)) {
+                fwrite($pipes[0], $decoded);
+                fclose($pipes[0]);
+                $decompressed = stream_get_contents($pipes[1]);
+                fclose($pipes[1]);
+                stream_get_contents($pipes[2]);
+                fclose($pipes[2]);
+                proc_close($process);
+            }
+        }
+        if ($decompressed === false || $decompressed === '') {
+            $GLOBALS['fptn_token_parse_diagnostic'] = function_exists('brotli_uncompress')
+                ? 'Base64 корректен, но Brotli-распаковка не удалась.'
+                : 'Brotli-распаковка не удалась; PHP-функция Brotli отсутствует или системная утилита недоступна.';
+            return null;
+        }
+    } else {
+        $decompressed = $decoded;
+    }
+    $json = json_decode($decompressed, true);
+    if (!is_array($json)) {
+        $GLOBALS['fptn_token_parse_diagnostic'] = 'Содержимое декодировано, но это невалидный JSON ('.json_last_error_msg().').';
+        return null;
+    }
+    if (empty($json['servers']) || !is_array($json['servers'])) {
+        $GLOBALS['fptn_token_parse_diagnostic'] = 'JSON распознан, но в нём нет непустого массива servers; возможно, формат токена изменился.';
+        return null;
+    }
+    $GLOBALS['fptn_token_parse_diagnostic'] = 'Токен успешно разобран встроенным парсером.';
+    return [
+        'service_name' => $json['service_name'] ?? 'FPTN',
+        'username' => $json['username'] ?? '',
+        'servers' => $json['servers']
+    ];
 }
 
 function parse_token_via_cli($token) {
     global $cli_path;
     if (!file_exists($cli_path) || !is_executable($cli_path)) {
+        $GLOBALS['fptn_token_cli_diagnostic'] = 'CLI отсутствует или не имеет права на выполнение.';
         return null;
     }
-    // Пробуем прямой вызов CLI, а при необходимости через dynamic loader Entware
     $commands = [
-        escapeshellcmd($cli_path) . " --access-token " . escapeshellarg($token) . " --show-servers 2>/dev/null",
-        "/opt/lib/ld.so.1 --library-path /opt/lib " . escapeshellcmd($cli_path) . " --access-token " . escapeshellarg($token) . " --show-servers 2>/dev/null"
+        escapeshellcmd($cli_path) . " --access-token " . escapeshellarg($token) . " --show-servers 2>&1",
+        "/opt/lib/ld.so.1 --library-path /opt/lib " . escapeshellcmd($cli_path) . " --access-token " . escapeshellarg($token) . " --show-servers 2>&1"
     ];
-    foreach ($commands as $cmd) {
+    $attempts = [];
+    foreach ($commands as $index => $cmd) {
         $output = [];
         $ret = 0;
         @exec($cmd, $output, $ret);
-        if ($ret === 0 && !empty($output)) {
-            $raw = implode("\n", $output);
+        $raw = implode("\n", $output);
+        if ($ret === 0 && $raw !== '') {
             $start = strpos($raw, '{');
             $end = strrpos($raw, '}');
             if ($start !== false && $end !== false && $end > $start) {
-                $json_str = substr($raw, $start, $end - $start + 1);
-                $parsed = json_decode($json_str, true);
-                if ($parsed && !empty($parsed['servers'])) {
+                $parsed = json_decode(substr($raw, $start, $end - $start + 1), true);
+                if (is_array($parsed) && !empty($parsed['servers']) && is_array($parsed['servers'])) {
+                    $GLOBALS['fptn_token_cli_diagnostic'] = 'CLI успешно получил список серверов.';
                     return $parsed;
                 }
+                $attempts[] = 'попытка '.($index + 1).': JSON не содержит ожидаемый массив servers';
+            } else {
+                $attempts[] = 'попытка '.($index + 1).': код 0, но JSON со списком серверов не найден';
             }
+        } else {
+            $attempts[] = 'попытка '.($index + 1).': код завершения '.(int)$ret.($raw !== '' ? ', вывод ошибки присутствует' : ', вывода нет');
         }
     }
+    $GLOBALS['fptn_token_cli_diagnostic'] = 'CLI не смог разобрать токен ('.implode('; ', $attempts).'). Текст вывода скрыт, чтобы не раскрыть данные токена.';
     return null;
 }
 
@@ -863,7 +877,9 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                         } else {
                             $config['TOKEN'] = $token;
                             write_config();
-                            $error = 'Токен записан в конфигурацию, но список серверов не удалось распарсить. Проверьте правильность токена.';
+                            $direct_diag = $GLOBALS['fptn_token_parse_diagnostic'] ?? 'Встроенный парсер не вернул подробности.';
+                            $cli_diag = $GLOBALS['fptn_token_cli_diagnostic'] ?? 'CLI-парсер не вернул подробности.';
+                            $error = 'Токен записан, но список серверов не удалось получить. Диагностика: встроенный парсер: ' . htmlspecialchars($direct_diag, ENT_QUOTES, 'UTF-8') . ' CLI: ' . htmlspecialchars($cli_diag, ENT_QUOTES, 'UTF-8');
                         }
                     }
                 }
