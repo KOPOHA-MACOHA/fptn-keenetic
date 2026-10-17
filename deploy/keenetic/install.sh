@@ -737,7 +737,7 @@ if [ "$INSTALL_WEB_PANEL" = "yes" ]; then
     if [ -f "$SCRIPT_DIR/index.php" ]; then
         cp "$SCRIPT_DIR/index.php" "$WWW_DIR/index.php"
     else
-        if ! download_file "\${GITHUB_RAW_BASE}/deploy/keenetic/index.php" "$WWW_DIR/index.php" 30; then
+        if ! download_file "${GITHUB_RAW_BASE}/deploy/keenetic/index.php" "$WWW_DIR/index.php" 30; then
             echo "Ошибка: Не удалось скачать index.php / Error: Failed to download index.php"
             exit 1
         fi
@@ -815,6 +815,22 @@ EOF
         exit 1
     fi
     rm -f "$LIGHTTPD_RESTART_LOG"
+
+    # Smoke-test PHP through the actual listener before claiming the panel works.
+    _fptn_page=$(curl -fsS --max-time 10 "http://127.0.0.1:$USER_PORT/" 2>/dev/null || true)
+    if [ -z "$_fptn_page" ] || echo "$_fptn_page" | grep -qi "No input file specified"; then
+        echo "ОШИБКА: PHP-CGI не смог обработать index.php через порт $USER_PORT."
+        echo "Проверьте /opt/bin/fptn-php-cgi, $WWW_DIR/index.php и конфигурацию PHP."
+        echo "$_fptn_page" | head -n 10
+        if [ "$FPTN_LIGHTTPD_HAD_CONFIG" = "yes" ] && [ -f "$FPTN_LIGHTTPD_BACKUP" ]; then
+            cp -p "$FPTN_LIGHTTPD_BACKUP" "$FPTN_LIGHTTPD_CONF"
+        else
+            rm -f "$FPTN_LIGHTTPD_CONF"
+        fi
+        /opt/etc/init.d/S80lighttpd restart >/dev/null 2>&1 || true
+        echo "Конфигурация FPTN Lighttpd восстановлена; резервные каталоги не удалялись."
+        exit 1
+    fi
 
     # 7. Entry point was downloaded and validated before Lighttpd restart.
     echo ""
