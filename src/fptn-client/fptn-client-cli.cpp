@@ -62,6 +62,10 @@ int main(int argc, char* argv[]) {
     argparse::ArgumentParser args("fptn-client", FPTN_VERSION);
     // Required arguments
     args.add_argument("--access-token").required().help("Access token");
+    args.add_argument("--show-servers")
+        .default_value(false)
+        .implicit_value(true)
+        .help("Print the access token's server list as JSON and exit");
     args.add_argument("--disable-routing")
         .default_value(false)
         .implicit_value(true)
@@ -253,6 +257,30 @@ int main(int argc, char* argv[]) {
       std::cerr << err.what() << std::endl;
       std::cerr << args;
       return EXIT_FAILURE;
+    }
+
+    // This read-only mode must exit before logger, gateway discovery, TUN setup,
+    // or any VPN connection attempt. The panel uses it to inspect compressed tokens.
+    if (args.get<bool>("--show-servers")) {
+      const auto token = args.get<std::string>("--access-token");
+      fptn::config::ConfigFile config(token, "",
+          fptn::protocol::https::CensorshipStrategy::kSniRealityModeYandex26_4);
+      config.Parse();
+
+      nlohmann::json result;
+      result["service_name"] = config.GetServiceName();
+      result["username"] = config.GetUsername();
+      result["servers"] = nlohmann::json::array();
+      for (const auto& server : config.GetServers()) {
+        result["servers"].push_back({
+            {"name", server.name},
+            {"host", server.host},
+            {"port", server.port},
+            {"md5_fingerprint", server.md5_fingerprint}
+        });
+      }
+      std::cout << result.dump() << std::endl;
+      return EXIT_SUCCESS;
     }
 
     if (fptn::logger::init("fptn-client-cli")) {
