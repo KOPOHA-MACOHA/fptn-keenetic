@@ -34,54 +34,78 @@ $init_script = "/opt/etc/init.d/S53fptn-client";
 
 function parse_fptn_token_direct($token) {
     $token = trim((string)$token);
-    if (empty($token)) {
+    $GLOBALS['fptn_token_parse_diagnostic'] = 'Проверка токена не выполнена.';
+    if ($token === '') {
+        $GLOBALS['fptn_token_parse_diagnostic'] = 'Токен пустой.';
         return null;
     }
     $is_brotli = (stripos($token, 'fptnb:') === 0 || stripos($token, 'fptnb//') === 0);
-    // Удаляем стандартные URI-схемы и спецсимволы
     $clean = preg_replace('/^(fptnb:\/\/|fptnb:|fptn:\/\/|fptn:)/i', '', $token);
     $clean = preg_replace('/[\s\r\n\t=]+/', '', $clean);
-    
     $decoded = base64_decode($clean, true);
-    if ($decoded !== false) {
-        $decompressed = false;
-        if ($is_brotli) {
-            if (function_exists('brotli_uncompress')) {
-                $decompressed = @brotli_uncompress($decoded);
-            }
-            if ($decompressed === false) {
-                // Попытка распаковки через системную утилиту brotli
-                $descriptors = [
-                    0 => ['pipe', 'r'],
-                    1 => ['pipe', 'w'],
-                    2 => ['pipe', 'w']
-                ];
-                $process = @proc_open('brotli -d -c 2>/dev/null', $descriptors, $pipes);
-                if (is_resource($process)) {
-                    fwrite($pipes[0], $decoded);
-                    fclose($pipes[0]);
-                    $decompressed = stream_get_contents($pipes[1]);
-                    fclose($pipes[1]);
-                    fclose($pipes[2]);
-                    proc_close($process);
-                }
-            }
-        } else {
-            $decompressed = $decoded;
-        }
-
-        if ($decompressed) {
-            $json = json_decode($decompressed, true);
-            if ($json && !empty($json['servers']) && is_array($json['servers'])) {
-                return [
-                    'service_name' => $json['service_name'] ?? 'FPTN',
-                    'username' => $json['username'] ?? '',
-                    'servers' => $json['servers']
-                ];
-            }
-        }
+    if ($decoded === false) {
+        $GLOBALS['fptn_token_parse_diagnostic'] = 'Токен не декодируется как Base64 после удаления префикса.';
+        return null;
     }
-    return null;
+    $decompressed = false;
+    if ($is_brotli && !is_array(json_decode($decoded, true))) {
+        // Some locally generated fptnb: tokens contain plain Base64 JSON; only
+        // invoke Brotli when the decoded payload is not already valid JSON.
+        if (function_exists('brotli_uncompress')) {
+            $decompressed = @brotli_uncompress($decoded);
+        }
+        if ($decompressed === false && function_exists('proc_open')) {
+            $descriptors = [0 => ['pipe', 'r'], 1 => ['pipe', 'w'], 2 => ['pipe', 'w']];
+            $process = @proc_open('brotli -d -c 2>/dev/null', $descriptors, $pipes);
+            if (is_resource($process)) {
+                fwrite($pipes[0], $decoded);
+                fclose($pipes[0]);
+                $decompressed = stream_get_contents($pipes[1]);
+                fclose($pipes[1]);
+                stream_get_contents($pipes[2]);
+                fclose($pipes[2]);
+                proc_close($process);
+            }
+        }
+        if ($decompressed === false || $decompressed === '') {
+            $GLOBALS['fptn_token_parse_diagnostic'] = function_exists('brotli_uncompress')
+                ? 'Base64 корректен, но Brotli-распаковка не удалась.'
+                : 'Brotli-распаковка не удалась; PHP-функция Brotli отсутствует или системная утилита недоступна.';
+            return null;
+        }
+    } else {
+        $decompressed = $decoded;
+    }
+    $json = json_decode($decompressed, true);
+    if (!is_array($json)) {
+        $GLOBALS['fptn_token_parse_diagnostic'] = 'Содержимое декодировано, но это невалидный JSON ('.json_last_error_msg().').';
+        return null;
+    }
+    // Compatibility with the old panel's locally generated token schema.
+    // Those tokens contain host/port/user fields instead of the official servers array.
+    if ((!isset($json['servers']) || !is_array($json['servers']) || empty($json['servers']))
+        && !empty($json['host']) && !empty($json['port'])) {
+        $json = [
+            'service_name' => $json['service_name'] ?? $json['host'],
+            'username' => $json['username'] ?? ($json['user'] ?? ''),
+            'servers' => [[
+                'name' => $json['host'],
+                'host' => $json['host'],
+                'port' => (int)$json['port'],
+                'md5_fingerprint' => $json['md5_fingerprint'] ?? ''
+            ]]
+        ];
+    }
+    if (empty($json['servers']) || !is_array($json['servers'])) {
+        $GLOBALS['fptn_token_parse_diagnostic'] = 'JSON распознан, но в нём нет непустого массива servers; формат токена не распознан.';
+        return null;
+    }
+    $GLOBALS['fptn_token_parse_diagnostic'] = 'Токен успешно разобран встроенным парсером.';
+    return [
+        'service_name' => $json['service_name'] ?? 'FPTN',
+        'username' => $json['username'] ?? ($json['user'] ?? ''),
+        'servers' => $json['servers']
+    ];
 }
 
 function parse_token_via_cli($token) {
@@ -89,7 +113,9 @@ function parse_token_via_cli($token) {
     if (!file_exists($cli_path) || !is_executable($cli_path)) {
         return null;
     }
-    // Пробуем прямой вызов CLI, а при необходимости через dynamic loader Entware
+    // Сохраняем исходный механизм оригинального проекта: клиент сам умеет
+    // разобрать fptnb-токен, даже если на роутере нет PHP Brotli и утилиты brotli.
+    // Пробуем обычный запуск и вариант через динамический загрузчик Entware.
     $commands = [
         escapeshellcmd($cli_path) . " --access-token " . escapeshellarg($token) . " --show-servers 2>/dev/null",
         "/opt/lib/ld.so.1 --library-path /opt/lib " . escapeshellcmd($cli_path) . " --access-token " . escapeshellarg($token) . " --show-servers 2>/dev/null"
@@ -103,10 +129,13 @@ function parse_token_via_cli($token) {
             $start = strpos($raw, '{');
             $end = strrpos($raw, '}');
             if ($start !== false && $end !== false && $end > $start) {
-                $json_str = substr($raw, $start, $end - $start + 1);
-                $parsed = json_decode($json_str, true);
-                if ($parsed && !empty($parsed['servers'])) {
-                    return $parsed;
+                $parsed = json_decode(substr($raw, $start, $end - $start + 1), true);
+                if (is_array($parsed) && !empty($parsed['servers']) && is_array($parsed['servers'])) {
+                    return [
+                        'service_name' => $parsed['service_name'] ?? 'FPTN',
+                        'username' => $parsed['username'] ?? '',
+                        'servers' => $parsed['servers']
+                    ];
                 }
             }
         }
@@ -136,6 +165,8 @@ function get_token_servers_info($token) {
         @file_put_contents($servers_file, json_encode($info, JSON_PRETTY_PRINT | JSON_UNESCAPED_UNICODE), LOCK_EX);
         return $info;
     }
+    // Fallback оригинального проекта: fptn-client-cli распаковывает fptnb-токен
+    // собственной Brotli-реализацией и возвращает JSON со списком серверов.
     $cli_info = parse_token_via_cli($token);
     if ($cli_info) {
         $cli_info['token_sha256'] = $token_hash;
@@ -288,14 +319,24 @@ function delete_server_user($username) {
 }
 
 function generate_user_token($host, $port, $username, $password, $fingerprint = '') {
+    // The FPTN client interprets fptnb: as Brotli-compressed data. This panel
+    // creates plain JSON, so use the uncompressed fptn: format and the schema
+    // consumed by ConfigFile::Parse().
     $token_data = [
-        'host' => $host,
-        'port' => (int)$port,
-        'user' => $username,
-        'password' => $password,
-        'md5_fingerprint' => $fingerprint
+        'version' => 1,
+        'service_name' => (string)$host,
+        'username' => (string)$username,
+        'password' => (string)$password,
+        'servers' => [[
+            'name' => (string)$host,
+            'host' => (string)$host,
+            'port' => (int)$port,
+            'md5_fingerprint' => (string)$fingerprint
+        ]],
+        'censored_zone_servers' => []
     ];
-    return 'fptnb:' . base64_encode(json_encode($token_data));
+    $json = json_encode($token_data, JSON_UNESCAPED_SLASHES);
+    return 'fptn:' . rtrim(base64_encode($json), '=');
 }
 
 // Вспомогательная функция для HTTP запросов с каскадным фоллбэком (cURL -> CLI curl -> stream_context)
@@ -398,8 +439,39 @@ function read_config() {
 }
 
 read_config();
-$password_set = !empty($config['WEB_PASSWORD']);
-$authenticated = !$password_set || (isset($_SESSION['auth']) && $_SESSION['auth'] === true);
+
+// Match nfqws2 web-panel authentication: validate the supplied Entware account
+// against /opt/etc/shadow (or passwd if shadow is unavailable). Never expose hashes.
+function authenticate_entware_user($username, $password) {
+    if (!is_string($username) || !is_string($password)
+        || !preg_match('/^[a-zA-Z0-9_.-]+$/', $username)) {
+        return false;
+    }
+    $shadow_file = '/opt/etc/shadow';
+    $passwd_file = '/opt/etc/passwd';
+    $auth_file = is_readable($shadow_file) ? $shadow_file : $passwd_file;
+    if (!is_readable($auth_file)) {
+        return false;
+    }
+    $users = @file($auth_file, FILE_IGNORE_NEW_LINES | FILE_SKIP_EMPTY_LINES);
+    if ($users === false) return false;
+    foreach ($users as $line) {
+        $parts = explode(':', $line);
+        if (count($parts) < 2 || $parts[0] !== $username) continue;
+        $stored_hash = $parts[1];
+        if ($stored_hash === '' || $stored_hash === '!' || $stored_hash === '*'
+            || strpos($stored_hash, '!') === 0 || strpos($stored_hash, '*') === 0) {
+            return false;
+        }
+        $calculated = crypt($password, $stored_hash);
+        return is_string($calculated) && hash_equals($stored_hash, $calculated);
+    }
+    return false;
+}
+
+// No separately stored panel password: use the same Entware account authentication as nfqws2.
+$password_set = true;
+$authenticated = isset($_SESSION['auth']) && $_SESSION['auth'] === true;
 
 // Обработка AJAX запросов (проверка обновлений, автообновление статуса и запуск обновления)
 if (isset($_GET['ajax'])) {
@@ -773,14 +845,15 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 
         // 2. Вход (если пароль задан)
         elseif ($action === 'login' && $password_set) {
+            $username = $_POST['username'] ?? '';
             $pass = $_POST['password'] ?? '';
-            if (password_verify($pass, $config['WEB_PASSWORD'])) {
+            if (authenticate_entware_user($username, $pass)) {
                 session_regenerate_id(true);
                 $_SESSION['auth'] = true;
                 header("Location: " . $_SERVER['PHP_SELF']);
                 exit;
             } else {
-                $error = 'Неверный пароль';
+                $error = 'Неверный логин или пароль Entware';
             }
         }
 
@@ -810,10 +883,6 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                     } else {
                         @unlink($servers_file);
                         $parsed = parse_fptn_token_direct($token);
-                        if (!$parsed) {
-                            $parsed = parse_token_via_cli($token);
-                        }
-
                         if ($parsed && !empty($parsed['servers']) && is_array($parsed['servers'])) {
                             $parsed['token_sha256'] = hash('sha256', $token);
                             @file_put_contents($servers_file, json_encode($parsed, JSON_PRETTY_PRINT | JSON_UNESCAPED_UNICODE), LOCK_EX);
@@ -829,9 +898,21 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                                 $message .= ' Служба автоматически перезапущена.';
                             }
                         } else {
+                            // The FPTN client itself can parse Brotli-compressed fptnb: tokens.
+                            // The panel must not reject a token only because PHP lacks Brotli.
+                            // Clear any server preference that may refer to the previous token;
+                            // an empty PREFERRED_SERVER lets the client choose from all servers.
                             $config['TOKEN'] = $token;
+                            $config['PREFERRED_SERVER'] = '';
+                            $config['DISABLE_AUTO_FALLBACK'] = 'no';
                             write_config();
-                            $error = 'Токен записан в конфигурацию, но список серверов не удалось распарсить. Проверьте правильность токена.';
+                            $direct_diag = $GLOBALS['fptn_token_parse_diagnostic'] ?? 'Список серверов недоступен для панели.';
+                            $message = 'Токен сохранён. Панель не смогла прочитать список серверов (' . htmlspecialchars($direct_diag, ENT_QUOTES, 'UTF-8') . '), поэтому включён автовыбор сервера. Сам клиент FPTN разбирает токен самостоятельно.';
+                            if ($service_running) {
+                                $cmd = $init_script . ' restart 2>&1';
+                                exec($cmd, $restart_output, $restart_return);
+                                $message .= ' Служба перезапущена.';
+                            }
                         }
                     }
                 }
@@ -1483,7 +1564,7 @@ if (!empty($config['TOKEN'])) {
                     <input type="hidden" name="action" value="setup_password">
                     <input type="hidden" name="csrf_token" value="<?php echo htmlspecialchars($_SESSION['csrf_token'] ?? ''); ?>">
                     <div class="form-group">
-                        <label for="new_pass">Новый пароль (минимум 6 символов)</label>
+                        <label for="new_pass">Новый пароль (минимум 10 символов)</label>
                         <input type="password" id="new_pass" name="password" required autocomplete="new-password">
                     </div>
                     <div class="form-group">
@@ -1505,8 +1586,12 @@ if (!empty($config['TOKEN'])) {
                     <input type="hidden" name="action" value="login">
                     <input type="hidden" name="csrf_token" value="<?php echo htmlspecialchars($_SESSION['csrf_token'] ?? ''); ?>">
                     <div class="form-group">
-                        <label for="login_pass">Пароль администратора</label>
-                        <input type="password" id="login_pass" name="password" required autofocus autocomplete="current-password">
+                        <label for="login_user">Пользователь Entware</label>
+                        <input type="text" id="login_user" name="username" value="root" required autofocus autocomplete="username">
+                    </div>
+                    <div class="form-group">
+                        <label for="login_pass">Пароль Entware</label>
+                        <input type="password" id="login_pass" name="password" required autocomplete="current-password">
                     </div>
                     <button type="submit" class="btn btn-primary btn-full">Войти</button>
                 </form>

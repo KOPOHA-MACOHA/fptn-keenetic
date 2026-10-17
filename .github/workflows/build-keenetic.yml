@@ -2,7 +2,7 @@ name: Build FPTN Client for Keenetic
 
 on:
   push:
-    branches: [ master, main ]
+    branches: [ master, main, fix/entware-mirror-fallback ]
     tags: [ '*' ]
   # Cross-architecture builds run on mainline changes or by manual dispatch.
   # PR checks use the lightweight script validator; dispatch this workflow manually
@@ -21,38 +21,18 @@ permissions:
 
 jobs:
   build:
-    name: Build for ${{ matrix.arch-name }}
+    name: Build for ${{ matrix.arch_name }}
     runs-on: ubuntu-22.04
     strategy:
       fail-fast: false
       matrix:
         include:
-          - arch-name: aarch64
-            conan-arch: armv8
-            apt-packages: gcc-aarch64-linux-gnu g++-aarch64-linux-gnu
-            cc: aarch64-linux-gnu-gcc
-            cxx: aarch64-linux-gnu-g++
-            strip: aarch64-linux-gnu-strip
-            flags: '["-DOPENSSL_PTHREADS", "-pthread", "-fcoroutines", "-march=armv8-a", "-mno-outline-atomics"]'
-            asmflags: "-DOPENSSL_PTHREADS -pthread -march=armv8-a"
-            linkflags: '["-pthread"]'
-            cmake-linker-flags: "-static -pthread -Wl,--whole-archive -lpthread -Wl,--no-whole-archive"
-          - arch-name: armv7
-            conan-arch: armv7
-            apt-packages: gcc-arm-linux-gnueabihf g++-arm-linux-gnueabihf
-            cc: arm-linux-gnueabihf-gcc
-            cxx: arm-linux-gnueabihf-g++
-            strip: arm-linux-gnueabihf-strip
-            flags: '["-DOPENSSL_PTHREADS", "-pthread", "-fcoroutines", "-march=armv7-a", "-mfpu=vfpv3-d16", "-mfloat-abi=hard"]'
-            asmflags: "-DOPENSSL_PTHREADS -pthread -march=armv7-a -mfpu=vfpv3-d16 -mfloat-abi=hard"
-            linkflags: '["-pthread", "-latomic"]'
-            cmake-linker-flags: "-static -pthread -Wl,--whole-archive -lpthread -latomic -Wl,--no-whole-archive"
-          - arch-name: mipsel
+          - arch_name: mipselsf
             conan-arch: mips
-            apt-packages: gcc-mipsel-linux-gnu g++-mipsel-linux-gnu
-            cc: mipsel-linux-gnu-gcc
-            cxx: mipsel-linux-gnu-g++
-            strip: mipsel-linux-gnu-strip
+            apt-packages: ""
+            cc: mipsel-linux-muslsf-gcc
+            cxx: mipsel-linux-muslsf-g++
+            strip: mipsel-linux-muslsf-strip
             flags: '["-DOPENSSL_PTHREADS", "-pthread", "-fcoroutines", "-march=mips32r2"]'
             asmflags: "-DOPENSSL_PTHREADS -pthread -march=mips32r2"
             linkflags: '["-pthread", "-latomic"]'
@@ -73,21 +53,31 @@ jobs:
           sudo apt-get install -y build-essential cmake ninja-build pkg-config ${{ matrix.apt-packages }}
           pip install conan
 
+      - name: Install MIPS soft-float cross toolchain
+        if: matrix.arch_name == 'mipselsf'
+        run: |
+          curl -fSL --connect-timeout 15 --max-time 300 --retry 3 --retry-all-errors https://github.com/musl-cc/musl.cc/releases/download/v0.0.1/mipsel-linux-muslsf-cross.tgz -o /tmp/mipsel-linux-muslsf-cross.tgz
+          echo "a61c3bbf9fbb0be80fe2abdb4ea8b6f5afdf664b5b4104a3784a326270905216  /tmp/mipsel-linux-muslsf-cross.tgz" | sha256sum -c -
+          sudo tar -xzf /tmp/mipsel-linux-muslsf-cross.tgz -C /opt
+          # Fix absolute libtool paths embedded in the relocatable toolchain archive.
+          sudo find /opt/mipsel-linux-muslsf-cross -name '*.la' -type f -exec sed -i 's|/mipsel-linux-muslsf/lib|/opt/mipsel-linux-muslsf-cross/mipsel-linux-muslsf/lib|g' {} +
+          echo "/opt/mipsel-linux-muslsf-cross/bin" >> "$GITHUB_PATH"
+
       - name: Cache Conan Packages
         id: cache-conan
         uses: actions/cache@v3
         with:
           path: ~/.conan2/p
-          key: conan-v2-${{ matrix.arch-name }}-${{ hashFiles('conanfile.py', '.conan/**', '.github/workflows/build-keenetic.yml') }}
+          key: conan-v2-${{ matrix.arch_name }}-${{ hashFiles('conanfile.py', '.conan/**', '.github/workflows/build-keenetic.yml') }}
           restore-keys: |
-            conan-v2-${{ matrix.arch-name }}-
+            conan-v2-${{ matrix.arch_name }}-
 
       - name: Configure Conan profile
         run: |
           conan profile detect --force
           echo 'set(MI_NO_OPT_ARCH ON CACHE BOOL "" FORCE)' > ~/.conan2/profiles/global_user_toolchain.cmake
           echo 'set(MI_OPT_ARCH OFF CACHE BOOL "" FORCE)' >> ~/.conan2/profiles/global_user_toolchain.cmake
-          cat << 'EOF' > ~/.conan2/profiles/${{ matrix.arch-name }}_cross
+          cat << 'EOF' > ~/.conan2/profiles/${{ matrix.arch_name }}_cross
           [settings]
           os=Linux
           arch=${{ matrix.conan-arch }}
@@ -111,14 +101,14 @@ jobs:
 
       - name: Install Conan Dependencies
         run: |
-          conan install . --output-folder=build --build=missing -pr:h=${{ matrix.arch-name }}_cross -pr:b=default
+          conan install . --output-folder=build --build=missing -pr:h=${{ matrix.arch_name }}_cross -pr:b=default
 
       - name: Save Conan Cache
         uses: actions/cache/save@v3
         if: always() && steps.cache-conan.outputs.cache-hit != 'true'
         with:
           path: ~/.conan2/p
-          key: conan-v2-${{ matrix.arch-name }}-${{ hashFiles('conanfile.py', '.conan/**', '.github/workflows/build-keenetic.yml') }}
+          key: conan-v2-${{ matrix.arch_name }}-${{ hashFiles('conanfile.py', '.conan/**', '.github/workflows/build-keenetic.yml') }}
 
       - name: Configure CMake and Build
         run: |
@@ -136,33 +126,46 @@ jobs:
 
       - name: Prepare Named Binary Asset
         run: |
-          cp build/src/fptn-client/fptn-client-cli fptn-client-cli-${{ matrix.arch-name }}
-          cp build/src/fptn-passwd/fptn-passwd fptn-passwd-${{ matrix.arch-name }}
+          cp build/src/fptn-client/fptn-client-cli fptn-client-cli-${{ matrix.arch_name }}
+          cp build/src/fptn-passwd/fptn-passwd fptn-passwd-${{ matrix.arch_name }}
           # Убираем отладочную информацию
-          ls -lh fptn-client-cli-${{ matrix.arch-name }} fptn-passwd-${{ matrix.arch-name }}
-          ${{ matrix.strip }} --strip-unneeded fptn-client-cli-${{ matrix.arch-name }}
-          ${{ matrix.strip }} --strip-unneeded fptn-passwd-${{ matrix.arch-name }}
-          ls -lh fptn-client-cli-${{ matrix.arch-name }} fptn-passwd-${{ matrix.arch-name }}
-          file fptn-client-cli-${{ matrix.arch-name }} fptn-passwd-${{ matrix.arch-name }}
+          ls -lh fptn-client-cli-${{ matrix.arch_name }} fptn-passwd-${{ matrix.arch_name }}
+          ${{ matrix.strip }} --strip-unneeded fptn-client-cli-${{ matrix.arch_name }}
+          ${{ matrix.strip }} --strip-unneeded fptn-passwd-${{ matrix.arch_name }}
+          ls -lh fptn-client-cli-${{ matrix.arch_name }} fptn-passwd-${{ matrix.arch_name }}
+          file fptn-client-cli-${{ matrix.arch_name }} fptn-passwd-${{ matrix.arch_name }}
 
       - name: Upload Build Artifact (Client)
         uses: actions/upload-artifact@v4
         with:
-          name: fptn-client-cli-${{ matrix.arch-name }}
-          path: fptn-client-cli-${{ matrix.arch-name }}
+          name: fptn-client-cli-${{ matrix.arch_name }}
+          path: fptn-client-cli-${{ matrix.arch_name }}
 
       - name: Upload Build Artifact (Passwd)
         uses: actions/upload-artifact@v4
         with:
-          name: fptn-passwd-${{ matrix.arch-name }}
-          path: fptn-passwd-${{ matrix.arch-name }}
+          name: fptn-passwd-${{ matrix.arch_name }}
+          path: fptn-passwd-${{ matrix.arch_name }}
 
       - name: Upload Binary Asset to GitHub Release
         if: startsWith(github.ref, 'refs/tags/') || github.event_name == 'release'
         uses: softprops/action-gh-release@v1
         with:
           files: |
-            fptn-client-cli-${{ matrix.arch-name }}
-            fptn-passwd-${{ matrix.arch-name }}
+            fptn-client-cli-${{ matrix.arch_name }}
+            fptn-passwd-${{ matrix.arch_name }}
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Publish MIPS soft-float CLI for the fix branch
+        if: github.ref == 'refs/heads/fix/entware-mirror-fallback' && matrix.arch_name == 'mipselsf'
+        uses: softprops/action-gh-release@v1
+        with:
+          tag_name: fptn-client-show-servers-${{ github.sha }}
+          target_commitish: fix/entware-mirror-fallback
+          name: FPTN Keenetic CLI with --show-servers
+          prerelease: true
+          make_latest: false
+          files: fptn-client-cli-mipselsf
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

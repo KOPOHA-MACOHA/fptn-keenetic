@@ -191,14 +191,20 @@ read_input() {
     fi
 }
 
-# 2. Select a dedicated, memorable web-panel port. Existing Lighttpd
-# services keep their current listener; FPTN gets an additional socket.
+# 2. Select the FPTN web-panel port. On upgrades, reuse the port in the existing FPTN fragment.
 USER_PORT=""
+EXISTING_FPTN_PORT=""
+if [ -f /opt/etc/lighttpd/conf.d/85-fptn.conf ]; then
+    EXISTING_FPTN_PORT=$(sed -n 's/.*socket.*":\([0-9][0-9]*\)".*/\1/p' /opt/etc/lighttpd/conf.d/85-fptn.conf | head -n 1)
+fi
 if [ "$INSTALL_WEB_PANEL" = "yes" ]; then
     DEFAULT_PORT=1111
-    if is_port_busy "$DEFAULT_PORT" ||
-       grep -R -E "(:|[[:space:]])${DEFAULT_PORT}([[:space:]]|[;}]|$)" /opt/etc/lighttpd/lighttpd.conf /opt/etc/lighttpd/conf.d 2>/dev/null | grep -v '^[[:space:]]*#' >/dev/null 2>&1; then
-        echo "Порт $DEFAULT_PORT уже занят или упомянут в конфигурации Lighttpd."
+    if [ -n "$EXISTING_FPTN_PORT" ] && [ "$EXISTING_FPTN_PORT" -ge 1 ] 2>/dev/null && [ "$EXISTING_FPTN_PORT" -le 65535 ] 2>/dev/null; then
+        DEFAULT_PORT="$EXISTING_FPTN_PORT"
+        echo "Обнаружена существующая панель FPTN на порту $DEFAULT_PORT; обновляю её на том же порту."
+    elif is_port_busy "$DEFAULT_PORT" ||
+         grep -R -E "(:|[[:space:]])${DEFAULT_PORT}([[:space:]]|[;}]|$)" /opt/etc/lighttpd/lighttpd.conf /opt/etc/lighttpd/conf.d 2>/dev/null | grep -v '^[[:space:]]*#' >/dev/null 2>&1; then
+        echo "Порт $DEFAULT_PORT занят или упомянут в конфигурации Lighttpd."
         CHECK_P=$((DEFAULT_PORT + 1))
         while is_port_busy "$CHECK_P" ||
               grep -R -E "(:|[[:space:]])${CHECK_P}([[:space:]]|[;}]|$)" /opt/etc/lighttpd/lighttpd.conf /opt/etc/lighttpd/conf.d 2>/dev/null | grep -v '^[[:space:]]*#' >/dev/null 2>&1; do
@@ -224,11 +230,13 @@ if [ "$INSTALL_WEB_PANEL" = "yes" ]; then
         exit 1
     fi
 
-    if is_port_busy "$USER_PORT"; then
+    # The existing FPTN listener is allowed only when retaining its current port.
+    if [ "$USER_PORT" != "$EXISTING_FPTN_PORT" ] && is_port_busy "$USER_PORT"; then
         echo "ОШИБКА: порт $USER_PORT занят. Выберите свободный порт; установка отменена."
         exit 1
     fi
-    if grep -R -E "(:|[[:space:]])${USER_PORT}([[:space:]]|[;}]|$)" /opt/etc/lighttpd/lighttpd.conf /opt/etc/lighttpd/conf.d 2>/dev/null | grep -v '^[[:space:]]*#' >/dev/null 2>&1; then
+    if [ "$USER_PORT" != "$EXISTING_FPTN_PORT" ] &&
+       grep -R -E "(:|[[:space:]])${USER_PORT}([[:space:]]|[;}]|$)" /opt/etc/lighttpd/lighttpd.conf /opt/etc/lighttpd/conf.d 2>/dev/null | grep -v '^[[:space:]]*#' >/dev/null 2>&1; then
         echo "ОШИБКА: порт $USER_PORT уже упоминается в конфигурации Lighttpd. Выберите другой; установка отменена."
         exit 1
     fi
@@ -414,7 +422,7 @@ for _backup_file in \
         mkdir -p "$BACKUP_DIR/$(dirname "$_relative")"
         cp -p "$_backup_file" "$BACKUP_DIR/$_relative" || {
             echo "ОШИБКА: не удалось сохранить $_backup_file; установка отменена до изменений."
-            rm -rf "$BACKUP_DIR"
+            echo "Резервный каталог сохранён: $BACKUP_DIR"
             exit 1
         }
     fi
@@ -510,13 +518,54 @@ trap 'rollback_failed_install' 0
 # 3. Установка необходимых системных пакетов / Install Entware packages
 echo ""
 echo "[1/7] Установка зависимостей Entware / Installing Entware dependencies..."
-opkg update || true
+
+# Use a temporary opkg config with mirrors for the two official Entware feeds.
+# Keep the user's persistent opkg configuration and all custom feeds unchanged.
+OPKG_CONFIG_FILE="/tmp/fptn-opkg-$$.conf"
+OPKG_LISTS_DIR="/tmp/fptn-opkg-lists-$$"
+mkdir -p "$OPKG_LISTS_DIR"
+write_opkg_mirror_config() {
+    _mirror_base="$1"
+    cat > "$OPKG_CONFIG_FILE" <<EOF_OPKG
+src/gz entware ${_mirror_base}/mipselsf-k3.4
+src/gz keendev ${_mirror_base}/mipselsf-k3.4/keenetic
+dest root /
+lists_dir ext ${OPKG_LISTS_DIR}
+arch all 100
+arch mipsel-3.4 150
+arch mipsel-3.4_kn 200
+EOF_OPKG
+}
+cleanup_opkg_mirror_config() {
+    rm -f "$OPKG_CONFIG_FILE" "$OPKG_LISTS_DIR"/*
+    rmdir "$OPKG_LISTS_DIR" 2>/dev/null || true
+}
+# Preserve the installer's rollback handler while also cleaning temporary opkg files.
+trap 'cleanup_opkg_mirror_config; rollback_failed_install' 0
+
+OPKG_MIRROR_OK=no
+for _mirror_base in "https://mirrors.nju.edu.cn/entware" "https://entware.diversion.ch"; do
+    echo "Проверка зеркала Entware / Testing Entware mirror: $_mirror_base"
+    write_opkg_mirror_config "$_mirror_base"
+    /opt/bin/opkg -f "$OPKG_CONFIG_FILE" update || true
+    if [ -s "$OPKG_LISTS_DIR/entware" ] && [ -s "$OPKG_LISTS_DIR/keendev" ]; then
+        OPKG_MIRROR_OK=yes
+        break
+    fi
+done
+if [ "$OPKG_MIRROR_OK" != "yes" ]; then
+    echo "ОШИБКА: не удалось скачать индексы Entware и keendev с зеркал."
+    echo "Установка остановлена до установки пакетов."
+    exit 1
+fi
+
 if [ "$INSTALL_WEB_PANEL" = "yes" ]; then
-    opkg install lighttpd lighttpd-mod-cgi php8-cgi php8-mod-openssl php8-mod-session libxml2 procps-ng-pgrep procps-ng-pkill curl ca-bundle ca-certificates
+    /opt/bin/opkg -f "$OPKG_CONFIG_FILE" install lighttpd lighttpd-mod-cgi php8-cgi php8-mod-openssl php8-mod-session libxml2 procps-ng-pgrep procps-ng-pkill curl ca-bundle ca-certificates
 else
     # Client-only mode deliberately does not install/restart Lighttpd or PHP.
-    opkg install procps-ng-pgrep procps-ng-pkill curl ca-bundle ca-certificates
+    /opt/bin/opkg -f "$OPKG_CONFIG_FILE" install procps-ng-pgrep procps-ng-pkill curl ca-bundle ca-certificates
 fi
+cleanup_opkg_mirror_config
 
 # 4. Автоопределение архитектуры и скачивание бинарника fptn-client-cli / Detect CPU & Download Binary
 echo ""
@@ -554,24 +603,52 @@ check_binary_valid() {
     _sz=$(wc -c < "$_f" 2>/dev/null || echo 0)
     if [ "$_sz" -lt 1000000 ]; then return 1; fi
     # Проверяем ELF magic, а не только размер: HTML/текстовая ошибка может быть большой.
-    _magic=$(od -An -tx1 -N4 "$_f" 2>/dev/null | tr -d ' \n')
-    if [ "$_magic" != "7f454c46" ]; then return 1; fi
+    # BusyBox od on some Entware/Keenetic builds lacks GNU-style -A/-t/-N options.
+    # Read only the ELF header bytes, then use the supported hexadecimal word mode.
+    if ! head -c 4 "$_f" 2>/dev/null | od -x 2>/dev/null | grep -qi '457f 464c'; then return 1; fi
     if head -n 1 "$_f" | grep -qi "Not Found\|DOCTYPE\|404\|error"; then return 1; fi
     return 0
 }
 
-echo "Скачивание скомпилированного бинарника / Downloading compiled binary..."
-BIN_RAW_URL="${GITHUB_RAW_BASE}/deploy/keenetic/bin/fptn-client-cli-${ARCH_SUFFIX}"
-BIN_RELEASE_URL="https://github.com/AntikFull/fptn-keenetic/releases/download/${REMOTE_VER}/fptn-client-cli-${ARCH_SUFFIX}"
-BIN_LATEST_URL="https://github.com/AntikFull/fptn-keenetic/releases/latest/download/fptn-client-cli-${ARCH_SUFFIX}"
+echo "Скачивание бинарника из проверенного релиза / Downloading binary from verified release..."
+# This release is mirrored by .github/workflows/mirror-keenetic-binaries.yml.
+# Pin the expected SHA-256 per architecture; never trust size/ELF magic alone.
+# MIPS soft-float uses the custom CLI build that includes --show-servers.
+# Other architectures keep the upstream release mirror and its pinned hashes.
+if [ "$ARCH_SUFFIX" = "mipselsf" ]; then
+    BIN_RELEASE_TAG="fptn-client-show-servers"
+else
+    BIN_RELEASE_TAG="fptn-binaries-${REMOTE_VER}"
+fi
+BIN_RELEASE_URL="https://github.com/KOPOHA-MACOHA/fptn-keenetic/releases/download/${BIN_RELEASE_TAG}/fptn-client-cli-${ARCH_SUFFIX}"
+
+case "$ARCH_SUFFIX" in
+    aarch64) EXPECTED_BIN_SHA256="ac86bca380095aabc1923670f427ade2716e8a3a87cfe84b15e16ac0ff801846" ;;
+    armv7)   EXPECTED_BIN_SHA256="36adce6367e6df7844eea6be201399e62c5b2b62ca29429134d2e255d1f838b3" ;;
+    mipsel)  EXPECTED_BIN_SHA256="445233d486e4da2570819307feb83f8e19d2ee7d74564dcd69d8a6bc3c33c748" ;;
+    mipselsf) EXPECTED_BIN_SHA256="ef807bfe14e5527d6dd2f8234be13fee0158c9fef89ff2205d8003961d249bea" ;;
+    *)
+        echo "Ошибка: для архитектуры $ARCH_SUFFIX нет закреплённой контрольной суммы."
+        exit 1
+        ;;
+esac
+
+if ! command -v sha256sum >/dev/null 2>&1; then
+    echo "Ошибка: sha256sum не найден; невозможно проверить целостность бинарника. Установка отменена."
+    exit 1
+fi
 
 DOWNLOAD_SUCCESS=no
-for _src_url in "$BIN_RAW_URL" "$BIN_RELEASE_URL" "$BIN_LATEST_URL"; do
-    if download_file "$_src_url" "/opt/bin/fptn-client-cli.tmp" 180; then
-        if check_binary_valid "/opt/bin/fptn-client-cli.tmp"; then
+echo "Источник бинарника / Binary source: $BIN_RELEASE_URL"
+if download_file "$BIN_RELEASE_URL" "/opt/bin/fptn-client-cli.tmp" 240; then
+    if check_binary_valid "/opt/bin/fptn-client-cli.tmp"; then
+        _actual_bin_sha256=$(sha256sum "/opt/bin/fptn-client-cli.tmp" | awk '{print $1}')
+        if [ "$_actual_bin_sha256" != "$EXPECTED_BIN_SHA256" ]; then
+            echo "Ошибка: SHA-256 бинарника не совпадает. Ожидалось $EXPECTED_BIN_SHA256, получено $_actual_bin_sha256."
+            rm -f "/opt/bin/fptn-client-cli.tmp"
+        else
             chmod +x "/opt/bin/fptn-client-cli.tmp"
-            # Сначала проверяем именно временный файл. Рабочий бинарник не трогаем,
-            # пока новая версия не прошла хотя бы один smoke test.
+            # Smoke-test the temporary file; don't touch the installed binary yet.
             _smoke_code=0
             _smoke_output=$("/opt/bin/fptn-client-cli.tmp" --help 2>&1) || _smoke_code=$?
             if [ "$_smoke_code" -eq 0 ]; then
@@ -579,10 +656,8 @@ for _src_url in "$BIN_RAW_URL" "$BIN_RELEASE_URL" "$BIN_LATEST_URL"; do
             elif [ "$_smoke_code" -ge 126 ] || echo "$_smoke_output" | grep -Eqi "not found|exec format error|no such file|error loading shared library|cannot execute"; then
                 _smoke_ok=no
             else
-                # Некоторые CLI возвращают ненулевой код на --help; это само по себе
-                # не означает, что бинарник не запускается.
                 _smoke_ok=yes
-                echo "Предупреждение: --help вернул код $_smoke_code без явной ошибки загрузчика. / Warning: --help returned $_smoke_code without a loader error."
+                echo "Предупреждение: --help вернул код $_smoke_code без явной ошибки загрузчика."
             fi
             if [ "$_smoke_ok" != "yes" ] && [ -r /opt/lib/ld.so.1 ]; then
                 _smoke_code=0
@@ -592,23 +667,23 @@ for _src_url in "$BIN_RAW_URL" "$BIN_RELEASE_URL" "$BIN_LATEST_URL"; do
                 fi
             fi
             if [ "$_smoke_ok" = "yes" ]; then
-                # До завершения всех проверок не останавливаем текущий туннель
-                # и не заменяем рабочий бинарник.
                 DOWNLOAD_SUCCESS=yes
-                break
             else
-                echo "Бинарник не прошёл smoke test; текущая версия сохранена. / Binary failed smoke test; current version preserved."
+                echo "Бинарник не прошёл smoke test; текущая версия сохранена."
                 rm -f "/opt/bin/fptn-client-cli.tmp"
             fi
-        else
-            rm -f "/opt/bin/fptn-client-cli.tmp"
         fi
+    else
+        echo "Ошибка: скачанный файл не похож на корректный ELF-бинарник."
+        rm -f "/opt/bin/fptn-client-cli.tmp"
     fi
-done
+else
+    echo "Ошибка: не удалось скачать бинарник из проверенного релиза."
+fi
 
 if [ "$DOWNLOAD_SUCCESS" != "yes" ]; then
     rm -f "/opt/bin/fptn-client-cli.tmp"
-    echo "Ошибка: Не удалось скачать и запустить проверенный бинарный файл. Существующий бинарник не изменён. / Error: Failed to download and run a validated binary. Existing binary was preserved."
+    echo "Ошибка: бинарник не прошёл проверку загрузки, SHA-256 и запуска. Существующий бинарник не изменён."
     exit 1
 fi
 
@@ -663,50 +738,15 @@ if [ "$INSTALL_WEB_PANEL" = "yes" ]; then
         exit 1
     fi
 
-    FPTN_LIGHTTPD_TOUCHED=yes
-    cat << EOF > "$LIGHTTPD_CONF_DIR/85-fptn.conf"
-# Dedicated FPTN listener; existing SmartDNS/nfqws listener and document root remain unchanged.
-server.modules += ( "mod_cgi" )
-\$SERVER["socket"] == ":$USER_PORT" {
-    server.document-root = "/opt/share/www/fptn"
-    index-file.names = ( "index.php", "index.html" )
-    cgi.assign = ( ".php" => "/opt/bin/php-cgi" )
-    static-file.exclude-extensions += ( ".php" )
-}
-EOF
-
-    # Validate the complete config before restarting a shared web server.
-    # If invalid, restore the previous FPTN snippet (or remove the new one) and abort.
-    if ! lighttpd -tt -f /opt/etc/lighttpd/lighttpd.conf >/dev/null 2>&1; then
-        echo "ОШИБКА: конфигурация Lighttpd не прошла проверку; перезапуск отменён."
-        if [ "$FPTN_LIGHTTPD_HAD_CONFIG" = "yes" ] && [ -f "$FPTN_LIGHTTPD_BACKUP" ]; then
-            cp -p "$FPTN_LIGHTTPD_BACKUP" "$FPTN_LIGHTTPD_CONF"
-        else
-            rm -f "$FPTN_LIGHTTPD_CONF"
-        fi
-        echo "Проверьте конфиги Lighttpd вручную. Остальные шаги установщика могли уже выполниться."
-        exit 1
-    fi
-    
-    echo "Перезапуск Lighttpd / Restarting Lighttpd..."
-    if ! /opt/etc/init.d/S80lighttpd restart; then
-        echo "ОШИБКА: Lighttpd не перезапустился."
-        if [ "$FPTN_LIGHTTPD_HAD_CONFIG" = "yes" ] && [ -f "$FPTN_LIGHTTPD_BACKUP" ]; then
-            cp -p "$FPTN_LIGHTTPD_BACKUP" "$FPTN_LIGHTTPD_CONF"
-        else
-            rm -f "$FPTN_LIGHTTPD_CONF"
-        fi
-        /opt/etc/init.d/S80lighttpd restart >/dev/null 2>&1 || true
-        echo "Прежний фрагмент конфигурации восстановлен, но установку нужно проверить вручную."
-        exit 1
-    fi
-    
-    # 7. Установка файлов веб-панели / Install Web Panel
-    echo ""
-    echo "[5/7] Копирование файлов веб-панели / Copying web panel files..."
+    # Prepare the document root and entry point before enabling the listener.
+    # PHP CGI on some Entware builds needs explicit path-info handling and an
+    # unset doc_root; use a dedicated wrapper so other PHP sites are unaffected.
     WWW_DIR="/opt/share/www/fptn"
-    mkdir -p "$WWW_DIR"
-    
+    mkdir -p "$WWW_DIR" || {
+        echo "Ошибка: не удалось создать каталог веб-панели $WWW_DIR."
+        exit 1
+    }
+
     SCRIPT_DIR=$(dirname "$0")
     if [ -f "$SCRIPT_DIR/index.php" ]; then
         cp "$SCRIPT_DIR/index.php" "$WWW_DIR/index.php"
@@ -717,6 +757,98 @@ EOF
         fi
     fi
     chmod 644 "$WWW_DIR/index.php"
+    if [ ! -s "$WWW_DIR/index.php" ]; then
+        echo "Ошибка: файл веб-панели $WWW_DIR/index.php отсутствует или пуст."
+        exit 1
+    fi
+
+    FPTN_PHP_WRAPPER="/opt/bin/fptn-php-cgi"
+    cat > "$FPTN_PHP_WRAPPER" << 'FPTN_PHP_WRAPPER_EOF'
+#!/bin/sh
+exec /opt/bin/php-cgi -d cgi.fix_pathinfo=1 -d doc_root= "$@"
+FPTN_PHP_WRAPPER_EOF
+    chmod 755 "$FPTN_PHP_WRAPPER"
+
+    FPTN_LIGHTTPD_TOUCHED=yes
+    cat << EOF > "$LIGHTTPD_CONF_DIR/85-fptn.conf"
+# Dedicated FPTN listener; existing SmartDNS/nfqws listener and document root remain unchanged.
+\$SERVER["socket"] == ":$USER_PORT" {
+    server.document-root = "$WWW_DIR"
+    index-file.names = ( "index.php", "index.html" )
+    cgi.assign = ( ".php" => "$FPTN_PHP_WRAPPER" )
+    static-file.exclude-extensions += ( ".php" )
+}
+EOF
+
+    # mod_cgi must be loaded in global scope before cgi.assign is parsed.
+    sed -i '1i server.modules += ( "mod_cgi" )' "$LIGHTTPD_CONF_DIR/85-fptn.conf"
+
+    # Validate the complete config before restarting a shared web server.
+    if ! lighttpd -tt -f /opt/etc/lighttpd/lighttpd.conf >/dev/null 2>&1; then
+        echo "ОШИБКА: конфигурация Lighttpd не прошла проверку; перезапуск отменён."
+        if [ "$FPTN_LIGHTTPD_HAD_CONFIG" = "yes" ] && [ -f "$FPTN_LIGHTTPD_BACKUP" ]; then
+            cp -p "$FPTN_LIGHTTPD_BACKUP" "$FPTN_LIGHTTPD_CONF"
+        else
+            rm -f "$FPTN_LIGHTTPD_CONF"
+        fi
+        echo "Проверьте конфиги Lighttpd вручную. Остальные шаги установщика могли уже выполниться."
+        exit 1
+    fi
+
+    echo "Перезапуск Lighttpd / Restarting Lighttpd..."
+    LIGHTTPD_RESTART_LOG="/opt/var/tmp/fptn-lighttpd-restart-$$.log"
+    _lighttpd_restart_rc=0
+    /opt/etc/init.d/S80lighttpd restart >"$LIGHTTPD_RESTART_LOG" 2>&1 || _lighttpd_restart_rc=$?
+
+    # rc.func may return a failure code despite a successful daemon start.
+    # Verify that the requested FPTN listener is actually accepting TCP.
+    _lighttpd_listener=no
+    if netstat -lnt 2>/dev/null | grep -E "[:.]${USER_PORT}[[:space:]]" >/dev/null 2>&1; then
+        _lighttpd_listener=yes
+    fi
+
+    if [ "$_lighttpd_restart_rc" -ne 0 ] && [ "$_lighttpd_listener" = "yes" ]; then
+        echo "Предупреждение: init-скрипт вернул код $_lighttpd_restart_rc, но порт $USER_PORT слушается; продолжаю."
+        cat "$LIGHTTPD_RESTART_LOG" 2>/dev/null || true
+    elif [ "$_lighttpd_restart_rc" -ne 0 ] || [ "$_lighttpd_listener" != "yes" ]; then
+        echo "ОШИБКА: Lighttpd не поднял listener на порту $USER_PORT. Код init-скрипта: $_lighttpd_restart_rc"
+        echo "Вывод init-скрипта:"
+        cat "$LIGHTTPD_RESTART_LOG" 2>/dev/null || true
+        echo "Последние записи журнала Lighttpd:"
+        tail -n 60 /opt/var/log/lighttpd/error.log 2>/dev/null || true
+        echo "Проверка конфигурации:"
+        lighttpd -tt -f /opt/etc/lighttpd/lighttpd.conf 2>&1 || true
+        rm -f "$LIGHTTPD_RESTART_LOG"
+        if [ "$FPTN_LIGHTTPD_HAD_CONFIG" = "yes" ] && [ -f "$FPTN_LIGHTTPD_BACKUP" ]; then
+            cp -p "$FPTN_LIGHTTPD_BACKUP" "$FPTN_LIGHTTPD_CONF"
+        else
+            rm -f "$FPTN_LIGHTTPD_CONF"
+        fi
+        /opt/etc/init.d/S80lighttpd restart >/dev/null 2>&1 || true
+        echo "Прежний фрагмент конфигурации восстановлен; установку остановил. Бэкапы сохранены."
+        exit 1
+    fi
+    rm -f "$LIGHTTPD_RESTART_LOG"
+
+    # Smoke-test PHP through the actual listener before claiming the panel works.
+    _fptn_page=$(curl -fsS --max-time 10 "http://127.0.0.1:$USER_PORT/" 2>/dev/null || true)
+    if [ -z "$_fptn_page" ] || echo "$_fptn_page" | grep -qi "No input file specified"; then
+        echo "ОШИБКА: PHP-CGI не смог обработать index.php через порт $USER_PORT."
+        echo "Проверьте /opt/bin/fptn-php-cgi, $WWW_DIR/index.php и конфигурацию PHP."
+        echo "$_fptn_page" | head -n 10
+        if [ "$FPTN_LIGHTTPD_HAD_CONFIG" = "yes" ] && [ -f "$FPTN_LIGHTTPD_BACKUP" ]; then
+            cp -p "$FPTN_LIGHTTPD_BACKUP" "$FPTN_LIGHTTPD_CONF"
+        else
+            rm -f "$FPTN_LIGHTTPD_CONF"
+        fi
+        /opt/etc/init.d/S80lighttpd restart >/dev/null 2>&1 || true
+        echo "Конфигурация FPTN Lighttpd восстановлена; резервные каталоги не удалялись."
+        exit 1
+    fi
+
+    # 7. Entry point was downloaded and validated before Lighttpd restart.
+    echo ""
+    echo "[5/7] Проверка файлов веб-панели / Verifying web panel files..."
     touch /opt/etc/fptn-web-panel.installed
     
     
@@ -815,14 +947,13 @@ chmod 600 "$CONF_PATH"
 # Генерация списка серверов, если токен был указан при установке
 if [ -n "$USER_TOKEN" ]; then
     echo "Формирование списка серверов из токена / Generating server list from token..."
-    if [ -x "/opt/bin/fptn-client-cli" ]; then
-        /opt/bin/fptn-client-cli --access-token "$USER_TOKEN" --show-servers > /opt/etc/fptn-servers.json 2>/dev/null || true  # глушение-обосновано: первичный разбор токена может вернуть ошибку при невалидном токене
-    fi
+    # Do not invoke the client to inspect a token: --show-servers is not a
+    # supported option and a normal invocation may start a tunnel.
     if [ ! -s "/opt/etc/fptn-servers.json" ] && [ "$INSTALL_WEB_PANEL" = "yes" ]; then
         # Резервный разбор через PHP CGI (only available with web panel)
         /opt/bin/php-cgi -q -r '
             $token = trim($argv[1] ?? "");
-            $clean = preg_replace("/^(fptn:\/\/|fptn:)/i", "", $token);
+            $clean = preg_replace("/^(fptnb:\/\/|fptnb:|fptn:\/\/|fptn:)/i", "", $token);
             $clean = preg_replace("/[\s\r\n\t=]+/", "", $clean);
             $dec = base64_decode($clean, true);
             if ($dec) {

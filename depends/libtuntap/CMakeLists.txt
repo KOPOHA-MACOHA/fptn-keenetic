@@ -55,10 +55,8 @@ target_sources(tuntap PRIVATE ${CMAKE_CURRENT_BINARY_DIR}/tuntap-export.h)
 if(UNIX)
     # Unix specific include directories
     # ---------------------------------
-    target_include_directories(tuntap PUBLIC
-        /usr/include/
-        /usr/local/include/
-    )
+    # Standard system include paths are provided by the compiler. Do not
+    # hard-code host /usr/include paths: they break cross-compilation.
 
     # Unix specific definitions
     # -------------------------
