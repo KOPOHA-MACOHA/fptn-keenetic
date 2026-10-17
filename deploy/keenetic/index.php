@@ -108,6 +108,41 @@ function parse_fptn_token_direct($token) {
     ];
 }
 
+function parse_token_via_cli($token) {
+    global $cli_path;
+    if (!file_exists($cli_path) || !is_executable($cli_path)) {
+        return null;
+    }
+    // Сохраняем исходный механизм оригинального проекта: клиент сам умеет
+    // разобрать fptnb-токен, даже если на роутере нет PHP Brotli и утилиты brotli.
+    // Пробуем обычный запуск и вариант через динамический загрузчик Entware.
+    $commands = [
+        escapeshellcmd($cli_path) . " --access-token " . escapeshellarg($token) . " --show-servers 2>/dev/null",
+        "/opt/lib/ld.so.1 --library-path /opt/lib " . escapeshellcmd($cli_path) . " --access-token " . escapeshellarg($token) . " --show-servers 2>/dev/null"
+    ];
+    foreach ($commands as $cmd) {
+        $output = [];
+        $ret = 0;
+        @exec($cmd, $output, $ret);
+        if ($ret === 0 && !empty($output)) {
+            $raw = implode("\n", $output);
+            $start = strpos($raw, '{');
+            $end = strrpos($raw, '}');
+            if ($start !== false && $end !== false && $end > $start) {
+                $parsed = json_decode(substr($raw, $start, $end - $start + 1), true);
+                if (is_array($parsed) && !empty($parsed['servers']) && is_array($parsed['servers'])) {
+                    return [
+                        'service_name' => $parsed['service_name'] ?? 'FPTN',
+                        'username' => $parsed['username'] ?? '',
+                        'servers' => $parsed['servers']
+                    ];
+                }
+            }
+        }
+    }
+    return null;
+}
+
 function get_token_servers_info($token) {
     global $servers_file;
     if (empty($token)) {
@@ -130,7 +165,14 @@ function get_token_servers_info($token) {
         @file_put_contents($servers_file, json_encode($info, JSON_PRETTY_PRINT | JSON_UNESCAPED_UNICODE), LOCK_EX);
         return $info;
     }
-    // Do not invoke fptn-client-cli for inspection: it has no safe read-only mode.
+    // Fallback оригинального проекта: fptn-client-cli распаковывает fptnb-токен
+    // собственной Brotli-реализацией и возвращает JSON со списком серверов.
+    $cli_info = parse_token_via_cli($token);
+    if ($cli_info) {
+        $cli_info['token_sha256'] = $token_hash;
+        @file_put_contents($servers_file, json_encode($cli_info, JSON_PRETTY_PRINT | JSON_UNESCAPED_UNICODE), LOCK_EX);
+        return $cli_info;
+    }
     return null;
 }
 
