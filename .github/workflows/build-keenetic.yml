@@ -57,6 +57,16 @@ jobs:
             asmflags: "-DOPENSSL_PTHREADS -pthread -march=mips32r2"
             linkflags: '["-pthread", "-latomic"]'
             cmake-linker-flags: "-static -pthread -Wl,--whole-archive -lpthread -latomic -Wl,--no-whole-archive"
+          - arch-name: mipselsf
+            conan-arch: mips
+            apt-packages: gcc-mipsel-linux-gnu g++-mipsel-linux-gnu
+            cc: mipsel-linux-gnu-gcc
+            cxx: mipsel-linux-gnu-g++
+            strip: mipsel-linux-gnu-strip
+            flags: '["-DOPENSSL_PTHREADS", "-pthread", "-fcoroutines", "-march=mips32r2", "-msoft-float"]'
+            asmflags: "-DOPENSSL_PTHREADS -pthread -march=mips32r2 -msoft-float"
+            linkflags: '["-pthread", "-latomic"]'
+            cmake-linker-flags: "-static -pthread -Wl,--whole-archive -lpthread -latomic -Wl,--no-whole-archive"
 
     steps:
       - name: Checkout code
@@ -164,5 +174,18 @@ jobs:
           files: |
             fptn-client-cli-${{ matrix.arch-name }}
             fptn-passwd-${{ matrix.arch-name }}
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Publish MIPS soft-float CLI for the fix branch
+        if: github.ref == 'refs/heads/fix/entware-mirror-fallback' && matrix.arch-name == 'mipselsf'
+        uses: softprops/action-gh-release@v1
+        with:
+          tag_name: fptn-client-show-servers
+          target_commitish: fix/entware-mirror-fallback
+          name: FPTN Keenetic CLI with --show-servers
+          prerelease: true
+          make_latest: false
+          files: fptn-client-cli-mipselsf
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
