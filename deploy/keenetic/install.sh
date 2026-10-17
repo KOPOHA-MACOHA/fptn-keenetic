@@ -647,6 +647,56 @@ for _src_url in "$BIN_RAW_URL" "$BIN_RELEASE_URL" "$BIN_LATEST_URL"; do
     fi
 done
 
+# Fallback for networks where GitHub release download URLs return 404:
+# resolve the matching asset ID from the public release metadata, then use the API.
+if [ "$DOWNLOAD_SUCCESS" != "yes" ]; then
+    echo "Пробую GitHub Releases API / Trying GitHub Releases API..."
+    BIN_ASSET_ID=$(curl -fsSL --connect-timeout 10 --max-time 30 "https://api.github.com/repos/AntikFull/fptn-keenetic/releases/tags/${REMOTE_VER}" 2>/dev/null |
+        awk -v target="fptn-client-cli-${ARCH_SUFFIX}" '
+            /"id": [0-9]+,/ { id=$2; gsub(/,/, "", id) }
+            $0 ~ "\"name\": \"" target "\"" { print id; exit }
+        ')
+    case "$BIN_ASSET_ID" in
+        ''|*[!0-9]*) BIN_ASSET_ID="" ;;
+    esac
+    if [ -n "$BIN_ASSET_ID" ]; then
+        BIN_API_URL="https://api.github.com/repos/AntikFull/fptn-keenetic/releases/assets/${BIN_ASSET_ID}"
+        for _asset_url in "$BIN_API_URL" "https://ghproxy.net/${BIN_API_URL}" "https://ghfast.top/${BIN_API_URL}"; do
+            echo "Источник бинарника / Binary asset source: $_asset_url"
+            rm -f "/opt/bin/fptn-client-cli.tmp"
+            if curl -sSL --fail --connect-timeout 10 --max-time 180 -H "Accept: application/octet-stream" -o "/opt/bin/fptn-client-cli.tmp" "$_asset_url"; then
+                if check_binary_valid "/opt/bin/fptn-client-cli.tmp"; then
+                    chmod +x "/opt/bin/fptn-client-cli.tmp"
+                    _smoke_code=0
+                    _smoke_output=$("/opt/bin/fptn-client-cli.tmp" --help 2>&1) || _smoke_code=$?
+                    if [ "$_smoke_code" -eq 0 ]; then
+                        _smoke_ok=yes
+                    elif [ "$_smoke_code" -ge 126 ] || echo "$_smoke_output" | grep -Eqi "not found|exec format error|no such file|error loading shared library|cannot execute"; then
+                        _smoke_ok=no
+                    else
+                        _smoke_ok=yes
+                        echo "Предупреждение: --help вернул код $_smoke_code без явной ошибки загрузчика."
+                    fi
+                    if [ "$_smoke_ok" != "yes" ] && [ -r /opt/lib/ld.so.1 ]; then
+                        _smoke_code=0
+                        _smoke_output=$(/opt/lib/ld.so.1 --library-path /opt/lib /opt/bin/fptn-client-cli.tmp --help 2>&1) || _smoke_code=$?
+                        if [ "$_smoke_code" -eq 0 ] || { [ "$_smoke_code" -lt 126 ] && ! echo "$_smoke_output" | grep -Eqi "not found|exec format error|no such file|error loading shared library|cannot execute"; }; then
+                            _smoke_ok=yes
+                        fi
+                    fi
+                    if [ "$_smoke_ok" = "yes" ]; then
+                        DOWNLOAD_SUCCESS=yes
+                        break
+                    fi
+                    echo "Бинарник из API не прошёл проверку запуска; пробую следующий источник."
+                fi
+            fi
+        done
+    else
+        echo "Не удалось определить ID asset в GitHub Releases API."
+    fi
+fi
+
 if [ "$DOWNLOAD_SUCCESS" != "yes" ]; then
     rm -f "/opt/bin/fptn-client-cli.tmp"
     echo "Ошибка: Не удалось скачать и запустить проверенный бинарный файл. Существующий бинарник не изменён. / Error: Failed to download and run a validated binary. Existing binary was preserved."
