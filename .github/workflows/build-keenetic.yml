@@ -58,6 +58,8 @@ jobs:
         run: |
           curl -fL --retry 3 https://github.com/musl-cc/musl.cc/releases/download/v0.0.1/mipsel-linux-muslsf-cross.tgz -o /tmp/mipsel-linux-muslsf-cross.tgz
           sudo tar -xzf /tmp/mipsel-linux-muslsf-cross.tgz -C /opt
+          # The archive ships libtool .la files with a prefix that is wrong after extraction.
+          find /opt/mipsel-linux-muslsf-cross -name '*.la' -type f -exec sed -i 's|/mipsel-linux-muslsf/lib|/opt/mipsel-linux-muslsf-cross/mipsel-linux-muslsf/lib|g' {} +
           echo "/opt/mipsel-linux-muslsf-cross/bin" >> "$GITHUB_PATH"
 
       - name: Cache Conan Packages
