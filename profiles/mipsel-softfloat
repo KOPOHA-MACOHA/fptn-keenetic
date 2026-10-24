@@ -23,5 +23,5 @@ tools.cmake.cmaketoolchain:system_name=Linux
 tools.cmake.cmaketoolchain:system_processor=mips
 tools.build:cflags=["-march=mips32r2", "-mabi=32", "-msoft-float"]
 tools.build:cxxflags=["-march=mips32r2", "-mabi=32", "-msoft-float"]
-tools.build:exelinkflags=["-static", "-Wl,--no-as-needed,-latomic"]
+tools.build:exelinkflags=["-static"]
 tools.build:jobs=2

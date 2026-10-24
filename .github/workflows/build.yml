@@ -2,6 +2,9 @@ name: Build prototype
 on:
   push:
     branches: [main]
+    paths-ignore:
+      - '**/*.md'
+      - '.github/workflows/publish-probe.yml'
   pull_request:
   workflow_dispatch:
 
@@ -29,7 +32,9 @@ jobs:
           context: .
           target: probe-export
           outputs: type=local,dest=out/probe
-          cache-from: type=gha,scope=keenetic-toolchain
+          cache-from: |
+            type=gha,scope=keenetic-client
+            type=gha,scope=keenetic-toolchain
           cache-to: type=gha,mode=max,scope=keenetic-toolchain
       - uses: actions/upload-artifact@v4
         with:
@@ -49,7 +54,9 @@ jobs:
           context: .
           target: client-export
           outputs: type=local,dest=out/client
-          cache-from: type=gha,scope=keenetic-toolchain
+          cache-from: |
+            type=gha,scope=keenetic-client
+            type=gha,scope=keenetic-toolchain
           cache-to: type=gha,mode=max,scope=keenetic-client
       - uses: actions/upload-artifact@v4
         with:

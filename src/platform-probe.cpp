@@ -35,6 +35,10 @@ int main() {
         auto task = answer();
         if (counter.load() != 42 || task.handle.promise().value != 42)
             throw std::runtime_error("C++ runtime check failed");
+        counter.store(7);
+        std::uint64_t expected = 7;
+        if (!counter.compare_exchange_strong(expected, 42) || counter.load() != 42)
+            throw std::runtime_error("64-bit atomic store/CAS check failed");
         bool exception_ok = false;
         try { throw std::runtime_error("test"); }
         catch (const std::runtime_error&) { exception_ok = true; }
