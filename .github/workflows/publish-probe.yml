@@ -1,0 +1,44 @@
+name: Publish platform probe
+on:
+  push:
+    branches: [main]
+    paths: [.github/workflows/publish-probe.yml]
+  workflow_dispatch:
+permissions:
+  contents: write
+  actions: read
+jobs:
+  publish:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    env:
+      GH_TOKEN: ${{ github.token }}
+      GH_REPO: ${{ github.repository }}
+    steps:
+      - name: Download verified successful probe artifact
+        run: |
+          set -eu
+          gh api repos/KOPOHA-MACOHA/fptn-keenetic/actions/runs/40131028041/jobs --jq '.jobs[] | select(.name == "probe") | .conclusion' | grep -qx success
+          gh api repos/KOPOHA-MACOHA/fptn-keenetic/actions/artifacts/12575325550/zip > probe.zip
+          echo 'f0c533b65f00acc35cbd5cc85b5147ea8a0730661343347c5e3e5d2f62b28c38  probe.zip' | sha256sum -c -
+          mkdir payload
+          python3 - <<'PY'
+          import pathlib, zipfile
+          with zipfile.ZipFile("probe.zip") as archive:
+              for name in ["fptn-platform-probe", "SHA256SUMS", "sources.lock.json"]:
+                  pathlib.Path("payload", name).write_bytes(archive.read(name))
+          PY
+          cd payload
+          sha256sum -c SHA256SUMS
+      - name: Publish compatibility diagnostic only
+        run: |
+          set -eu
+          cat > notes.md <<'EOF'
+          Compatibility diagnostic for Keenetic Hopper KN-3810 EAEU.
+          MIPS32r2 little-endian / o32 / soft-float / fully static musl.
+          C++20 threads, atomic64, exceptions and coroutines passed under QEMU.
+          Does not access TUN, connect to a VPN or modify network settings.
+          Not a working VPN client; real-device compatibility remains to be tested.
+          Built from commit 4ed5766546da62a5c596ed32cb651fdf638165e2.
+          EOF
+          gh release create probe-4ed5766 payload/fptn-platform-probe payload/SHA256SUMS payload/sources.lock.json --target 4ed5766546da62a5c596ed32cb651fdf638165e2 --prerelease --title "Hopper compatibility probe (no VPN)" --notes-file notes.md
