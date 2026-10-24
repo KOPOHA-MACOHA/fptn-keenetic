@@ -1,0 +1,27 @@
+[settings]
+os=Linux
+arch=mips
+compiler=gcc
+compiler.version=13
+compiler.libcxx=libstdc++11
+compiler.cppstd=20
+build_type=Release
+
+[buildenv]
+STAGING_DIR=/builder/staging_dir/toolchain-mipsel_24kc_gcc-13.3.0_musl
+CC=mipsel-openwrt-linux-musl-gcc
+CXX=mipsel-openwrt-linux-musl-g++
+AR=mipsel-openwrt-linux-musl-ar
+RANLIB=mipsel-openwrt-linux-musl-ranlib
+STRIP=mipsel-openwrt-linux-musl-strip
+NM=mipsel-openwrt-linux-musl-nm
+LD=mipsel-openwrt-linux-musl-ld
+
+[conf]
+tools.build:compiler_executables={"c": "mipsel-openwrt-linux-musl-gcc", "cpp": "mipsel-openwrt-linux-musl-g++"}
+tools.cmake.cmaketoolchain:system_name=Linux
+tools.cmake.cmaketoolchain:system_processor=mips
+tools.build:cflags=["-march=mips32r2", "-mabi=32", "-msoft-float"]
+tools.build:cxxflags=["-march=mips32r2", "-mabi=32", "-msoft-float"]
+tools.build:exelinkflags=["-static", "-Wl,--no-as-needed,-latomic"]
+tools.build:jobs=2
