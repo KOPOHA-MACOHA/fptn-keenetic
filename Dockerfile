@@ -23,6 +23,8 @@ COPY --from=sdk /builder/scripts /builder/scripts
 ENV STAGING_DIR=/builder/staging_dir/toolchain-mipsel_24kc_gcc-13.3.0_musl
 ENV PATH=/tools/bin:/builder/staging_dir/toolchain-mipsel_24kc_gcc-13.3.0_musl/bin:/builder/staging_dir/host/bin:${PATH}
 WORKDIR /work
+COPY scripts/fix-static-libgcc.py /work/fix-static-libgcc.py
+RUN python /work/fix-static-libgcc.py
 COPY sources.lock.json /work/sources.lock.json
 COPY profiles/mipsel-softfloat /work/profile
 COPY scripts/verify-elf.py /work/verify-elf.py
