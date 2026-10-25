@@ -1,44 +1,90 @@
-name: Publish compatibility prototype
+name: Package phone connection test
 on:
   push:
     branches: [main]
     paths: [.github/workflows/publish-probe.yml]
   workflow_dispatch:
 permissions:
-  contents: write
+  contents: read
   actions: read
 jobs:
-  publish:
+  package:
     runs-on: ubuntu-24.04
-    timeout-minutes: 10
+    timeout-minutes: 20
     env:
       GH_TOKEN: ${{ github.token }}
       GH_REPO: ${{ github.repository }}
     steps:
-      - name: Download verified successful probe artifact
+      - uses: actions/checkout@v4
+      - name: Test token menu without making network connections
+        run: python3 -m unittest discover -s tests -p test_phone_launcher.py -v
+      - uses: docker/setup-buildx-action@v3
+      - name: Prepare decoder-only build
+        run: |
+          cp Dockerfile Dockerfile.phone
+          cat >> Dockerfile.phone <<'DOCKER'
+          
+          FROM toolchain AS phone-decoder
+          RUN curl -fL --retry 3 https://github.com/google/brotli/archive/028fb5a23661f123017c060daa546b55cf4bde29.tar.gz -o /tmp/brotli.tar.gz && \
+              mkdir /work/brotli && tar -xzf /tmp/brotli.tar.gz --strip-components=1 -C /work/brotli && \
+              cmake -S /work/brotli -B /work/brotli-build \
+                -DCMAKE_SYSTEM_NAME=Linux -DCMAKE_SYSTEM_PROCESSOR=mips \
+                -DCMAKE_C_COMPILER=mipsel-openwrt-linux-musl-gcc \
+                -DCMAKE_CXX_COMPILER=mipsel-openwrt-linux-musl-g++ \
+                -DCMAKE_C_FLAGS="-Os -march=mips32r2 -mabi=32 -msoft-float" \
+                -DCMAKE_CXX_FLAGS="-Os -march=mips32r2 -mabi=32 -msoft-float" \
+                -DCMAKE_FIND_ROOT_PATH=${STAGING_DIR} \
+                -DCMAKE_FIND_ROOT_PATH_MODE_LIBRARY=ONLY \
+                -DCMAKE_FIND_ROOT_PATH_MODE_INCLUDE=ONLY \
+                -DCMAKE_FIND_ROOT_PATH_MODE_PACKAGE=ONLY \
+                -DCMAKE_FIND_ROOT_PATH_MODE_PROGRAM=NEVER \
+                -DCMAKE_EXE_LINKER_FLAGS=-static -DBUILD_SHARED_LIBS=OFF \
+                -DBROTLI_BUILD_TOOLS=ON -DBROTLI_DISABLE_TESTS=ON && \
+              cmake --build /work/brotli-build --target brotli -j2 && \
+              mkdir /decoder && cp /work/brotli-build/brotli /decoder/ && \
+              cp /work/brotli/LICENSE /decoder/LICENSE-BROTLI && \
+              mipsel-openwrt-linux-musl-strip /decoder/brotli && \
+              python /work/verify-elf.py /decoder/brotli && \
+              printf 'local token decoder test' > /tmp/plain && \
+              qemu-mipsel /decoder/brotli -c /tmp/plain > /tmp/compressed && \
+              qemu-mipsel /decoder/brotli -d -c /tmp/compressed > /tmp/restored && \
+              cmp /tmp/plain /tmp/restored
+          FROM scratch AS phone-decoder-export
+          COPY --from=phone-decoder /decoder/ /
+          DOCKER
+      - name: Build only the small Brotli utility (no FPTN or Conan build)
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: Dockerfile.phone
+          target: phone-decoder-export
+          outputs: type=local,dest=out/decoder
+          cache-from: |
+            type=gha,scope=keenetic-toolchain
+            type=gha,scope=keenetic-phone-decoder
+          cache-to: type=gha,mode=max,scope=keenetic-phone-decoder
+      - name: Reuse verified client and assemble matching folder
         run: |
           set -eu
-          gh api repos/KOPOHA-MACOHA/fptn-keenetic/actions/runs/40167013608/jobs --jq '.jobs[] | select(.name == "client") | .conclusion' | grep -qx success
-          gh api repos/KOPOHA-MACOHA/fptn-keenetic/actions/artifacts/12589576599/zip > client.zip
-          echo '128139ceaf85277ec8bf5480926680099af5ad7ff8fa857a4840afbf160a0842  client.zip' | sha256sum -c -
-          mkdir payload
+          gh api repos/KOPOHA-MACOHA/fptn-keenetic/actions/artifacts/12592095581/zip > client.zip
+          echo '92f6380fe1a2c8063917a0f4b42423367ff9fbae0fb8f0ebed501326dd9eb605  client.zip' | sha256sum -c -
+          mkdir old-client
           python3 - <<'PY'
           import pathlib, zipfile
-          with zipfile.ZipFile("client.zip") as archive:
-              for name in ["fptn-client-cli", "SHA256SUMS", "sources.lock.json", "HELP.txt", "LICENSE-FPTN"]:
-                  pathlib.Path("payload", name).write_bytes(archive.read(name))
+          with zipfile.ZipFile("client.zip") as z:
+              for name in ["fptn-client-cli", "HELP.txt", "sources.lock.json", "LICENSE-FPTN", "run-connect-test.sh", "TUNNEL-TEST.md", "SHA256SUMS"]:
+                  pathlib.Path("old-client", name).write_bytes(z.read(name))
           PY
-          cd payload
-          sha256sum -c SHA256SUMS
-      - name: Publish compatibility diagnostic only
-        run: |
-          set -eu
-          cat > notes.md <<'EOF'
-          FPTN CLI compatibility prototype for Keenetic Hopper KN-3810 EAEU.
-          MIPS32r2 little-endian / o32 / soft-float / fully static musl.
-          Static ELF validation and FPTN --help passed under MIPS QEMU.
-          Connection is blocked in code before network initialization; use only --help / --version.
-          Not yet a working router VPN: routing, DNS, TLS connections and load have not been tested on hardware.
-          Built from commit f09f9c81c4cc0afab6f17d1ac458ee1cc90c34cf.
-          EOF
-          gh release create client-prototype-f09f9c8 payload/fptn-client-cli payload/SHA256SUMS payload/sources.lock.json payload/HELP.txt payload/LICENSE-FPTN --target f09f9c81c4cc0afab6f17d1ac458ee1cc90c34cf --prerelease --title "Hopper FPTN CLI prototype (connection disabled)" --notes-file notes.md
+          (cd old-client && sha256sum -c SHA256SUMS)
+          mkdir -p package/fptn-connect-test
+          cp old-client/fptn-client-cli old-client/HELP.txt old-client/sources.lock.json old-client/LICENSE-FPTN package/fptn-connect-test/
+          cp out/decoder/brotli out/decoder/LICENSE-BROTLI package/fptn-connect-test/
+          cp scripts/start-from-token.sh package/fptn-connect-test/run-connect-test.sh
+          cp docs/phone-connection-test.md package/fptn-connect-test/README.md
+          echo 'https://github.com/google/brotli/tree/028fb5a23661f123017c060daa546b55cf4bde29' > package/fptn-connect-test/BROTLI-SOURCE.txt
+          (cd package/fptn-connect-test && sha256sum fptn-client-cli brotli run-connect-test.sh README.md HELP.txt sources.lock.json LICENSE-FPTN LICENSE-BROTLI BROTLI-SOURCE.txt > SHA256SUMS)
+      - uses: actions/upload-artifact@v4
+        with:
+          name: fptn-connect-test
+          path: package/
+          if-no-files-found: error
