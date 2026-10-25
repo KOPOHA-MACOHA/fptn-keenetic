@@ -16,7 +16,10 @@ from pathlib import Path
 root=Path(os.environ['MIRROR_TEST_ROOT'])
 name=Path(sys.argv[0]).name
 port=int(os.environ['MIRROR_TEST_PORT'])
-if name=='id': print('0')
+if name=='sleep':
+    assert '.' not in sys.argv[1], 'Router BusyBox sleep requires whole seconds'
+    time.sleep(float(sys.argv[1]))
+elif name=='id': print('0')
 elif name=='netstat':
     if (root/'listening').exists() or os.environ.get('MIRROR_BUSY'):
         print(f'udp 0 0 0.0.0.0:{port} 0.0.0.0:* 123/ndnproxy')
@@ -61,7 +64,7 @@ class MirrorProbeTest(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             root=Path(tmp); commands=root/'bin'; commands.mkdir()
             port=15453
-            for name in ['ndnproxy','socat','nslookup','netstat','id']:
+            for name in ['ndnproxy','socat','nslookup','netstat','id','sleep']:
                 path=commands/name; path.write_text(MOCK); path.chmod(0o700)
             # Redirect only the private test root and test ports on the host.
             script=SCRIPT.read_text().replace('/opt/tmp',str(root)).replace('15453',str(port))

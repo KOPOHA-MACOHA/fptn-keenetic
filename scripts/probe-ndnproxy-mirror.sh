@@ -42,7 +42,7 @@ stop_probe() {
     if own_process "$pid"; then
       kill -TERM "$pid" 2>/dev/null || true
       n=0
-      while own_process "$pid" && [ "$n" -lt 10 ]; do sleep 0.1; n=$((n+1)); done
+      while own_process "$pid" && [ "$n" -lt 2 ]; do sleep 1; n=$((n+1)); done
       if own_process "$pid"; then kill -KILL "$pid" 2>/dev/null || true; fi
     fi
   done
@@ -80,7 +80,7 @@ EOF
 timeout -s TERM 15 socat -u -b 65535 "UNIX-RECVFROM:$WORK/mirror.sock" STDOUT > "$WORK/message.bin" 2> "$WORK/socat.log" &
 CAPTURE_PID=$!
 n=0
-while [ ! -S "$WORK/mirror.sock" ] && [ "$n" -lt 20 ]; do sleep 0.1; n=$((n+1)); done
+while [ ! -S "$WORK/mirror.sock" ] && [ "$n" -lt 3 ]; do sleep 1; n=$((n+1)); done
 [ -S "$WORK/mirror.sock" ] || { cat "$WORK/socat.log"; echo 'Временный сокет не создан.' >&2; exit 1; }
 echo '[ПРОВЕРКА] Отдельный ndnproxy: DNS :15453, RPC :15454, rr_port :15455.'
 echo '[ПРОВЕРКА] Upstream — действующий SmartDNS :53; зеркало — только в приватный временный сокет.'
@@ -97,9 +97,9 @@ LAUNCH_PID=$!
 WATCH_PID=$!
 n=0
 READY=0
-while [ "$n" -lt 30 ]; do
+while [ "$n" -lt 3 ]; do
   if netstat -lnptu 2>/dev/null | awk '$1=="udp" && $4 ~ /:15453$/ {found=1} END {exit !found}'; then READY=1; break; fi
-  sleep 0.1
+  sleep 1
   n=$((n+1))
 done
 if [ "$READY" != 1 ]; then
@@ -110,7 +110,7 @@ fi
 timeout -s TERM 6 nslookup api.ipify.org 127.0.0.1:15453 > "$WORK/answer" 2>&1 || true
 cat "$WORK/answer"
 n=0
-while [ ! -s "$WORK/message.bin" ] && [ "$n" -lt 30 ]; do sleep 0.1; n=$((n+1)); done
+while [ ! -s "$WORK/message.bin" ] && [ "$n" -lt 3 ]; do sleep 1; n=$((n+1)); done
 stop_probe
 if [ ! -s "$WORK/message.bin" ]; then
   echo '[ПРОВЕРКА] Сообщение зеркалирования не получено. Это не подтверждает совместимость.' >&2
