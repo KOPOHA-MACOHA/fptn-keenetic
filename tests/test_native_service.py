@@ -251,3 +251,18 @@ int main(int argc,char**argv){
             self.assertFalse(run.exists());self.assertEqual(self.state()['mutations'],0)
         finally:
             if process.poll() is None:process.kill();process.wait(timeout=5)
+
+    def test_staged_stop_recognizes_installed_supervisor_through_opt_symlink(self):
+        root=self.prepare_native_client()
+        alias=self.root/'opt-link';alias.symlink_to(root,target_is_directory=True)
+        self.env['FPTN_PREFIX']=str(alias)
+        installed=root/'bin/fptnctl';installed.parent.mkdir(parents=True)
+        installed.write_text(SCRIPT.read_text());installed.chmod(0o700)
+        try:
+            started=subprocess.run(['sh',str(alias/'bin/fptnctl'),'start'],env=self.env,text=True,capture_output=True,timeout=25)
+            self.assertEqual(started.returncode,0,started.stdout+started.stderr)
+            # self.cmd uses a different staged script, as the updater does.
+            stopped=self.cmd('stop');self.assertEqual(stopped.returncode,0,stopped.stdout+stopped.stderr)
+            self.assertFalse((root/'var/run/fptn-keenetic').exists())
+            self.assertEqual(self.state()['mutations'],0)
+        finally:self.cmd('stop')

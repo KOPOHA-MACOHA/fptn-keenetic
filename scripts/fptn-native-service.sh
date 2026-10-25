@@ -44,8 +44,9 @@ supervisor_owned() {
   alive "$RUN/supervisor.pid" || return 1
   SHELL_EXE=$(readlink "/proc/$PID/exe" 2>/dev/null || true)
   case "$SHELL_EXE" in */sh|*/ash|*/dash|*/bash|*/busybox) ;; *) return 1 ;; esac
-  tr '\000' '\n' < "/proc/$PID/cmdline" | awk -v installed="$ROOT/bin/fptnctl" -v self="$SELF" '
-    $0==installed || $0==self {script=1}
+  INSTALLED_SCRIPT=$(readlink -f "$ROOT/bin/fptnctl" 2>/dev/null || true)
+  tr '\000' '\n' < "/proc/$PID/cmdline" | awk -v installed="$ROOT/bin/fptnctl" -v canonical="$INSTALLED_SCRIPT" -v self="$SELF" '
+    $0==installed || (canonical!="" && $0==canonical) || $0==self {script=1}
     $0=="_run" {run=1}
     END {exit !(script && run)}'
 }
