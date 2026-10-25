@@ -4,6 +4,8 @@
 
 #include <algorithm>
 #include <chrono>
+#include <cstdio>
+#include <fstream>
 #include <cctype>
 #include <mutex>
 #include <optional>
@@ -12,8 +14,20 @@
 #include <thread>
 #include <unordered_set>
 #include <vector>
+#include <sys/stat.h>
 
 namespace fptn::keenetic {
+inline bool WritePrivateJson(const std::string& path, const std::string& json) {
+  if (path.empty()) return true;
+  const auto temporary = path + ".new";
+  std::ofstream file(temporary, std::ios::binary | std::ios::trunc);
+  if (!file) return false;
+  file << json << '\n'; file.close();
+  if (!file || chmod(temporary.c_str(), 0600) != 0 || std::rename(temporary.c_str(), path.c_str()) != 0) {
+    std::remove(temporary.c_str()); return false;
+  }
+  return true;
+}
 inline std::string ServerKey(std::string name) {
   const auto first = name.find_first_not_of(" \r\n\t");
   if (first == std::string::npos) return {};

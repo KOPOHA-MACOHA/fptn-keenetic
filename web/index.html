@@ -1,5 +1,5 @@
 <!doctype html>
-<html lang="ru">
+<html lang="ru" data-ui-version="0.4.0">
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
@@ -7,12 +7,14 @@
   <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self'; style-src 'self'; connect-src 'self'; img-src 'self'; object-src 'none'; base-uri 'none'; form-action 'self'; frame-src 'none'">
   <title>FPTN · Keenetic</title>
   <link rel="icon" href="data:,">
-  <link rel="stylesheet" href="style.css">
-  <script src="app.js" defer></script>
+  <link rel="stylesheet" href="style.css?v=0.4.0-f17351f5775c">
+  <script src="app.js?v=0.4.0-d5b8c2557c50" defer></script>
 </head>
 <body>
   <div class="shell">
     <header><a class="brand" href="./"><span class="mark">F</span><span>FPTN <small>KEENETIC</small></span></a><button id="logout" class="quiet" hidden>Выйти</button></header>
+    <p id="versions" class="version-line">Панель 0.4.0 · версия клиента появится после входа</p>
+    <div id="version-mismatch" class="banner error-banner" hidden><span id="version-mismatch-text"></span><button id="reload-ui" type="button">Обновить страницу</button></div>
     <section id="login" class="card login">
       <span class="eyebrow">ЛОКАЛЬНАЯ ПАНЕЛЬ</span>
       <h1>Управление подключением</h1>
@@ -23,19 +25,26 @@
       <div class="heading"><div><span class="eyebrow">KEENETIC · OPKGTUN0</span><h1>Ваше подключение</h1></div><span class="tag">FPTN для Keenetic</span></div>
       <section class="card overview">
         <div class="status-heading"><span id="indicator" class="dot"></span><h2 id="status-title">Проверяем состояние…</h2><span id="memory" class="memory"></span></div>
-        <p id="status-text" class="status-text"></p>
+        <p id="status-message" class="status-text"></p>
+        <p class="current-server">Текущий сервер: <strong id="active-server">Нет активного сервера</strong></p>
+        <p id="operation" class="operation" hidden></p>
         <div class="actions"><button id="start" class="primary" data-command="start">Запустить</button><button id="stop" data-command="stop">Остановить</button><button id="restart" data-command="restart">Переподключить</button></div>
-        <p class="hint">Статус процесса и READY при запуске. Доступность сайтов проверяется отдельно.</p>
+        <p class="hint">Состояние туннеля FPTN обновляется автоматически. Доступность отдельных сайтов зависит также от маршрутов Keenetic.</p>
+        <details><summary>Техническое состояние</summary><pre id="status-text"></pre></details>
       </section>
+      <div id="unsaved" class="banner" role="status" hidden><strong>Есть несохранённые изменения</strong><span id="unsaved-text"></span></div>
       <div class="columns">
         <section class="card">
           <div class="section-heading"><span class="step">01</span><h2>Сервер и токен</h2></div>
           <label for="selection-mode">Выбор сервера</label><select id="selection-mode"><option value="manual">Указать сервер</option><option value="auto">Автоматически · избранные сначала</option></select>
           <div id="manual-server"><label for="server">VPN-сервер</label><select id="server" form="settings-form" required></select></div>
           <p class="hint">При обрыве — автовыбор: сначала избранные, затем остальные. Выбирается сервер с наименьшим временем успешного входа.</p>
-          <div class="server-list-heading"><h3>Серверы</h3><span id="server-count" class="hint"></span></div>
+          <div class="server-list-heading"><h3>Избранные и исключения</h3><span id="server-count" class="hint"></span></div>
           <p class="hint">★ — избранный, × — исключённый. Исключённые серверы не проверяются. Списки применятся после сохранения.</p>
           <div id="server-list" class="server-list"></div>
+          <p id="settings-error" class="error-text" hidden></p>
+          <button id="check-servers" type="button" class="check-button">Проверить серверы</button>
+          <p id="check-summary" class="hint">Серверы ещё не проверены.</p>
           <details><summary>Заменить токен</summary><p class="hint">Текущий токен сохранён на роутере и не возвращается в браузер.</p><label for="token">Новый токен FPTN</label><textarea id="token" rows="3" spellcheck="false" autocomplete="off" placeholder="fptnb:…"></textarea><button id="preview" type="button">Прочитать серверы</button><p class="hint">Сначала прочитайте серверы, затем сохраните настройки.</p></details>
         </section>
         <section class="card">
@@ -51,7 +60,7 @@
               <p class="hint">Автоподбор появится в отдельном обновлении. Сейчас укажите домен вручную.</p>
             </div>
             <button id="save" class="primary wide" type="submit">Сохранить настройки</button>
-            <p class="hint">Работающий клиент переподключится. Остановленный останется остановленным. При неудачном запуске панель попробует вернуть прежние настройки.</p>
+            <p id="save-help" class="hint">Сохранение не запускает остановленную службу.</p>
           </form>
         </section>
       </div>

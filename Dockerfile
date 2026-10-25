@@ -105,7 +105,7 @@ RUN --mount=type=secret,id=proxy_ca \
       -DCMAKE_TOOLCHAIN_FILE=/build/conan_toolchain.cmake \
       -DCMAKE_BUILD_TYPE=Release -DCMAKE_EXE_LINKER_FLAGS=-static \
       -DCMAKE_COMPILE_WARNING_AS_ERROR=OFF -DCMAKE_CXX_CLANG_TIDY= \
-      -DFPTN_VERSION=0.3.0 && \
+      -DFPTN_VERSION=0.4.0 && \
     python /work/check-cross-includes.py /build/compile_commands.json && \
     cmake --build /build --target fptn-client-cli -j2
 RUN mkdir /out && \
@@ -116,6 +116,7 @@ RUN mkdir /out && \
     grep -q -- '--keenetic-connect' /out/HELP.txt && \
     grep -q -- '--keenetic-native' /out/HELP.txt && \
     grep -q -- '--keenetic-server-policy' /out/HELP.txt && \
+    grep -q -- '--keenetic-probe-only' /out/HELP.txt && \
     if timeout 60 qemu-mipsel /out/fptn-client-cli --access-token test > /out/GUARD.txt 2>&1; then exit 1; fi && \
     grep -q 'Connection requires --keenetic-connect' /out/GUARD.txt && \
     if timeout 60 qemu-mipsel /out/fptn-client-cli --keenetic-connect --keenetic-native \
@@ -126,6 +127,16 @@ RUN mkdir /out && \
     cp /work/run-connect-test.sh /work/TUNNEL-TEST.md /out/ && \
     cp /work/fptn-native-service.sh /work/NATIVE-INTERFACE.md /out/ && \
     cd /out && sha256sum fptn-client-cli HELP.txt sources.lock.json LICENSE-FPTN run-connect-test.sh TUNNEL-TEST.md fptn-native-service.sh NATIVE-INTERFACE.md > SHA256SUMS
+
+# Exercise probe-only mode on MIPS with a closed loopback port, without a TUN.
+RUN python -c 'import json,base64,pathlib; data={"version":1,"service_name":"offline-test","username":"probe","password":"probe","servers":[{"name":"offline-test","host":"127.0.0.1","port":9,"md5_fingerprint":"0"*32}]}; pathlib.Path("/tmp/offline-token").write_text("fptn:"+base64.b64encode(json.dumps(data).encode()).decode()); pathlib.Path("/tmp/offline-policy.json").write_text(json.dumps({"mode":"auto","favorites":[],"excluded":[]}))' && \
+    LC_ALL=C LANG=C timeout 45 qemu-mipsel /out/fptn-client-cli \
+      --keenetic-connect --keenetic-native --keenetic-probe-only \
+      --keenetic-server-policy /tmp/offline-policy.json --keenetic-probe-report /tmp/offline-report.json \
+      --access-token "$(cat /tmp/offline-token)" --out-network-interface lo \
+      --gateway-ip 127.0.0.1 --gateway-ipv6 ::1 --tun-interface-name opkgtun0 \
+      --bypass-method obfuscation --enable-ad-block false --blacklist-domains '' > /out/PROBE-CHECK.txt 2>&1 && \
+    python -c 'import json; data=json.load(open("/tmp/offline-report.json")); assert data["complete"] and data["method"]=="fptn-login"; assert len(data["results"])==1 and data["results"][0]["name"]=="offline-test" and not data["results"][0]["ok"]'
 
 FROM scratch AS client-export
 COPY --from=client /out/ /

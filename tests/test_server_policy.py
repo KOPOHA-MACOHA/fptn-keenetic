@@ -17,8 +17,10 @@ CPP = r'''
 #include <thread>
 struct Server {std::string name; int ms; bool works=true;};
 struct Result {std::string name;};
-int main(){
+int main(int argc,char**argv){
   using namespace fptn::keenetic;
+  assert(argc==2);assert(WritePrivateJson(argv[1],"{\"state\":\"connected\"}"));
+  struct stat info{};assert(stat(argv[1],&info)==0);assert((info.st_mode&0777)==0600);
   std::mutex mutex;std::set<std::string> calls;std::atomic<int> active{0},peak{0};
   auto probe=[&](const Server& s)->std::optional<Result>{
     int n=++active;int previous=peak.load();while(n>previous&&!peak.compare_exchange_weak(previous,n)){}
@@ -67,7 +69,7 @@ class ServerPolicyTest(unittest.TestCase):
             compiled=subprocess.run([compiler,'-std=c++20','-Wall','-Wextra','-Werror','-pthread',
                 '-I'+str(ROOT/'src'),str(root/'test.cpp'),'-o',str(root/'test')],capture_output=True,text=True)
             self.assertEqual(compiled.returncode,0,compiled.stderr)
-            result=subprocess.run([str(root/'test')],capture_output=True,text=True,timeout=10)
+            result=subprocess.run([str(root/'test'),str(root/'report.json')],capture_output=True,text=True,timeout=10)
             self.assertEqual(result.returncode,0,result.stderr)
 
     def test_changed_upstream_is_rejected_before_writes(self):

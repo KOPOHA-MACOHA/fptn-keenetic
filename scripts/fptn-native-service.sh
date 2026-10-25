@@ -250,11 +250,14 @@ run_service() {
   trap finish EXIT
   trap 'exit 0' TERM INT HUP
   EVER_READY=no
+  REPORT_CAPABLE=no
+  "$LIB/fptn-client-cli" --help | grep -q -- '--keenetic-probe-only' && REPORT_CAPABLE=yes
   BACKOFF=5
   FORCE_AUTO=no
   printf '[]\n' > "$RUN/failed-servers.json"
   while :; do
-    rm -f "$RUN/ready" "$RUN/active-server"
+    rm -f "$RUN/ready" "$RUN/active-server" "$RUN/link.json"
+    printf 'starting\n' > "$RUN/phase"
     echo 'FPTN: подключение.' > "$RUN/state"
     # Each attempt needs a fresh READY, not a line left by the previous client.
     if [ -s "$RUN/client.log" ]; then
@@ -277,6 +280,7 @@ run_service() {
     printf '[]\n' > "$RUN/failed-servers.json"
     FORCE_AUTO=yes
     echo "FPTN: клиент завершился; повтор через $BACKOFF секунд." > "$RUN/state"
+    printf 'retrying\n' > "$RUN/phase"
     cat "$RUN/state"
     trim_logs
     # Short whole-second waits allow stop during backoff on BusyBox ash.
@@ -304,11 +308,15 @@ attempt_service() {
     --sni "$SNI" --bypass-method "$BYPASS" --connection-strategy "$STRATEGY" \
     --enable-split-tunnel false --enable-ad-block false --blacklist-domains ''
   READY_TIMEOUT=60
+  if [ "$REPORT_CAPABLE" = yes ]; then
+    set -- "$@" --keenetic-status-file "$RUN/link.json" --keenetic-probe-report "$RUN/server-checks.json"
+  fi
   if [ -f "$CONF/server-policy.json" ]; then
     READY_TIMEOUT=540
     set -- "$@" --keenetic-server-policy "$CONF/server-policy.json" --keenetic-skip-file "$RUN/failed-servers.json"
     [ "$FORCE_AUTO" = no ] || set -- "$@" --keenetic-auto-select
     echo 'FPTN: выбор сервера — избранные, затем остальные разрешённые.' > "$RUN/state"
+    printf 'selecting\n' > "$RUN/phase"
   fi
   nice -n 10 "$LIB/fptn-client-cli" "$@" >> "$RUN/client.log" 2>&1 &
   CHILD=$!; record_pid "$CHILD" "$RUN/client.pid"; unset TOKEN
@@ -319,6 +327,7 @@ attempt_service() {
     trim_logs; sleep 1; N=$((N+1))
   done
   : > "$RUN/ready"
+  printf 'running\n' > "$RUN/phase"
   capture_selected
   EVER_READY=yes
   echo 'FPTN: READY получен для текущего процесса.'
@@ -373,6 +382,60 @@ status_service() {
   elif [ -d "$RUN" ]; then echo 'FPTN: остаточное состояние, требуется recover.'; return 1
   else echo 'FPTN: остановлен. Автозапуск выключен.'; fi
 }
+status_json() {
+  STATE=stopped; SUPERVISOR=false; CLIENT=false; CONNECTED=false; ACTIVE=
+  if alive "$RUN/supervisor.pid"; then
+    SUPERVISOR=true; STATE=starting
+    if [ -r "$RUN/phase" ]; then
+      PHASE=$(cat "$RUN/phase")
+      case "$PHASE" in starting|selecting|retrying) STATE=$PHASE ;; esac
+    fi
+    if client_alive; then
+      CLIENT=true
+      if [ -f "$RUN/ready" ]; then
+        STATE=running
+        LINK=$(jq -r '.state // "unknown"' "$RUN/link.json" 2>/dev/null || true)
+        if [ "$LINK" = reconnecting ]; then STATE=reconnecting
+        elif [ "$LINK" = connected ]; then CONNECTED=true; fi
+        if [ -s "$RUN/active-server" ]; then ACTIVE=$(cat "$RUN/active-server")
+        elif [ ! -f "$CONF/server-policy.json" ]; then ACTIVE=$(cat "$CONF/server"); fi
+      fi
+    fi
+  elif [ -d "$RUN" ]; then STATE=stale; fi
+  case "$STATE" in
+    stopped) MESSAGE='Служба остановлена.' ;;
+    running) if [ "$CONNECTED" = true ]; then MESSAGE='Туннель FPTN подключён.'; else MESSAGE='Клиент запущен; текущее состояние туннеля не подтверждено.'; fi ;;
+    reconnecting) MESSAGE='Соединение потеряно. FPTN восстанавливает туннель.' ;;
+    selecting) MESSAGE='Проверяем серверы и выбираем подключение.' ;;
+    retrying) MESSAGE='Ожидаем следующую попытку подключения.' ;;
+    stale) MESSAGE='Осталось состояние завершённой службы. Требуется fptnctl recover.' ;;
+    *) MESSAGE='Служба запускается.' ;;
+  esac
+  CAN_START=false; [ "$STATE" != stopped ] || CAN_START=true
+  jq -n --arg state "$STATE" --arg message "$MESSAGE" --arg server "$ACTIVE" \
+    --argjson supervisor "$SUPERVISOR" --argjson client "$CLIENT" --argjson connected "$CONNECTED" --argjson canStart "$CAN_START" \
+    '{state:$state,message:$message,selectedServer:$server,supervisorAlive:$supervisor,clientAlive:$client,connected:$connected,canStart:$canStart,canStop:$supervisor,canRestart:$supervisor}'
+}
+check_servers() (
+  "$LIB/fptn-client-cli" --help | grep -q -- '--keenetic-probe-only' || fail 'Для проверки нужен клиент 0.4.0.'
+  load_connection
+  CHECK_RUN=$ROOT/var/run/fptn-web
+  mkdir -p "$CHECK_RUN"
+  CHECK_TMP=$(mktemp -d "$CHECK_RUN/check.XXXXXX")
+  trap 'rm -rf "$CHECK_TMP"' EXIT
+  trap 'exit 1' INT TERM HUP
+  server_policy_json > "$CHECK_TMP/policy.json"
+  TOKEN=$(cat "$CONF/token")
+  GW=$(ip -4 route show table main default | awk '$1=="default" && $2=="via" {print $3; exit}')
+  IFACE=$(ip -4 route show table main default | awk '$1=="default" {for(i=1;i<NF;i++) if($i=="dev") {print $(i+1); exit}}')
+  [ -n "$GW" ] && [ -n "$IFACE" ] || fail 'Не найден обычный шлюз.'
+  nice -n 10 timeout -s TERM 600 "$LIB/fptn-client-cli" --keenetic-connect --keenetic-native \
+    --keenetic-probe-only --keenetic-probe-report "$CHECK_RUN/server-checks.json" \
+    --keenetic-server-policy "$CHECK_TMP/policy.json" --access-token "$TOKEN" \
+    --out-network-interface "$IFACE" --gateway-ip "$GW" --tun-interface-name opkgtun0 \
+    --bypass-method "$BYPASS" --connection-strategy "$STRATEGY" --sni "$SNI" \
+    --enable-split-tunnel false --enable-ad-block false --blacklist-domains ''
+)
 stop_service() {
   [ -d "$RUN" ] || { echo 'FPTN остановлен.'; return 0; }
   alive "$RUN/supervisor.pid" || fail 'Нет живого supervisor: recover.'
@@ -404,6 +467,8 @@ case "${1:-}" in
   validate-settings) validate_connection ;;
   get-server-policy) server_policy_json ;;
   validate-server-policy) validate_server_policy ;;
+  status-json) status_json ;;
+  check-servers) check_servers ;;
   install) install_native "${2:-/opt/tmp/fptn-native-client}" ;;
   setup-interface) setup_interface ;;
   configure) mkdir -p "$CONF"; chmod 700 "$CONF"; configure ;;

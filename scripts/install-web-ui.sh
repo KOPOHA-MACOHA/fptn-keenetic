@@ -49,6 +49,7 @@ CHANGED=no
 DONE=no
 KEY_CREATED=no
 ORIGIN_EXISTED=no
+META_EXISTED=no
 CLIENT_UPDATE=no
 WAS_RUNNING=no
 finish() {
@@ -69,6 +70,8 @@ finish() {
     else rm -f "$FRAGMENT"; fi
     if [ "$ORIGIN_EXISTED" = yes ]; then cp -p "$BACKUP/web-origin" "$CONF/web-origin"
     else rm -f "$CONF/web-origin"; fi
+    if [ "$META_EXISTED" = yes ]; then cp -p "$BACKUP/web-meta.json" "$CONF/web-meta.json"
+    else rm -f "$CONF/web-meta.json"; fi
     [ "$KEY_CREATED" = no ] || rm -f "$CONF/web-key"
     "$INIT" restart || echo 'Не удалось перезапустить lighttpd при откате; резервная копия сохранена.' >&2
     if [ "$CLIENT_UPDATE" = yes ] && [ "$WAS_RUNNING" = yes ]; then /opt/bin/fptnctl start || true; fi
@@ -81,24 +84,25 @@ BASE=https://raw.githubusercontent.com/KOPOHA-MACOHA/fptn-keenetic/$REV
 echo 'Скачиваю панель и управляющий скрипт. Сборка зависимостей не требуется.'
 mkdir -p "$STAGE/web" "$STAGE/scripts"
 curl -fL --connect-timeout 15 --max-time 60 "$BASE/web/SHA256SUMS" -o "$STAGE/SHA256SUMS"
-for path in web/index.html web/style.css web/app.js web/api.cgi scripts/fptn-native-service.sh; do
+for path in web/index.html web/index.cgi web/style.css web/app.js web/api.cgi scripts/fptn-native-service.sh; do
   curl -fL --connect-timeout 15 --max-time 60 "$BASE/$path" -o "$STAGE/$path"
 done
 (cd "$STAGE"; sha256sum -c SHA256SUMS) || fail 'Контрольные суммы не совпали.'
 sh -n "$STAGE/web/api.cgi"
+sh -n "$STAGE/web/index.cgi"
 sh -n "$STAGE/scripts/fptn-native-service.sh"
-if ! /opt/libexec/fptn/fptn-client-cli --help | grep -q -- '--keenetic-server-policy'; then
+if ! /opt/libexec/fptn/fptn-client-cli --help | grep -q -- '--keenetic-probe-only'; then
   CLIENT_UPDATE=yes
   mkdir -p "$STAGE/client"
   CLIENT_BASE=https://github.com/KOPOHA-MACOHA/fptn-keenetic/releases/download/native-$REV
-  echo 'Для политики серверов нужен клиент 0.3.0. Скачиваю готовый бинарник для Hopper.'
+  echo 'Для проверки серверов и состояния нужен клиент 0.4.0. Скачиваю готовый бинарник для Hopper.'
   curl -fL --connect-timeout 15 --max-time 180 "$CLIENT_BASE/fptn-client-cli" -o "$STAGE/client/fptn-client-cli"
   curl -fL --connect-timeout 15 --max-time 60 "$CLIENT_BASE/SHA256SUMS" -o "$STAGE/client/SHA256SUMS.all"
   awk '$2=="fptn-client-cli"' "$STAGE/client/SHA256SUMS.all" > "$STAGE/client/SHA256SUMS"
   [ -s "$STAGE/client/SHA256SUMS" ] || fail 'В выпуске нет контрольной суммы клиента.'
   (cd "$STAGE/client"; sha256sum -c SHA256SUMS) || fail 'Бинарник повреждён.'
   chmod 700 "$STAGE/client/fptn-client-cli"
-  "$STAGE/client/fptn-client-cli" --help | grep -q -- '--keenetic-server-policy' || fail 'Бинарник не поддерживает политику серверов или не подходит платформе.'
+  "$STAGE/client/fptn-client-cli" --help | grep -q -- '--keenetic-probe-only' || fail 'Бинарник не поддерживает диагностику или не подходит платформе.'
 fi
 # Existing settings must be accepted by the updated controller before installation.
 sh "$STAGE/scripts/fptn-native-service.sh" get-settings >/dev/null
@@ -113,6 +117,7 @@ fi
 [ ! -e "$FRAGMENT" ] || cp -p "$FRAGMENT" "$BACKUP/95-fptn.conf"
 [ ! -d "$WEB" ] || cp -pR "$WEB" "$BACKUP/web"
 if [ -f "$CONF/web-origin" ]; then ORIGIN_EXISTED=yes; cp -p "$CONF/web-origin" "$BACKUP/web-origin"; fi
+if [ -f "$CONF/web-meta.json" ]; then META_EXISTED=yes; cp -p "$CONF/web-meta.json" "$BACKUP/web-meta.json"; fi
 echo "Резервная копия: $BACKUP"
 CHANGED=yes
 if [ "$CLIENT_UPDATE" = yes ]; then
@@ -127,7 +132,7 @@ mkdir -p "$WEB"
 chmod 755 "$WEB"
 cp "$STAGE/web/"* "$WEB/"
 chmod 644 "$WEB/index.html" "$WEB/style.css" "$WEB/app.js"
-chmod 700 "$WEB/api.cgi"
+chmod 700 "$WEB/api.cgi" "$WEB/index.cgi"
 : > "$WEB/.fptn-web-owned"
 cp "$STAGE/scripts/fptn-native-service.sh" /opt/bin/fptnctl.new
 chmod 700 /opt/bin/fptnctl.new
@@ -139,11 +144,14 @@ if [ ! -s "$CONF/web-key" ]; then
 fi
 chmod 600 "$CONF/web-key"
 printf '%s\n' "$ORIGIN" > "$CONF/web-origin"
+CLIENT_VERSION=$(/opt/libexec/fptn/fptn-client-cli --version)
+jq -n --arg version "$CLIENT_VERSION" --arg revision "$REV" '{uiVersion:"0.4.0",clientVersion:$version,revision:$revision}' > "$CONF/web-meta.json.new"
+mv "$CONF/web-meta.json.new" "$CONF/web-meta.json"
 cat > "$FRAGMENT" <<EOF
 # Managed by fptn-web-ui. Credentials live outside the document root.
 \$SERVER["socket"] == "$LAN:$PORT" {
     server.document-root = "$WEB"
-    index-file.names = ( "index.html" )
+    index-file.names = ( "index.cgi" )
     cgi.assign = ( ".cgi" => "/bin/sh" )
     server.max-request-size = 300
 }
@@ -152,18 +160,20 @@ chmod 600 "$FRAGMENT"
 lighttpd -tt -f "$MAIN" || fail 'lighttpd отверг настройки панели.'
 "$INIT" restart || fail 'Не удалось перезапустить lighttpd.'
 sleep 1
-curl --noproxy '*' -fsS --connect-timeout 5 --max-time 10 "$ORIGIN/" >/dev/null || fail 'Страница панели не отвечает.'
+curl --noproxy '*' -fsS -D "$STAGE/headers" --connect-timeout 5 --max-time 10 "$ORIGIN/" -o "$STAGE/page" || fail 'Страница панели не отвечает.'
+grep -Fq 'data-ui-version="0.4.0"' "$STAGE/page" || fail 'На порту открылась другая версия панели.'
+grep -iq '^Cache-Control:.*no-store' "$STAGE/headers" || fail 'Страница панели кэшируется.'
 CODE=$(curl --noproxy '*' -sS -o /dev/null -w '%{http_code}' --max-time 10 "$ORIGIN/api.cgi?status")
 [ "$CODE" = 401 ] || fail 'Проверка ограничения доступа к API не прошла.'
 KEY=$(cat "$CONF/web-key")
 # Keep the panel key out of curl argv/process listings.
 printf 'header = "Authorization: Bearer %s"\n' "$KEY" |
   curl --noproxy '*' -K - -fsS --max-time 15 "$ORIGIN/api.cgi?status" |
-  jq -e '(.status|type=="string") and (.busy|type=="boolean")' >/dev/null || fail 'Авторизованный запрос к API не прошёл.'
+  jq -e '.uiVersion=="0.4.0" and (.service.state|type=="string") and (.busy|type=="boolean")' >/dev/null || fail 'Версия или состояние API не соответствуют панели.'
 if [ "$CLIENT_UPDATE" = yes ] && [ "$WAS_RUNNING" = yes ]; then /opt/bin/fptnctl start || fail 'Обновлённый клиент не запустился.'; fi
 DONE=yes
 echo
-echo "Панель: $ORIGIN/"
+echo "Панель 0.4.0: $ORIGIN/?v=$REV"
 echo "Код доступа: $KEY"
 echo 'Это код панели, не токен VPN. Сохраните его.'
 echo 'Токен, выбранный сервер, маршруты и DNS сохранены. Автозапуск FPTN не включался.'

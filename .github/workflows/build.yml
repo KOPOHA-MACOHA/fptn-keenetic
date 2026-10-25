@@ -63,7 +63,7 @@ jobs:
           if ! gh release view "$tag" >/dev/null 2>&1; then
             gh release create "$tag" --target "$GITHUB_SHA" --prerelease \
               --title "FPTN Keenetic native prototype ${GITHUB_SHA:0:7}" \
-              --notes 'Native prototype for Hopper KN-3810 / Entware mipsel. Includes favorite/excluded server policy and bounded automatic selection. Compilation and local tests passed; router validation of this update is still required. Routing, DNS and firewall remain managed by Keenetic.'
+              --notes 'Native prototype for Hopper KN-3810 / Entware mipsel. Includes favorite/excluded server policy, bounded automatic selection, live connection status and login checks without a TUN. Compilation and local tests passed; router validation of this update is still required. Routing, DNS and firewall remain managed by Keenetic.'
           fi
           gh release upload "$tag" client/fptn-client-cli client/SHA256SUMS \
             client/HELP.txt client/LICENSE-FPTN client/sources.lock.json --clobber

@@ -57,7 +57,7 @@ touch '{created}'
 volatile sig_atomic_t stopped=0;
 void stop(int s){stopped=1;}
 int main(int argc,char**argv){
- if(argc==2 && !strcmp(argv[1],"--help")){puts("--keenetic-server-policy");return 0;}
+ if(argc==2 && !strcmp(argv[1],"--help")){puts("--keenetic-server-policy --keenetic-probe-only");return 0;}
  int native=0,name=0; for(int i=1;i<argc;i++){
   if(!strcmp(argv[i],"--keenetic-native")) native=1;
   if(!strcmp(argv[i],"opkgtun0")) name=1;
@@ -179,5 +179,22 @@ int main(int argc,char**argv){
             self.assertIn('--keenetic-server-policy',args)
             self.assertIn('--keenetic-skip-file',args)
             self.assertEqual(json.loads((root/'var/run/fptn-keenetic/failed-servers.json').read_text()),['CZ'])
+            self.assertEqual(self.state()['mutations'],0)
+        finally:self.cmd('stop')
+
+    def test_structured_status_uses_owned_process_and_current_link_state(self):
+        root=self.prepare_native_client()
+        data=json.loads(self.cmd('status-json').stdout)
+        self.assertEqual(data['state'],'stopped');self.assertTrue(data['canStart']);self.assertFalse(data['canStop'])
+        try:
+            started=self.cmd('start');self.assertEqual(started.returncode,0,started.stdout+started.stderr)
+            run=root/'var/run/fptn-keenetic'
+            (run/'link.json').write_text('{"state":"connected"}')
+            data=json.loads(self.cmd('status-json').stdout)
+            self.assertEqual(data['state'],'running');self.assertTrue(data['connected'])
+            self.assertFalse(data['canStart']);self.assertTrue(data['canStop'])
+            (run/'link.json').write_text('{"state":"reconnecting"}')
+            data=json.loads(self.cmd('status-json').stdout)
+            self.assertEqual(data['state'],'reconnecting');self.assertFalse(data['connected'])
             self.assertEqual(self.state()['mutations'],0)
         finally:self.cmd('stop')

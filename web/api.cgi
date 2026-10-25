@@ -44,6 +44,7 @@ worker() {
   rollback=no
   was_running=no
   success=no
+  SUCCESS_MESSAGE='Готово.'
   finish_worker() {
     trap '' INT TERM HUP
     if [ "$rollback" = yes ]; then
@@ -58,7 +59,7 @@ worker() {
       fi
     fi
     if [ "$success" = yes ]; then
-      printf '%s\n' '{"ok":true,"message":"Готово"}' > "$RUN/result.new"
+      jq -n --arg action "$ACTION" --arg message "$SUCCESS_MESSAGE" '{ok:true,action:$action,message:$message}' > "$RUN/result.new"
     else
       printf '%s\n' '{"ok":false,"message":"Операция не выполнена. Подробности — в журнале службы."}' > "$RUN/result.new"
     fi
@@ -79,9 +80,10 @@ worker() {
   trap 'exit 1' INT TERM HUP
   : > "$LOCK/output"
   case "$ACTION" in
-    start) "$CTL" start >> "$LOCK/output" 2>&1 ;;
-    stop) "$CTL" stop >> "$LOCK/output" 2>&1 ;;
-    restart) "$CTL" stop >> "$LOCK/output" 2>&1; "$CTL" start >> "$LOCK/output" 2>&1 ;;
+    start) "$CTL" start >> "$LOCK/output" 2>&1; SUCCESS_MESSAGE='Служба запущена.' ;;
+    stop) "$CTL" stop >> "$LOCK/output" 2>&1; SUCCESS_MESSAGE='Служба остановлена.' ;;
+    restart) "$CTL" stop >> "$LOCK/output" 2>&1; "$CTL" start >> "$LOCK/output" 2>&1; SUCCESS_MESSAGE='Клиент переподключён.' ;;
+    check) "$CTL" check-servers >> "$LOCK/output" 2>&1; SUCCESS_MESSAGE='Проверка входа на серверы завершена.' ;;
     save)
       # All validation precedes stopping or writing the current configuration.
       TOKEN=$(jq -r '.token // ""' "$LOCK/request.json")
@@ -106,6 +108,7 @@ worker() {
       for key in token server connection.json server-policy.json; do
         [ ! -f "$CONF/$key" ] || cp -p "$CONF/$key" "$LOCK/old-$key"
       done
+      rm -f "$RUN/server-checks.json"
       # Existing CLI status is informational; inspect its owned runtime record too.
       if [ -d "$ROOT/var/run/fptn-keenetic" ]; then was_running=yes; fi
       "$CTL" stop >> "$LOCK/output" 2>&1
@@ -119,6 +122,8 @@ worker() {
       done
       unset TOKEN TOKEN_JSON
       if [ "$was_running" = yes ]; then "$CTL" start >> "$LOCK/output" 2>&1; fi
+      if [ "$was_running" = yes ]; then SUCCESS_MESSAGE='Настройки применены. Клиент переподключён.'
+      else SUCCESS_MESSAGE='Настройки сохранены. Служба остановлена — нажмите «Запустить» для подключения.'; fi
       rollback=no
       ;;
     *) exit 1 ;;
@@ -152,6 +157,15 @@ case "${REQUEST_METHOD:-}" in
     case "${QUERY_STRING:-}" in
       status)
         TEXT=$("$CTL" status 2>&1 || true)
+        SERVICE=$("$CTL" status-json) || error '500 Internal Server Error' 'Не удалось получить состояние службы.'
+        META='{}'; [ ! -f "$CONF/web-meta.json" ] || META=$(cat "$CONF/web-meta.json")
+        REPORT='null'
+        for source in "$ROOT/var/run/fptn-keenetic/server-checks.json" "$RUN/server-checks.json"; do
+          [ -r "$source" ] || continue
+          CANDIDATE=$(jq -ce 'select((.checked_at|type=="number") and (.results|type=="array")) |
+            {checked_at,complete,scope,method,results:[.results[]|{name,ok,latency_ms,code}]}' "$source" 2>/dev/null) || continue
+          REPORT=$(printf '%s\n%s\n' "$REPORT" "$CANDIDATE" | jq -s 'map(select(.!=null))|max_by(.checked_at)')
+        done
         RSS=0
         if [ -r "$ROOT/var/run/fptn-keenetic/client.pid" ]; then
           read -r CLIENT_PID REST < "$ROOT/var/run/fptn-keenetic/client.pid" || true
@@ -160,9 +174,11 @@ case "${REQUEST_METHOD:-}" in
           esac
         fi
         BUSY=false; [ ! -d "$LOCK" ] || BUSY=true
+        OPERATION=''; [ ! -f "$LOCK/action" ] || OPERATION=$(cat "$LOCK/action")
         RESULT='null'; [ ! -r "$RUN/result.json" ] || RESULT=$(cat "$RUN/result.json")
-        respond '200 OK' "$(jq -n --arg status "$TEXT" --arg rss "${RSS:-0}" --argjson busy "$BUSY" --argjson result "$RESULT" \
-          '{status:$status,rssKiB:($rss|tonumber),busy:$busy,result:$result}')"
+        respond '200 OK' "$(jq -n --arg status "$TEXT" --arg rss "${RSS:-0}" --arg operation "$OPERATION" \
+          --argjson service "$SERVICE" --argjson report "$REPORT" --argjson meta "$META" --argjson busy "$BUSY" --argjson result "$RESULT" \
+          '{status:$status,service:$service,report:$report,uiVersion:"0.4.0",clientVersion:($meta.clientVersion // "неизвестна"),revision:($meta.revision // ""),operation:$operation,rssKiB:($rss|tonumber),busy:$busy,result:$result}')"
         ;;
       settings)
         CONNECTION=$("$CTL" get-settings) || error '500 Internal Server Error' 'Некорректные настройки подключения.'
@@ -201,7 +217,7 @@ case "${REQUEST_METHOD:-}" in
       unset TOKEN
       respond '200 OK' "$(printf '%s' "$SERVERS" | jq '{servers:[.servers[].name]}')"
     fi
-    case "$ACTION" in start|stop|restart) ;; save)
+    case "$ACTION" in start|stop|restart|check) ;; save)
       printf '%s' "$BODY" | jq -e '(.server|type=="string" and length>0 and length<=128) and
         (.token // ""|type=="string" and length<=262144)' >/dev/null 2>&1 || error '400 Bad Request' 'Некорректный сервер или токен.'
       printf '%s' "$BODY" | jq '.connection' | "$CTL" validate-settings >/dev/null 2>&1 || error '400 Bad Request' 'Проверьте стратегию, метод обхода и домен SNI.'
