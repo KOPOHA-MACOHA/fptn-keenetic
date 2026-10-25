@@ -51,7 +51,21 @@ def prepare(root, lock):
     replace_once(root, "src/fptn-client/CMakeLists.txt",
                  'set(ADBLOCK_BLOCKLIST_GZ "${CMAKE_CURRENT_BINARY_DIR}/blocklist.gz")',
                  'set(ADBLOCK_BLOCKLIST_GZ "${CMAKE_SOURCE_DIR}/keenetic-empty-blocklist.gz")')
-    print("Pinned moving sources; disabled connections; omitted large adblock list")
+    # libtuntap hardcodes build-host include directories and exports them to
+    # consumers. These override musl's features.h with Ubuntu/glibc headers.
+    anchor = 'add_subdirectory("${Libtuntap_SOURCE_DIR}" "${Libtuntap_BINARY_DIR}" EXCLUDE_FROM_ALL)'
+    fix = '''
+# Keenetic cross-build: retain source/build includes, remove host system paths.
+foreach(_property INCLUDE_DIRECTORIES INTERFACE_INCLUDE_DIRECTORIES)
+  get_target_property(_includes tuntap ${_property})
+  if(_includes)
+    list(FILTER _includes EXCLUDE REGEX "^/usr/(local/)?include/?$")
+    set_property(TARGET tuntap PROPERTY ${_property} "${_includes}")
+  endif()
+endforeach()
+'''
+    replace_once(root, "depends/cmake/FetchLibTunTap.cmake", anchor, anchor + fix)
+    print("Pinned sources; disabled connections; omitted adblock; isolated TUN includes")
 
 
 if __name__ == "__main__":

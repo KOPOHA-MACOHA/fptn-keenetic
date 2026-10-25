@@ -43,7 +43,7 @@ RUN mkdir /out && \
 FROM scratch AS probe-export
 COPY --from=probe /out/ /
 
-FROM toolchain AS client
+FROM toolchain AS dependencies
 COPY scripts/prepare-source.py /work/prepare-source.py
 RUN --mount=type=secret,id=proxy_ca \
     if [ -f /run/secrets/proxy_ca ]; then export GIT_SSL_CAINFO=/run/secrets/proxy_ca; fi; \
@@ -65,6 +65,9 @@ RUN --mount=type=secret,id=proxy_ca \
     conan install . --output-folder=/build --build=missing \
       --profile:build=default --profile:host=/work/profile -s:b compiler.cppstd=20 \
       -o with_gui_client=False -o openwrt=True
+
+FROM dependencies AS client
+COPY scripts/check-cross-includes.py /work/check-cross-includes.py
 RUN --mount=type=secret,id=proxy_ca \
     if [ -f /run/secrets/proxy_ca ]; then \
       export SSL_CERT_FILE=/run/secrets/proxy_ca CMAKE_TLS_CAINFO=/run/secrets/proxy_ca; \
@@ -75,6 +78,7 @@ RUN --mount=type=secret,id=proxy_ca \
       -DCMAKE_BUILD_TYPE=Release -DCMAKE_EXE_LINKER_FLAGS=-static \
       -DCMAKE_COMPILE_WARNING_AS_ERROR=OFF -DCMAKE_CXX_CLANG_TIDY= \
       -DFPTN_VERSION=0.0.0 && \
+    python /work/check-cross-includes.py /build/compile_commands.json && \
     cmake --build /build --target fptn-client-cli -j2
 RUN mkdir /out && \
     cp /build/src/fptn-client/fptn-client-cli /out/ && \
