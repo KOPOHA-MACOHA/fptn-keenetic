@@ -3,9 +3,12 @@
 The stock-secondary-resolver check succeeded on Hopper KN-3810, KeeneticOS
 5.1.4: the previously empty `api.ipify.org` FQDN entry learned 8.6.112.0 and
 8.47.69.0. Existing explicit IP entries were not used as evidence. The native
-engine reported a lifetime near 150 seconds although the captured DNS mirror
-contained `t = 3`. The bridge should therefore delegate native membership and
-expiry rather than trying to duplicate those policies in direct ipset writes.
+engine initially reported a lifetime near 150 seconds although the captured DNS
+mirror contained `t = 3`; that observation does not establish a fixed native TTL
+floor. The subsequent reply-only writer test refreshed both addresses with
+`ttl = 3` and `last-updated = 0`, confirming acceptance without qid. The source
+of the earlier 150-second value has not been established. Native expiry and
+membership policies should not be reimplemented based on that earlier snapshot.
 
 `scripts/probe-smartdns-native-writer.sh` is the next controlled diagnostic. It
 queries the existing SmartDNS at 127.0.0.1:53, extracts only IPv4 addresses from
@@ -31,3 +34,7 @@ An independent local tree reader checks complete consumption, the exact FQDN,
 both answer addresses, test TTL and absence of qid. Invalid DNS answer addresses
 must prevent sending. Mock socket/ndmc tests do not validate actual router
 acceptance or infer native queue semantics.
+
+The user deferred SmartDNS integration and chose stock Keenetic DNS in front of
+SmartDNS for current FPTN development. See [the SmartDNS update plan](smartdns-update-plan.md).
+The permanent bridge draft was never published or installed on the router.
