@@ -12,7 +12,7 @@ ROOT = pathlib.Path(__file__).resolve().parents[1]
 
 
 class PhoneLauncherTest(unittest.TestCase):
-    def run_launcher(self, config, choice="", compressed=False):
+    def run_launcher(self, config, choice="", compressed=False, extra_env=None):
         with tempfile.TemporaryDirectory() as tmp:
             root = pathlib.Path(tmp)
             (root / "run-connect-test.sh").write_text((ROOT / "scripts/start-from-token.sh").read_text())
@@ -38,8 +38,11 @@ class PhoneLauncherTest(unittest.TestCase):
 if [ "$1" = --version ]; then echo 0.1.0; exit 0; fi
 while [ "$#" -gt 0 ]; do
   if [ "$1" = --preferred-server ]; then shift; printf 'MOCK_SERVER=%s\\n' "$1"; fi
+  if [ "$1" = --sni ]; then shift; printf 'MOCK_SNI=%s\\n' "$1"; fi
+  if [ "$1" = --bypass-method ]; then shift; printf 'MOCK_METHOD=%s\\n' "$1"; fi
   shift
 done
+printf 'MOCK_LOCALE=%s\\n' "$LC_ALL"
 ''')
             # Covers decoder plumbing; real Brotli is tested under QEMU in CI.
             (root / "brotli").write_text("#!/bin/sh\ncat\n")
@@ -50,7 +53,7 @@ done
             token = ("fptnb:" if compressed else "fptn://") + encoded
             result = subprocess.run(["sh", str(root / "run-connect-test.sh")],
                 input=token + "\n" + choice, text=True, capture_output=True,
-                env={**os.environ, "PATH": str(commands) + ":" + os.environ["PATH"]}, timeout=10)
+                env={**os.environ, **(extra_env or {}), "PATH": str(commands) + ":" + os.environ["PATH"]}, timeout=10)
             self.assertNotIn(token, result.stdout + result.stderr)
             self.assertNotIn("secret-password", result.stdout + result.stderr)
             return result
@@ -78,3 +81,11 @@ done
             result = self.run_launcher({"servers": servers})
             self.assertNotEqual(result.returncode, 0)
             self.assertNotIn("MOCK_SERVER=", result.stdout)
+
+    def test_sni_and_method_overrides_and_portable_locale(self):
+        result = self.run_launcher({"servers": [{"name": "NL"}]}, extra_env={
+            "FPTN_SNI": "example.org", "FPTN_BYPASS_METHOD": "obfuscation", "LC_ALL": "invalid_LOCALE"})
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn("MOCK_SNI=example.org", result.stdout)
+        self.assertIn("MOCK_METHOD=obfuscation", result.stdout)
+        self.assertIn("MOCK_LOCALE=C", result.stdout)

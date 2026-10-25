@@ -1,6 +1,8 @@
 #!/bin/sh
 # Uses the already built 0.1.0 client. Token decoding stays on the router.
 set -eu
+# Static libstdc++ supports the C locale; Entware may export an unavailable locale.
+export LC_ALL=C LANG=C
 umask 077
 ulimit -c 0
 cd "$(dirname "$0")"
@@ -94,6 +96,8 @@ nice -n 10 timeout -s TERM 90 ./fptn-client-cli \
   --out-network-interface "$FPTN_INTERFACE" \
   --gateway-ip "$FPTN_GATEWAY" \
   --tun-interface-name fptn0 \
+  --sni "${FPTN_SNI:-google.com}" \
+  --bypass-method "${FPTN_BYPASS_METHOD:-sni-spoofing-yandex-26-4}" \
   --enable-split-tunnel false \
   --enable-ad-block false \
   --blacklist-domains '' \
