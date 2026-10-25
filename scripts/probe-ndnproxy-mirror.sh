@@ -1,8 +1,15 @@
 #!/bin/sh
-# Capture a short FQDN-mirror exchange in a private socket, never the live IPC.
+# Capture in private IPC by default; --native-check opts into fresh live mirrors.
 set -eu
 export LC_ALL=C LANG=C
 umask 077
+MODE=${1:-capture}
+case "$MODE" in capture|--native-check) ;; *) echo 'Режимы: capture или --native-check' >&2; exit 1;; esac
+NATIVE_SOCKET=/var/run/fqdn-dns-mirror.sock
+if [ "$MODE" = --native-check ]; then
+  command -v ndmc >/dev/null 2>&1 || { echo 'ndmc не найден.' >&2; exit 1; }
+  [ -S "$NATIVE_SOCKET" ] || { echo 'Штатный сокет DNS-маршрутизации не найден.' >&2; exit 1; }
+fi
 for cmd in socat timeout nslookup netstat od; do
   command -v "$cmd" >/dev/null 2>&1 || { echo "Нет команды $cmd" >&2; exit 1; }
 done
@@ -18,6 +25,8 @@ done
 mkdir -p /opt/tmp
 # Keep the pathname below the Unix-domain socket limit.
 WORK=$(mktemp -d /opt/tmp/fqdn-probe.XXXXXX)
+MIRROR_PATH=$WORK/mirror.sock
+[ "$MODE" != --native-check ] || MIRROR_PATH=$NATIVE_SOCKET
 CAPTURE_PID=''
 WATCH_PID=''
 LAUNCH_PID=''
@@ -73,19 +82,27 @@ dns_server = 127.0.0.1:53 .
 dns_tcp_port = 15453
 dns_udp_port = 15453
 rpc_only = off
-fqdn_mirror_path = $WORK/mirror.sock
+fqdn_mirror_path = $MIRROR_PATH
 EOF
 : > "$WORK/hosts"
 : > "$WORK/safe"
 # RECVFROM without fork exits after the request notification. RECV must stay
 # listening for the later response notifications, including A/AAAA and CNAMEs.
-timeout -s TERM 15 socat -u -b 65535 "UNIX-RECV:$WORK/mirror.sock" STDOUT > "$WORK/message.bin" 2> "$WORK/socat.log" &
-CAPTURE_PID=$!
-n=0
-while [ ! -S "$WORK/mirror.sock" ] && [ "$n" -lt 3 ]; do sleep 1; n=$((n+1)); done
-[ -S "$WORK/mirror.sock" ] || { cat "$WORK/socat.log"; echo 'Временный сокет не создан.' >&2; exit 1; }
+if [ "$MODE" = capture ]; then
+  timeout -s TERM 15 socat -u -b 65535 "UNIX-RECV:$WORK/mirror.sock" STDOUT > "$WORK/message.bin" 2> "$WORK/socat.log" &
+  CAPTURE_PID=$!
+  n=0
+  while [ ! -S "$WORK/mirror.sock" ] && [ "$n" -lt 3 ]; do sleep 1; n=$((n+1)); done
+  [ -S "$WORK/mirror.sock" ] || { cat "$WORK/socat.log"; echo 'Временный сокет не создан.' >&2; exit 1; }
+  echo '[ПРОВЕРКА] Зеркало — только в приватный временный сокет.'
+else
+  echo '[ПРОВЕРКА] До запроса: штатная группа domain-list9.'
+  ndmc -c 'show object-group fqdn domain-list9'
+  echo '[ПРОВЕРКА] Свежие сообщения штатного ndnproxy об api.ipify.org пойдут в рабочий обработчик DNS-маршрутизации.'
+  echo '[ПРОВЕРКА] Настройки группы, ручные IP, маршруты и основной DNS не изменяются.'
+fi
 echo '[ПРОВЕРКА] Отдельный ndnproxy: DNS :15453, RPC :15454, rr_port :15455.'
-echo '[ПРОВЕРКА] Upstream — действующий SmartDNS :53; зеркало — только в приватный временный сокет.'
+echo '[ПРОВЕРКА] Upstream — действующий SmartDNS :53.'
 "$NDNPROXY" -c "$WORK/probe.conf" -p "$WORK/probe.pid" -f "$WORK/hosts" -s "$WORK/safe" > "$WORK/ndnproxy.log" 2>&1 &
 LAUNCH_PID=$!
 # Independent deadline also handles ndnproxy daemonizing away from the launcher.
@@ -111,6 +128,12 @@ if [ "$READY" != 1 ]; then
 fi
 timeout -s TERM 6 nslookup api.ipify.org 127.0.0.1:15453 > "$WORK/answer" 2>&1 || true
 cat "$WORK/answer"
+if [ "$MODE" = --native-check ]; then
+  echo '[ПРОВЕРКА] Сразу после ответа: адреса внутри entry с fqdn api.ipify.org.'
+  ndmc -c 'show object-group fqdn domain-list9'
+  echo '[ПРОВЕРКА] Проверяется обучение FQDN, а не уже существующие ручные IP. Готовый мост SmartDNS пока не установлен.'
+  exit 0
+fi
 # The first message can arrive before the DNS response. Do not stop at nonempty.
 sleep 3
 stop_probe

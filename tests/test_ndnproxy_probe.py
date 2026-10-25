@@ -24,10 +24,15 @@ elif name=='od':
     data=sys.stdin.buffer.read(); (root/'dumped').write_bytes(data)
     sys.exit(subprocess.run(['/usr/bin/od',*sys.argv[1:]],input=data).returncode)
 elif name=='id': print('0')
+elif name=='ndmc':
+    assert sys.argv[1:]==['-c','show object-group fqdn domain-list9'], 'Only read-only native commands are allowed'
+    with (root/'native-reads').open('a') as f: f.write('show\n')
+    print('fixture native group read; this is not a router compatibility check')
 elif name=='netstat':
     if (root/'listening').exists() or os.environ.get('MIRROR_BUSY'):
         print(f'udp 0 0 0.0.0.0:{port} 0.0.0.0:* 123/ndnproxy')
 elif name=='socat':
+    (root/'capture-started').touch()
     address=next(a for a in sys.argv if a.startswith('UNIX-RECV'))
     path=address.split(':',1)[1]
     assert path.startswith(str(root)+'/fqdn-probe.')
@@ -46,11 +51,12 @@ elif name=='ndnproxy':
     config=Path(sys.argv[sys.argv.index('-c')+1])
     data=dict(line.split(' = ',1) for line in config.read_text().splitlines())
     assert data['dns_server']=='127.0.0.1:53 .'
-    assert data['fqdn_mirror_path']==str(config.parent/'mirror.sock')
+    native=os.environ.get('MIRROR_NATIVE')=='1'
+    assert data['fqdn_mirror_path']==str(root/'native.sock' if native else config.parent/'mirror.sock')
     assert data['dns_udp_port']==str(port)
     assert data['rpc_port']!= '54321'
     assert data['rr_port']!= '40901'
-    for key in ['stat_file','fqdn_mirror_path']:
+    for key in ['stat_file']+([] if native else ['fqdn_mirror_path']):
         assert data[key].startswith(str(config.parent)+'/')
     if os.environ.get('MIRROR_START_FAIL'): sys.exit(2)
     if os.environ.get('MIRROR_DAEMON') and os.fork(): sys.exit(0)
@@ -75,18 +81,27 @@ class MirrorProbeTest(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             root=Path(tmp); commands=root/'bin'; commands.mkdir()
             port=15453
-            for name in ['ndnproxy','socat','nslookup','netstat','id','sleep','od']:
+            for name in ['ndnproxy','socat','nslookup','netstat','id','sleep','od','ndmc']:
                 path=commands/name; path.write_text(MOCK); path.chmod(0o700)
             # Redirect only the private test root and test ports on the host.
             script=SCRIPT.read_text().replace('/opt/tmp',str(root)).replace('15453',str(port))
             # This sandbox forbids bind(), including Unix-domain sockets.
             script=script.replace('-S "$WORK/mirror.sock"','-f "$WORK/mirror.sock"')
+            script=script.replace('/var/run/fqdn-dns-mirror.sock',str(root/'native.sock'))
+            script=script.replace('-S "$NATIVE_SOCKET"','-f "$NATIVE_SOCKET"')
+            (root/'native.sock').write_bytes(b'live socket sentinel')
             local=root/'probe.sh'; local.write_text(script)
-            result=subprocess.run(['sh',str(local)],text=True,capture_output=True,timeout=25,
+            native=(extra or {}).get('MIRROR_NATIVE')=='1'
+            args=['sh',str(local)]+(['--native-check'] if native else [])
+            result=subprocess.run(args,text=True,capture_output=True,timeout=25,
                 env={**os.environ,'PATH':str(commands)+':'+os.environ['PATH'],
                      'MIRROR_TEST_ROOT':str(root),'MIRROR_TEST_PORT':str(port),**(extra or {})})
             self.assertEqual(list(root.glob('fqdn-probe.*')),[],result.stdout+result.stderr)
-            if result.returncode==0:
+            self.assertEqual((root/'native.sock').read_bytes(),b'live socket sentinel')
+            if native:
+                self.assertFalse((root/'capture-started').exists())
+                self.assertEqual((root/'native-reads').read_text(),'show\nshow\n')
+            elif result.returncode==0:
                 self.assertIn(b'fixture-response', (root/'dumped').read_bytes())
             if (root/'resolver.pid').exists():
                 self.assertTrue((root/'stopped').exists(),result.stdout+result.stderr)
@@ -122,3 +137,8 @@ class MirrorProbeTest(unittest.TestCase):
         result=self.run_probe({'MIRROR_START_FAIL':'1'})
         self.assertNotEqual(result.returncode,0)
         self.assertIn('не начал слушать',result.stderr)
+
+    def test_native_check_uses_fresh_resolver_and_only_reads_native_config(self):
+        result=self.run_probe({'MIRROR_NATIVE':'1'})
+        self.assertEqual(result.returncode,0,result.stdout+result.stderr)
+        self.assertIn('Готовый мост SmartDNS пока не установлен',result.stdout)
