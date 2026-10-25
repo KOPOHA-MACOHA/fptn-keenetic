@@ -41,7 +41,11 @@ fptn::common::network::IPv4Address ResolveDomain(const std::string& domain) { re
                 '    std::cerr << "Keenetic prototype: connection is disabled; "\n'
                 '                 "only --help and --version are supported.\\n";\n'
                 '    return EXIT_FAILURE;\n'
-                '    if (fptn::logger::init("fptn-client-cli")) {}')
+                '    if (fptn::logger::init("fptn-client-cli")) {}\n'
+                '      bool use_login_race = preferred_names.empty();\n'
+                '          SPDLOG_WARN("Server \'{}\' does not exist! Check your token!",\n'
+                '              preferred_names.front());\n'
+                '          use_login_race = true;')
             route = cli.parent / "routing/route_manager.cpp"
             route.parent.mkdir()
             route.write_text('namespace { }\n// NOLINT(bugprone-exception-escape)\n'
@@ -51,3 +55,5 @@ fptn::common::network::IPv4Address ResolveDomain(const std::string& domain) { re
             self.assertLess(text.index('if (!args.get<bool>("--keenetic-connect"))'), text.index("logger::init"))
             self.assertIn('--enable-split-tunnel false', text)
             self.assertIn('!= "fptn0"', text)
+            self.assertIn('preferred_names.size() != 1', text)
+            self.assertIn('not found; refusing fallback', text)

@@ -106,6 +106,22 @@ def prepare(root):
       return EXIT_FAILURE;
     }'''
     replace_once(cli, old, new)
+    # Upstream silently tries every server if a preferred name is misspelled.
+    # The router test must fail instead of starting a parallel login race.
+    replace_once(cli,
+        '      bool use_login_race = preferred_names.empty();',
+        '      if (preferred_names.size() != 1) {\n'
+        '        SPDLOG_ERROR("Tunnel test requires exactly one preferred server");\n'
+        '        return EXIT_FAILURE;\n'
+        '      }\n'
+        '      bool use_login_race = false;')
+    replace_once(cli,
+        '          SPDLOG_WARN("Server \'{}\' does not exist! Check your token!",\n'
+        '              preferred_names.front());\n'
+        '          use_login_race = true;',
+        '          SPDLOG_ERROR("Preferred server \'{}\' not found; refusing fallback",\n'
+        '              preferred_names.front());\n'
+        '          return EXIT_FAILURE;')
     route = root / "src/fptn-client/routing/route_manager.cpp"
     route.write_text(external_route_source(route.read_text()))
     print("Prepared opt-in tunnel test; RouteManager has no system mutations or workers")

@@ -18,6 +18,9 @@ FPTN_INTERFACE=$(ip -4 route show table main default | awk '$1=="default" {for(i
 printf 'Preferred server name (one server, as shown in your Android app): '
 IFS= read -r FPTN_SERVER
 [ -n "$FPTN_SERVER" ] || { echo 'Server name must not be empty.' >&2; exit 1; }
+case "$FPTN_SERVER" in
+  *,*) echo 'Specify one server, not a comma-separated list.' >&2; exit 1 ;;
+esac
 FPTN_TTY_STATE=$(stty -g)
 trap 'stty "$FPTN_TTY_STATE" 2>/dev/null || true' EXIT
 trap 'exit 130' INT
