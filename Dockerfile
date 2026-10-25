@@ -74,7 +74,7 @@ RUN --mount=type=secret,id=proxy_ca \
       -DCMAKE_TOOLCHAIN_FILE=/build/conan_toolchain.cmake \
       -DCMAKE_BUILD_TYPE=Release -DCMAKE_EXE_LINKER_FLAGS=-static \
       -DCMAKE_COMPILE_WARNING_AS_ERROR=OFF -DCMAKE_CXX_CLANG_TIDY= \
-      -DFPTN_VERSION="keenetic-prototype-${revision}" && \
+      -DFPTN_VERSION=0.0.0 && \
     cmake --build /build --target fptn-client-cli -j2
 RUN mkdir /out && \
     cp /build/src/fptn-client/fptn-client-cli /out/ && \
