@@ -1,7 +1,8 @@
-# syntax=docker/dockerfile:1
+# syntax=docker/dockerfile:1@sha256:4edf897a3ffa55b89f906fc8cc78afdb3f1834cc9c7083565e611a8a7d5fe99e
 # SDK supplies a modern compiler only. No OpenWrt package is installed on Keenetic.
-FROM --platform=linux/amd64 openwrt/sdk:ramips-mt7621-24.10.7 AS sdk
-FROM --platform=linux/amd64 ubuntu:24.04 AS toolchain
+ARG DEPENDENCIES_IMAGE=dependencies
+FROM --platform=linux/amd64 openwrt/sdk:ramips-mt7621-24.10.7@sha256:80fac8772ff0c536ba8a1b59497acd038daa744b7e3a628508b447a50145308c AS sdk
+FROM --platform=linux/amd64 ubuntu:24.04@sha256:68ee22004a9109b44973313b02ff7b1de250f1de0f5ecb628d73f579aaff33ac AS toolchain
 ENV DEBIAN_FRONTEND=noninteractive
 RUN --mount=type=secret,id=proxy_ca \
     if [ -f /run/secrets/proxy_ca ]; then \
@@ -66,7 +67,22 @@ RUN --mount=type=secret,id=proxy_ca \
       --profile:build=default --profile:host=/work/profile -s:b compiler.cppstd=20 \
       -o with_gui_client=False -o openwrt=True
 
-FROM dependencies AS client
+# Strip disposable Conan builds/sources before flattening. Packages and /build stay.
+FROM dependencies AS dependency-clean
+RUN conan cache clean "*" --source --build --download --temp && \
+    conan cache check-integrity "*:*"
+
+# A single compact filesystem layer avoids carrying deleted multi-GB build trees.
+FROM scratch AS dependency-image
+COPY --from=dependency-clean / /
+ENV STAGING_DIR=/builder/staging_dir/toolchain-mipsel_24kc_gcc-13.3.0_musl
+ENV PATH=/tools/bin:/builder/staging_dir/toolchain-mipsel_24kc_gcc-13.3.0_musl/bin:/builder/staging_dir/host/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
+ENV DEBIAN_FRONTEND=noninteractive
+WORKDIR /work/upstream
+# END DEPENDENCY IMAGE INPUTS
+
+# CI overrides this FROM with an integrity-checked OCI snapshot, not a cache hint.
+FROM ${DEPENDENCIES_IMAGE} AS client
 COPY scripts/check-cross-includes.py /work/check-cross-includes.py
 COPY scripts/prepare-connect-test.py /work/prepare-connect-test.py
 COPY scripts/run-connect-test.sh /work/run-connect-test.sh

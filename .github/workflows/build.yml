@@ -48,26 +48,17 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - uses: docker/setup-buildx-action@v3
-      - name: Build and preserve dependencies before compiling FPTN
-        uses: docker/build-push-action@v6
-        with:
-          context: .
-          target: dependencies
-          cache-from: |
-            type=gha,scope=keenetic-dependencies
-            type=gha,scope=keenetic-toolchain
-          cache-to: type=gha,mode=max,scope=keenetic-dependencies
+      - name: Restore prepared dependency image
+        id: dependencies-image
+        uses: ./.github/actions/dependency-image
       - name: Cross-build FPTN CLI
         uses: docker/build-push-action@v6
         with:
           context: .
           target: client-export
+          build-args: DEPENDENCIES_IMAGE=prepared-dependencies
+          build-contexts: prepared-dependencies=${{ steps.dependencies-image.outputs.context }}
           outputs: type=local,dest=out/client
-          cache-from: |
-            type=gha,scope=keenetic-dependencies
-            type=gha,scope=keenetic-client
-            type=gha,scope=keenetic-toolchain
-          cache-to: type=gha,mode=max,scope=keenetic-client
       - uses: actions/upload-artifact@v4
         with:
           name: fptn-native-client

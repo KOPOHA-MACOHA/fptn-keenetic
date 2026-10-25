@@ -1,0 +1,54 @@
+name: Prepare and verify dependency image
+on:
+  workflow_run:
+    workflows: [Build prototype]
+    types: [completed]
+  workflow_dispatch:
+permissions:
+  contents: read
+concurrency:
+  group: fptn-dependency-image-main
+  cancel-in-progress: false
+jobs:
+  prepare:
+    if: github.event_name == 'workflow_dispatch' || ((github.event.workflow_run.conclusion == 'success' || github.event.workflow_run.conclusion == 'failure') && github.event.workflow_run.head_branch == 'main' && github.event.workflow_run.event == 'push')
+    runs-on: ubuntu-24.04
+    timeout-minutes: 120
+    outputs:
+      source-sha: ${{ steps.source.outputs.sha }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: main
+      - id: source
+        run: echo "sha=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
+      - uses: docker/setup-buildx-action@v3
+      - name: Prepare reusable dependency snapshot
+        uses: ./.github/actions/dependency-image
+  verify-fresh-runner:
+    needs: prepare
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.prepare.outputs.source-sha }}
+      - uses: docker/setup-buildx-action@v3
+      - name: Require actual cache restore on a different runner
+        id: dependencies-image
+        uses: ./.github/actions/dependency-image
+        with:
+          require-hit: 'true'
+      - name: Compile native client without Conan or dependency stages
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          target: client-export
+          build-args: DEPENDENCIES_IMAGE=prepared-dependencies
+          build-contexts: prepared-dependencies=${{ steps.dependencies-image.outputs.context }}
+          outputs: type=local,dest=out/client
+      - uses: actions/upload-artifact@v4
+        with:
+          name: fptn-native-client-cache-verified
+          path: out/client/
+          if-no-files-found: error

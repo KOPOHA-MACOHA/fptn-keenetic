@@ -1,0 +1,64 @@
+name: Restore prepared dependency image
+description: Reuse a complete immutable OCI snapshot instead of rerunning Conan.
+inputs:
+  require-hit:
+    description: Fail rather than rebuilding when verifying cross-job reuse.
+    default: 'false'
+outputs:
+  context:
+    description: Verified OCI build-context URI.
+    value: ${{ steps.unpack.outputs.context }}
+  key:
+    description: Content key of dependency inputs.
+    value: ${{ steps.key.outputs.key }}
+  cache-hit:
+    description: Whether this run restored an existing dependency image.
+    value: ${{ steps.restore.outputs.cache-hit }}
+runs:
+  using: composite
+  steps:
+    - id: key
+      shell: bash
+      run: |
+        set -euo pipefail
+        echo "key=$(python3 scripts/dependency-image.py key .)" >> "$GITHUB_OUTPUT"
+        mkdir -p "$RUNNER_TEMP/fptn-dependency-cache"
+    - id: restore
+      uses: actions/cache/restore@v4
+      with:
+        path: ${{ runner.temp }}/fptn-dependency-cache/dependencies.tar
+        key: fptn-deps-oci-v1-${{ steps.key.outputs.key }}
+        fail-on-cache-miss: ${{ inputs.require-hit }}
+    - if: inputs.require-hit == 'true' && steps.restore.outputs.cache-hit != 'true'
+      shell: bash
+      run: |
+        echo 'Expected a dependency image cache hit; refusing to compile dependencies.' >&2
+        exit 1
+    - if: steps.restore.outputs.cache-hit != 'true'
+      name: Prepare dependency snapshot (only on input-key change or missing cache)
+      uses: docker/build-push-action@v6
+      with:
+        context: .
+        target: dependency-image
+        provenance: false
+        sbom: false
+        outputs: type=oci,dest=${{ runner.temp }}/fptn-dependency-cache/dependencies.tar
+        cache-from: |
+          type=gha,scope=keenetic-dependencies
+          type=gha,scope=keenetic-client
+          type=gha,scope=keenetic-toolchain
+    - if: steps.restore.outputs.cache-hit != 'true'
+      uses: actions/cache/save@v4
+      with:
+        path: ${{ runner.temp }}/fptn-dependency-cache/dependencies.tar
+        key: fptn-deps-oci-v1-${{ steps.key.outputs.key }}
+    - id: unpack
+      shell: bash
+      run: |
+        set -euo pipefail
+        du -h "$RUNNER_TEMP/fptn-dependency-cache/dependencies.tar"
+        context=$(python3 scripts/dependency-image.py unpack \
+          "$RUNNER_TEMP/fptn-dependency-cache/dependencies.tar" \
+          "$RUNNER_TEMP/fptn-dependency-layout")
+        echo "context=$context" >> "$GITHUB_OUTPUT"
+        echo 'Prepared dependency image verified; Conan installation will not run in the client build.'
