@@ -68,6 +68,10 @@ RUN --mount=type=secret,id=proxy_ca \
 
 FROM dependencies AS client
 COPY scripts/check-cross-includes.py /work/check-cross-includes.py
+COPY scripts/prepare-connect-test.py /work/prepare-connect-test.py
+COPY scripts/run-connect-test.sh /work/run-connect-test.sh
+COPY docs/tunnel-test.md /work/TUNNEL-TEST.md
+RUN python /work/prepare-connect-test.py /work/upstream
 RUN --mount=type=secret,id=proxy_ca \
     if [ -f /run/secrets/proxy_ca ]; then \
       export SSL_CERT_FILE=/run/secrets/proxy_ca CMAKE_TLS_CAINFO=/run/secrets/proxy_ca; \
@@ -77,7 +81,7 @@ RUN --mount=type=secret,id=proxy_ca \
       -DCMAKE_TOOLCHAIN_FILE=/build/conan_toolchain.cmake \
       -DCMAKE_BUILD_TYPE=Release -DCMAKE_EXE_LINKER_FLAGS=-static \
       -DCMAKE_COMPILE_WARNING_AS_ERROR=OFF -DCMAKE_CXX_CLANG_TIDY= \
-      -DFPTN_VERSION=0.0.0 && \
+      -DFPTN_VERSION=0.1.0 && \
     python /work/check-cross-includes.py /build/compile_commands.json && \
     cmake --build /build --target fptn-client-cli -j2
 RUN mkdir /out && \
@@ -85,9 +89,13 @@ RUN mkdir /out && \
     mipsel-openwrt-linux-musl-strip /out/fptn-client-cli && \
     python /work/verify-elf.py /out/fptn-client-cli && \
     timeout 60 qemu-mipsel /out/fptn-client-cli --help > /out/HELP.txt && \
+    grep -q -- '--keenetic-connect' /out/HELP.txt && \
+    if timeout 60 qemu-mipsel /out/fptn-client-cli --access-token test > /out/GUARD.txt 2>&1; then exit 1; fi && \
+    grep -q 'Connection requires --keenetic-connect' /out/GUARD.txt && \
     cp /work/sources.lock.json /out/ && \
     cp /work/upstream/LICENSE /out/LICENSE-FPTN && \
-    cd /out && sha256sum fptn-client-cli HELP.txt sources.lock.json LICENSE-FPTN > SHA256SUMS
+    cp /work/run-connect-test.sh /work/TUNNEL-TEST.md /out/ && \
+    cd /out && sha256sum fptn-client-cli HELP.txt sources.lock.json LICENSE-FPTN run-connect-test.sh TUNNEL-TEST.md > SHA256SUMS
 
 FROM scratch AS client-export
 COPY --from=client /out/ /
