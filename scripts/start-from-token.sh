@@ -101,4 +101,4 @@ nice -n 10 timeout -s TERM 90 ./fptn-client-cli \
   --enable-split-tunnel false \
   --enable-ad-block false \
   --blacklist-domains '' \
-  --connection-strategy rolling-tunnel
+  --connection-strategy "${FPTN_CONNECTION_STRATEGY:-rolling-tunnel}"

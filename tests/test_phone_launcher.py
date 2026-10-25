@@ -40,6 +40,7 @@ while [ "$#" -gt 0 ]; do
   if [ "$1" = --preferred-server ]; then shift; printf 'MOCK_SERVER=%s\\n' "$1"; fi
   if [ "$1" = --sni ]; then shift; printf 'MOCK_SNI=%s\\n' "$1"; fi
   if [ "$1" = --bypass-method ]; then shift; printf 'MOCK_METHOD=%s\\n' "$1"; fi
+  if [ "$1" = --connection-strategy ]; then shift; printf 'MOCK_STRATEGY=%s\\n' "$1"; fi
   shift
 done
 printf 'MOCK_LOCALE=%s\\n' "$LC_ALL"
@@ -84,8 +85,10 @@ printf 'MOCK_LOCALE=%s\\n' "$LC_ALL"
 
     def test_sni_and_method_overrides_and_portable_locale(self):
         result = self.run_launcher({"servers": [{"name": "NL"}]}, extra_env={
-            "FPTN_SNI": "example.org", "FPTN_BYPASS_METHOD": "obfuscation", "LC_ALL": "invalid_LOCALE"})
+            "FPTN_SNI": "example.org", "FPTN_BYPASS_METHOD": "obfuscation",
+            "FPTN_CONNECTION_STRATEGY": "dual-rolling-tunnel", "LC_ALL": "invalid_LOCALE"})
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertIn("MOCK_SNI=example.org", result.stdout)
         self.assertIn("MOCK_METHOD=obfuscation", result.stdout)
+        self.assertIn("MOCK_STRATEGY=dual-rolling-tunnel", result.stdout)
         self.assertIn("MOCK_LOCALE=C", result.stdout)
