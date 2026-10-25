@@ -10,6 +10,12 @@ def replace(text, old, new):
     return text.replace(old, new, 1)
 
 
+def patch_ntp(header, source):
+    header = replace(header, '  bool SyncWithNtp();', '  bool SyncWithNtp();\n  void Stop();')
+    source = replace(source, 'TimeProvider::~TimeProvider() {\n  stop_sync_.store(true);', 'TimeProvider::~TimeProvider() { Stop(); }\n\nvoid TimeProvider::Stop() {\n  stop_sync_.store(true);')
+    return header, source
+
+
 SELECTION = r'''
       const auto policy_path = args.get<std::string>("--keenetic-server-policy");
       if (!policy_path.empty()) {
@@ -82,6 +88,8 @@ SELECTION = r'''
         if (!fptn::keenetic::WritePrivateJson(report_path, report.dump())) report_failed = true;
         if (probe_only) {
           if (report_path.empty() || report_failed) throw std::runtime_error("Cannot write server check report");
+          // NTP logs from a background thread. Join it before destroying the logger.
+          fptn::time::TimeProvider::Instance()->Stop();
           spdlog::shutdown();
           return EXIT_SUCCESS; // no TUN, RouteManager or VPN session is constructed
         }
@@ -99,6 +107,8 @@ SELECTION = r'''
 def prepare(root, header):
     cli_path = root/'src/fptn-client/fptn-client-cli.cpp'
     loop_path = root/'src/fptn-client/utils/signal/main_loop.h'
+    time_header = root/'src/fptn-protocol-lib/time/time_provider.h'
+    time_source = root/'src/fptn-protocol-lib/time/time_provider.cpp'
     cli = cli_path.read_text()
     cli = replace(cli, '#include <iostream>', '#include <iostream>\n#include <fstream>\n#include <nlohmann/json.hpp>\n#include "keenetic-server-policy.h"\n#include "fptn-protocol-lib/https/api_client/api_client.h"')
     cli = replace(cli, '    args.add_argument("--keenetic-native")', '''    args.add_argument("--keenetic-server-policy").default_value(std::string{}).help("Native server policy JSON file");
@@ -135,9 +145,12 @@ def prepare(root, header):
       io_context.stop();
       return;
     }''')
+    ntp_header, ntp_source = patch_ntp(time_header.read_text(), time_source.read_text())
     # Validate every anchor before writing any file.
     cli_path.write_text(cli)
     loop_path.write_text(loop)
+    time_header.write_text(ntp_header)
+    time_source.write_text(ntp_source)
     (root/'src/fptn-client/keenetic-server-policy.h').write_text(header.read_text())
     (loop_path.parent/'keenetic-server-policy.h').write_text(header.read_text())
 

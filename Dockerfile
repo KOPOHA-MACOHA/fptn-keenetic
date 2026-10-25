@@ -89,6 +89,7 @@ COPY scripts/run-connect-test.sh /work/run-connect-test.sh
 COPY docs/tunnel-test.md /work/TUNNEL-TEST.md
 COPY scripts/prepare-native-tun.py /work/prepare-native-tun.py
 COPY scripts/prepare-server-policy.py /work/prepare-server-policy.py
+COPY scripts/check-probe-mode.sh /work/check-probe-mode.sh
 COPY src/keenetic-server-policy.h /work/keenetic-server-policy.h
 COPY src/keenetic-linux-tun.h /work/keenetic-linux-tun.h
 COPY scripts/fptn-native-service.sh /work/fptn-native-service.sh
@@ -129,14 +130,7 @@ RUN mkdir /out && \
     cd /out && sha256sum fptn-client-cli HELP.txt sources.lock.json LICENSE-FPTN run-connect-test.sh TUNNEL-TEST.md fptn-native-service.sh NATIVE-INTERFACE.md > SHA256SUMS
 
 # Exercise probe-only mode on MIPS with a closed loopback port, without a TUN.
-RUN python -c 'import json,base64,pathlib; data={"version":1,"service_name":"offline-test","username":"probe","password":"probe","servers":[{"name":"offline-test","host":"127.0.0.1","port":9,"md5_fingerprint":"0"*32}]}; pathlib.Path("/tmp/offline-token").write_text("fptn:"+base64.b64encode(json.dumps(data).encode()).decode()); pathlib.Path("/tmp/offline-policy.json").write_text(json.dumps({"mode":"auto","favorites":[],"excluded":[]}))' && \
-    LC_ALL=C LANG=C timeout 45 qemu-mipsel /out/fptn-client-cli \
-      --keenetic-connect --keenetic-native --keenetic-probe-only \
-      --keenetic-server-policy /tmp/offline-policy.json --keenetic-probe-report /tmp/offline-report.json \
-      --access-token "$(cat /tmp/offline-token)" --out-network-interface lo \
-      --gateway-ip 127.0.0.1 --gateway-ipv6 ::1 --tun-interface-name opkgtun0 \
-      --bypass-method obfuscation --enable-ad-block false --blacklist-domains '' > /out/PROBE-CHECK.txt 2>&1 && \
-    python -c 'import json; data=json.load(open("/tmp/offline-report.json")); assert data["complete"] and data["method"]=="fptn-login"; assert len(data["results"])==1 and data["results"][0]["name"]=="offline-test" and not data["results"][0]["ok"]'
+RUN sh /work/check-probe-mode.sh
 
 FROM scratch AS client-export
 COPY --from=client /out/ /
