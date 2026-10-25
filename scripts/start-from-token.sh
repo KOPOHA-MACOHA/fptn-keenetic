@@ -57,7 +57,7 @@ fi
 if [ "${#FPTN_CONFIG}" -gt 1048576 ] || ! printf '%s' "$FPTN_CONFIG" | jq -e '
   type == "object" and (.servers | type == "array") and (.servers | length > 0)
   and all(.servers[]; .name | type == "string" and length > 0
-    and (test("[[:cntrl:]]") | not))' >/dev/null 2>&1; then
+    and all(explode[]; . >= 32 and . != 127))' >/dev/null 2>&1; then
   echo 'В токене не найден корректный список серверов.' >&2; exit 1
 fi
 FPTN_COUNT=$(printf '%s' "$FPTN_CONFIG" | jq -r '.servers | length')

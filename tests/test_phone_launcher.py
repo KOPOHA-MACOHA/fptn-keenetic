@@ -3,6 +3,7 @@ import hashlib
 import json
 import os
 import pathlib
+import shutil
 import subprocess
 import tempfile
 import unittest
@@ -23,6 +24,13 @@ class PhoneLauncherTest(unittest.TestCase):
                 "nice": '#!/bin/sh\nshift 2\nexec "$@"\n',
                 "timeout": '#!/bin/sh\nshift 3\nexec "$@"\n',
             }
+            # Entware's default jq is the noregex variant. Reject any accidental
+            # use of regex functions even when tests run against Ubuntu jq-full.
+            real_jq = shutil.which("jq")
+            self.assertIsNotNone(real_jq)
+            mocks["jq"] = ('#!/bin/sh\n'
+                'case "$*" in *"test("*|*"match("*|*"sub("*) echo "regex unavailable" >&2; exit 3;; esac\n'
+                'exec ' + real_jq + ' "$@"\n')
             for name, source in mocks.items():
                 (commands / name).write_text(source)
                 (commands / name).chmod(0o700)
