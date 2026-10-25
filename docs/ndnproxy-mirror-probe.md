@@ -23,7 +23,7 @@ made. Its only configured upstream is the existing SmartDNS at 127.0.0.1:53.
 
 One bounded nslookup for `api.ipify.org` exercises the resolver. Socat receives
 one message at the private mirror socket; the script prints its length and up to
-4096 bytes in hex. A 15-second watchdog stops only processes whose command line
+4096 bytes as octal byte values. A 15-second watchdog stops only processes whose command line
 contains the unique private `-c` configuration path, including a daemon child.
 Normal exit and signals also stop the temporary resolver and remove its files.
 The stock mirror socket is never bound, read, renamed, replaced or written.

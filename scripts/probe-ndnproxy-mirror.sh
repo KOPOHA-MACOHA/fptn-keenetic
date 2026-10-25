@@ -117,7 +117,7 @@ if [ ! -s "$WORK/message.bin" ]; then
   cat "$WORK/ndnproxy.log" "$WORK/socat.log"
   exit 1
 fi
-echo "[ПРОВЕРКА] Получен образец сообщения: $(wc -c < "$WORK/message.bin") байт. Первые 4096 байт:"
-dd if="$WORK/message.bin" bs=4096 count=1 2>/dev/null | od -An -tx1 -v
+echo "[ПРОВЕРКА] Получен образец сообщения: $(wc -c < "$WORK/message.bin") байт. Первые 4096 байт (восьмеричные значения):"
+dd if="$WORK/message.bin" bs=4096 count=1 2>/dev/null | od -b -v
 echo '[ПРОВЕРКА] Это образец протокола, а не проверка готовой доменной маршрутизации.'
 echo '[ПРОВЕРКА] Временный ndnproxy остановлен; настройки и рабочие сокеты не изменялись.'

@@ -19,6 +19,9 @@ port=int(os.environ['MIRROR_TEST_PORT'])
 if name=='sleep':
     assert '.' not in sys.argv[1], 'Router BusyBox sleep requires whole seconds'
     time.sleep(float(sys.argv[1]))
+elif name=='od':
+    assert sys.argv[1:]==['-b','-v'], 'Router BusyBox od only supports short legacy flags'
+    os.execv('/usr/bin/od',['od',*sys.argv[1:]])
 elif name=='id': print('0')
 elif name=='netstat':
     if (root/'listening').exists() or os.environ.get('MIRROR_BUSY'):
@@ -64,7 +67,7 @@ class MirrorProbeTest(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             root=Path(tmp); commands=root/'bin'; commands.mkdir()
             port=15453
-            for name in ['ndnproxy','socat','nslookup','netstat','id','sleep']:
+            for name in ['ndnproxy','socat','nslookup','netstat','id','sleep','od']:
                 path=commands/name; path.write_text(MOCK); path.chmod(0o700)
             # Redirect only the private test root and test ports on the host.
             script=SCRIPT.read_text().replace('/opt/tmp',str(root)).replace('15453',str(port))
