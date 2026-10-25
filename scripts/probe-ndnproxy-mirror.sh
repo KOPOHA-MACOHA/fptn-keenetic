@@ -1,5 +1,5 @@
 #!/bin/sh
-# Capture one genuine FQDN-mirror message in a private socket, never the live IPC.
+# Capture a short FQDN-mirror exchange in a private socket, never the live IPC.
 set -eu
 export LC_ALL=C LANG=C
 umask 077
@@ -77,7 +77,9 @@ fqdn_mirror_path = $WORK/mirror.sock
 EOF
 : > "$WORK/hosts"
 : > "$WORK/safe"
-timeout -s TERM 15 socat -u -b 65535 "UNIX-RECVFROM:$WORK/mirror.sock" STDOUT > "$WORK/message.bin" 2> "$WORK/socat.log" &
+# RECVFROM without fork exits after the request notification. RECV must stay
+# listening for the later response notifications, including A/AAAA and CNAMEs.
+timeout -s TERM 15 socat -u -b 65535 "UNIX-RECV:$WORK/mirror.sock" STDOUT > "$WORK/message.bin" 2> "$WORK/socat.log" &
 CAPTURE_PID=$!
 n=0
 while [ ! -S "$WORK/mirror.sock" ] && [ "$n" -lt 3 ]; do sleep 1; n=$((n+1)); done
@@ -109,15 +111,20 @@ if [ "$READY" != 1 ]; then
 fi
 timeout -s TERM 6 nslookup api.ipify.org 127.0.0.1:15453 > "$WORK/answer" 2>&1 || true
 cat "$WORK/answer"
-n=0
-while [ ! -s "$WORK/message.bin" ] && [ "$n" -lt 3 ]; do sleep 1; n=$((n+1)); done
+# The first message can arrive before the DNS response. Do not stop at nonempty.
+sleep 3
 stop_probe
+# Freeze the stream before measuring or dumping it. Serialized XML documents
+# are concatenated; original datagram boundaries are not preserved in this file.
+kill -TERM "$CAPTURE_PID" 2>/dev/null || true
+wait "$CAPTURE_PID" 2>/dev/null || true
+CAPTURE_PID=''
 if [ ! -s "$WORK/message.bin" ]; then
   echo '[ПРОВЕРКА] Сообщение зеркалирования не получено. Это не подтверждает совместимость.' >&2
   cat "$WORK/ndnproxy.log" "$WORK/socat.log"
   exit 1
 fi
-echo "[ПРОВЕРКА] Получен образец сообщения: $(wc -c < "$WORK/message.bin") байт. Первые 4096 байт (восьмеричные значения):"
+echo "[ПРОВЕРКА] Захвачена последовательность сообщений: $(wc -c < "$WORK/message.bin") байт. Первые 4096 байт (восьмеричные значения):"
 dd if="$WORK/message.bin" bs=4096 count=1 2>/dev/null | od -b -v
 echo '[ПРОВЕРКА] Это образец протокола, а не проверка готовой доменной маршрутизации.'
 echo '[ПРОВЕРКА] Временный ndnproxy остановлен; настройки и рабочие сокеты не изменялись.'

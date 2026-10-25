@@ -11,7 +11,7 @@ import unittest
 
 SCRIPT = Path(__file__).resolve().parents[1] / 'scripts/probe-ndnproxy-mirror.sh'
 MOCK = r'''#!/usr/bin/env python3
-import os,signal,sys,time
+import os,signal,subprocess,sys,time
 from pathlib import Path
 root=Path(os.environ['MIRROR_TEST_ROOT'])
 name=Path(sys.argv[0]).name
@@ -21,17 +21,23 @@ if name=='sleep':
     time.sleep(float(sys.argv[1]))
 elif name=='od':
     assert sys.argv[1:]==['-b','-v'], 'Router BusyBox od only supports short legacy flags'
-    os.execv('/usr/bin/od',['od',*sys.argv[1:]])
+    data=sys.stdin.buffer.read(); (root/'dumped').write_bytes(data)
+    sys.exit(subprocess.run(['/usr/bin/od',*sys.argv[1:]],input=data).returncode)
 elif name=='id': print('0')
 elif name=='netstat':
     if (root/'listening').exists() or os.environ.get('MIRROR_BUSY'):
         print(f'udp 0 0 0.0.0.0:{port} 0.0.0.0:* 123/ndnproxy')
 elif name=='socat':
-    path=next(a.split(':',1)[1] for a in sys.argv if a.startswith('UNIX-RECVFROM:'))
+    address=next(a for a in sys.argv if a.startswith('UNIX-RECV'))
+    path=address.split(':',1)[1]
     assert path.startswith(str(root)+'/fqdn-probe.')
     Path(path).touch()
     while not (root/'message').exists(): time.sleep(.02)
     sys.stdout.buffer.write((root/'message').read_bytes()); sys.stdout.buffer.flush()
+    if address.startswith('UNIX-RECVFROM:'): sys.exit(0)
+    while not (root/'response').exists(): time.sleep(.02)
+    sys.stdout.buffer.write((root/'response').read_bytes()); sys.stdout.buffer.flush()
+    while True: signal.pause()
 elif name=='nslookup':
     assert sys.argv[1:]==['api.ipify.org',f'127.0.0.1:{port}']
     (root/'query').touch()
@@ -58,6 +64,8 @@ elif name=='ndnproxy':
     while not (root/'query').exists(): time.sleep(.02)
     if not os.environ.get('MIRROR_SKIP_MESSAGE'):
         (root/'message').write_bytes(b'fixture\x00api.ipify.org\x00192.0.2.123')
+        time.sleep(.2)
+        (root/'response').write_bytes(b'fixture-response\x00192.0.2.123\x00300')
     while True: signal.pause()
 '''
 
@@ -78,6 +86,8 @@ class MirrorProbeTest(unittest.TestCase):
                 env={**os.environ,'PATH':str(commands)+':'+os.environ['PATH'],
                      'MIRROR_TEST_ROOT':str(root),'MIRROR_TEST_PORT':str(port),**(extra or {})})
             self.assertEqual(list(root.glob('fqdn-probe.*')),[],result.stdout+result.stderr)
+            if result.returncode==0:
+                self.assertIn(b'fixture-response', (root/'dumped').read_bytes())
             if (root/'resolver.pid').exists():
                 self.assertTrue((root/'stopped').exists(),result.stdout+result.stderr)
                 pid=(root/'resolver.pid').read_text()
@@ -88,7 +98,7 @@ class MirrorProbeTest(unittest.TestCase):
     def test_foreground_resolver_capture_and_cleanup(self):
         result=self.run_probe()
         self.assertEqual(result.returncode,0,result.stdout+result.stderr)
-        self.assertIn('Получен образец сообщения',result.stdout)
+        self.assertIn('Захвачена последовательность сообщений',result.stdout)
 
     def test_daemonized_resolver_is_also_stopped(self):
         result=self.run_probe({'MIRROR_DAEMON':'1'})
