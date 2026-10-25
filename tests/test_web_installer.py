@@ -121,3 +121,20 @@ esac
         self.assertEqual(trace.count('staged-stop'),1)
         self.assertTrue((self.root/'var/run/fptn-keenetic').exists())
         self.assertFalse((self.root/'var/run/fptn-web/action').exists())
+
+    def test_failure_immediately_after_binary_rename_restores_previous_files(self):
+        original=shutil.which('mv')
+        wrapper=self.root/'bin/mv'
+        wrapper.write_text('''#!/usr/bin/env python3
+import os,pathlib,subprocess,sys
+root=pathlib.Path(os.environ['FPTN_PREFIX']);real=REAL
+result=subprocess.run([real,*sys.argv[1:]])
+marker=root/'fail-swap'
+if sys.argv[-1]==str(root/'libexec/fptn/fptn-client-cli') and sys.argv[-2].endswith('.new') and marker.exists():
+ marker.unlink();sys.exit(1)
+sys.exit(result.returncode)
+'''.replace('REAL',repr(original)));wrapper.chmod(0o700)
+        (self.root/'fail-swap').touch();result=self.execute()
+        self.assertNotEqual(result.returncode,0,result.stdout+result.stderr)
+        self.assert_original_files()
+        self.assertTrue((self.root/'var/run/fptn-keenetic').exists())

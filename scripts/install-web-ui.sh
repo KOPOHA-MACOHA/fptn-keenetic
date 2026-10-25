@@ -148,8 +148,9 @@ if [ "$CLIENT_UPDATE" = yes ]; then
   CHANGED=yes
   cp "$STAGE/client/fptn-client-cli" /opt/libexec/fptn/fptn-client-cli.new
   chmod 700 /opt/libexec/fptn/fptn-client-cli.new
-  mv /opt/libexec/fptn/fptn-client-cli.new /opt/libexec/fptn/fptn-client-cli
+  # Arm restoration before rename so an interrupt after rename is also covered.
   CLIENT_SWAPPED=yes
+  mv /opt/libexec/fptn/fptn-client-cli.new /opt/libexec/fptn/fptn-client-cli
   (cd /opt/libexec/fptn; sha256sum fptn-client-cli brotli > SHA256SUMS.new; mv SHA256SUMS.new SHA256SUMS)
 fi
 CHANGED=yes
