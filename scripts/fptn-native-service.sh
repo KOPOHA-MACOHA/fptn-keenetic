@@ -36,7 +36,7 @@ client_alive() {
 
 trim_logs() {
   # Existing ELF also writes its own rotating log; cap that active file too.
-  for log in "$RUN/client.log" "$UPSTREAM_LOG"; do
+  for log in "$RUN/client.log" "$RUN/supervisor.log" "$UPSTREAM_LOG"; do
     if [ -f "$log" ] && [ ! -L "$log" ] && [ "$(wc -c < "$log")" -gt 131072 ]; then
       : > "$log"
     fi
@@ -172,26 +172,59 @@ install_native() {
   echo 'Установлена native-служба. Токен и сервер сохранены; старый CIDR-файл больше не используется.'
   echo 'Далее: fptnctl setup-interface; fptnctl start. Автозапуск выключен.'
 }
+stop_child() {
+  if client_alive; then
+    kill -TERM "$PID" 2>/dev/null || true
+    STOP_N=0
+    while client_alive && [ "$STOP_N" -lt 10 ]; do sleep 1; STOP_N=$((STOP_N+1)); done
+    if client_alive; then kill -KILL "$PID" 2>/dev/null || true; fi
+  fi
+  if [ -n "${CHILD:-}" ]; then wait "$CHILD" 2>/dev/null || true; fi
+  CHILD=
+  rm -f "$RUN/client.pid" "$RUN/ready"
+}
 run_service() {
   record_pid "$$" "$RUN/supervisor.pid"
   finish() {
     trap '' INT TERM HUP
-    if client_alive; then
-      kill -TERM "$PID" 2>/dev/null || true
-      N=0
-      while client_alive && [ "$N" -lt 10 ]; do sleep 1; N=$((N+1)); done
-      if client_alive; then kill -KILL "$PID" 2>/dev/null || true; fi
-    fi
-    if [ -n "${CHILD:-}" ]; then wait "$CHILD" 2>/dev/null || true; fi
+    stop_child
     [ ! -f "$RUN/client.log" ] || tail -c 65536 "$RUN/client.log" > "$CONF/last.log"
     [ ! -f "$RUN/supervisor.log" ] || tail -c 16384 "$RUN/supervisor.log" > "$CONF/service-last.log"
     rm -rf "$RUN"
   }
   trap finish EXIT
   trap 'exit 0' TERM INT HUP
+  EVER_READY=no
+  BACKOFF=5
+  while :; do
+    rm -f "$RUN/ready"
+    echo 'FPTN: подключение.' > "$RUN/state"
+    # Each attempt needs a fresh READY, not a line left by the previous client.
+    if [ -s "$RUN/client.log" ]; then
+      tail -c 65536 "$RUN/client.log" > "$CONF/last.log"
+    fi
+    : > "$RUN/client.log"
+    attempt_service
+    stop_child
+    [ "$EVER_READY" = yes ] || fail 'Первое подключение не удалось: fptnctl logs.'
+    echo "FPTN: клиент завершился; повтор через $BACKOFF секунд." > "$RUN/state"
+    cat "$RUN/state"
+    trim_logs
+    # Short whole-second waits allow stop during backoff on BusyBox ash.
+    WAIT_N=0
+    while [ "$WAIT_N" -lt "$BACKOFF" ]; do sleep 1; WAIT_N=$((WAIT_N+1)); done
+    BACKOFF=$((BACKOFF*2))
+    [ "$BACKOFF" -le 60 ] || BACKOFF=60
+  done
+}
+attempt_service() {
+  # Re-read the uplink on every attempt: DHCP/failover can change it.
   GW=$(ip -4 route show table main default | awk '$1=="default" && $2=="via" {print $3; exit}')
   IFACE=$(ip -4 route show table main default | awk '$1=="default" {for(i=1;i<NF;i++) if($i=="dev") {print $(i+1); exit}}')
-  [ -n "$GW" ] && [ -n "$IFACE" ] || fail 'Не найден обычный шлюз.'
+  if [ -z "$GW" ] || [ -z "$IFACE" ]; then
+    echo 'FPTN: не найден обычный шлюз.'
+    return 0
+  fi
   TOKEN=$(cat "$CONF/token"); SERVER=$(cat "$CONF/server")
   nice -n 10 "$LIB/fptn-client-cli" --keenetic-connect --keenetic-native \
     --access-token "$TOKEN" --preferred-server "$SERVER" \
@@ -202,13 +235,24 @@ run_service() {
   CHILD=$!; record_pid "$CHILD" "$RUN/client.pid"; unset TOKEN
   N=0
   until grep -q 'Connection #1 READY' "$RUN/client.log"; do
-    kill -0 "$CHILD" 2>/dev/null || fail 'Клиент завершился до READY.'
-    [ "$N" -lt 60 ] || fail 'Нет READY за 60 секунд.'
+    client_alive || { echo 'FPTN: клиент завершился до READY.'; return 0; }
+    [ "$N" -lt 60 ] || { echo 'FPTN: нет READY за 60 секунд.'; return 0; }
     trim_logs; sleep 1; N=$((N+1))
   done
   : > "$RUN/ready"
-  while kill -0 "$CHILD" 2>/dev/null; do trim_logs; sleep 2; done
-  wait "$CHILD"
+  EVER_READY=yes
+  echo 'FPTN: READY получен для текущего процесса.'
+  STABLE_N=0
+  while client_alive; do
+    trim_logs; sleep 2
+    STABLE_N=$((STABLE_N+1))
+    # Reset only after a stable minute, so rapid crash loops keep backing off.
+    [ "$STABLE_N" -lt 30 ] || BACKOFF=5
+  done
+  CLIENT_RC=0
+  wait "$CHILD" || CLIENT_RC=$?
+  echo "FPTN: процесс завершён, код $CLIENT_RC."
+  return 0
 }
 start_service() {
   for cmd in ip timeout nice nohup jq base64 stty; do command -v "$cmd" >/dev/null 2>&1 || fail "Нет команды $cmd"; done
@@ -236,6 +280,7 @@ status_service() {
       echo 'FPTN native: клиент запущен, READY получен при старте.'
       printf 'Сервер: '; cat "$CONF/server"
       echo 'Интерфейс: OpkgTun0 / opkgtun0. CIDR, домены, маршруты и firewall — в Keenetic.'
+    elif [ -f "$RUN/state" ]; then cat "$RUN/state"
     else echo 'FPTN: запуск или остановка.'; fi
   elif [ -d "$RUN" ]; then echo 'FPTN: остаточное состояние, требуется recover.'; return 1
   else echo 'FPTN: остановлен. Автозапуск выключен.'; fi
