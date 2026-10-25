@@ -37,6 +37,15 @@ esac
                 "nice": '#!/bin/sh\nshift 2\nexec "$@"\n',
                 "timeout": '#!/bin/sh\nshift 3\nexec "$@"\n',
                 "curl": '''#!/bin/sh
+[ -z "${FPTN_MOCK_TRACE:-}" ] || printf 'CURL %s\\n' "$*" >> "$FPTN_MOCK_TRACE"
+case "$*" in
+  *"bytes=5242880"*)
+    [ "${FPTN_MOCK_LOAD_FAIL:-0}" != 1 ] || exit 7
+    sleep 1
+    printf '200 5242880 524288 10.0\\n'
+    exit 0 ;;
+  *"bytes=1"*) printf '198.51.100.8'; exit 0 ;;
+esac
 vpn=0
 file=''
 case "$*" in *"--interface fptn0"*) vpn=1 ;; esac
@@ -55,6 +64,10 @@ fi
             }
             # Entware's default jq is the noregex variant. Reject any accidental
             # use of regex functions even when tests run against Ubuntu jq-full.
+            real_awk = shutil.which("awk")
+            mocks["awk"] = ('#!/bin/sh\n'
+                'case "$*" in *"/proc/meminfo"*) if [ "${FPTN_MOCK_LOW_MEM:-0}" = 1 ]; then echo 10240; exit 0; fi ;; esac\n'
+                'exec ' + real_awk + ' "$@"\n')
             real_jq = shutil.which("jq")
             self.assertIsNotNone(real_jq)
             mocks["jq"] = ('#!/bin/sh\n'
@@ -159,3 +172,32 @@ fi
         self.assertNotIn('route add', result.route_trace)
         self.assertNotIn('rule add', result.route_trace)
         self.assertNotIn('rule del', result.route_trace)
+
+    def test_load_is_bounded_and_cleans_both_destinations(self):
+        result = self.run_launcher({"servers": [{"name": "NL"}]}, extra_env={"FPTN_LOAD_TEST": "1"})
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn('HTTP 200, получено 5242880 байт', result.stdout)
+        self.assertIn('Пик общего CPU', result.stdout)
+        self.assertIn('--limit-rate 512K --max-filesize 5242880', result.route_trace)
+        self.assertIn('--max-time 15', result.route_trace)
+        self.assertIn('--resolve speed.cloudflare.com:443:198.51.100.8', result.route_trace)
+        self.assertIn('rule del priority 50 iif lo to 198.51.100.8/32', result.route_trace)
+        self.assertIn('route del table 30090 198.51.100.8/32', result.route_trace)
+        self.assertNotIn('replace', result.route_trace)
+        self.assertEqual(result.leftover_directories, [])
+
+    def test_failed_download_cleans_load_route(self):
+        result = self.run_launcher({"servers": [{"name": "NL"}]}, extra_env={
+            "FPTN_LOAD_TEST": "1", "FPTN_MOCK_LOAD_FAIL": "1"})
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn('Загрузка не завершена', result.stderr)
+        self.assertIn('rule del priority 50 iif lo to 198.51.100.8/32', result.route_trace)
+        self.assertEqual(result.leftover_directories, [])
+
+    def test_low_available_memory_aborts_load_and_cleans_route(self):
+        result = self.run_launcher({"servers": [{"name": "NL"}]}, extra_env={
+            "FPTN_LOAD_TEST": "1", "FPTN_MOCK_LOW_MEM": "1"})
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn('Порог остановки:', result.stderr)
+        self.assertIn('route del table 30090 198.51.100.8/32', result.route_trace)
+        self.assertEqual(result.leftover_directories, [])

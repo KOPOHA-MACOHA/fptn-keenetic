@@ -12,6 +12,7 @@ chmod 700 fptn-client-cli
 for tool in ip timeout nice stty jq base64; do
   command -v "$tool" >/dev/null 2>&1 || { echo "Нет команды: $tool" >&2; exit 1; }
 done
+if [ "${FPTN_LOAD_TEST:-0}" = 1 ]; then export FPTN_DATA_TEST=1; fi
 FPTN_DATA_DIR=''
 FPTN_DATA_WORKER=''
 FPTN_TTY_STATE=''
@@ -42,6 +43,12 @@ if [ "${FPTN_DATA_TEST:-0}" = 1 ]; then
     -o "$FPTN_DATA_DIR/direct.txt" -w '%{remote_ip}' https://api.ipify.org > "$FPTN_DATA_DIR/target.txt"; then
     echo 'Сервис проверки IP недоступен по обычному подключению. VPN ещё не запускался.' >&2
     exit 1
+  fi
+  if [ "${FPTN_LOAD_TEST:-0}" = 1 ]; then
+    command -v readlink >/dev/null 2>&1 || { echo "Для замера памяти нужен readlink." >&2; exit 1; }
+    echo '[НАГРУЗКА] Проверяю доступность Cloudflare обычным путём...'
+    curl -4 --noproxy '*' -fsS --connect-timeout 5 --max-time 10 \
+      -o /dev/null -w '%{remote_ip}' 'https://speed.cloudflare.com/__down?bytes=1' > "$FPTN_DATA_DIR/load-target.txt"
   fi
 fi
 FPTN_TTY_STATE=$(stty -g)
@@ -134,6 +141,7 @@ fptn_valid_ipv4() {
 fptn_check_data() (
   FPTN_ROUTE_ADDED=0
   FPTN_RULE_ADDED=0
+  FPTN_CURL_PID=''
   FPTN_TARGET=$(cat "$FPTN_DATA_DIR/target.txt")
   FPTN_DIRECT=$(cat "$FPTN_DATA_DIR/direct.txt")
   fptn_remove_test_rule() {
@@ -164,7 +172,14 @@ fptn_check_data() (
     fi
     [ "$FPTN_CLEAN_OK" = 1 ]
   }
-  trap fptn_remove_test_rule EXIT
+  fptn_worker_cleanup() {
+    if [ -n "$FPTN_CURL_PID" ]; then
+      kill -TERM "$FPTN_CURL_PID" 2>/dev/null || true
+      wait "$FPTN_CURL_PID" 2>/dev/null || true
+    fi
+    fptn_remove_test_rule
+  }
+  trap fptn_worker_cleanup EXIT
   trap 'exit 130' INT
   trap 'exit 143' TERM
   trap 'exit 129' HUP
@@ -187,19 +202,23 @@ fptn_check_data() (
   done
   [ "$FPTN_READY" = 1 ] || { echo '[ПРОВЕРКА] Туннель не стал готов за 45 секунд.' >&2; exit 1; }
   FPTN_ENDPOINT=$(awk '/VPN SERVER IP:/ {print $NF; exit}' "$FPTN_DATA_DIR/client.log")
-  [ -n "$FPTN_ENDPOINT" ] && [ "$FPTN_ENDPOINT" != "$FPTN_TARGET" ] || {
-    echo '[ПРОВЕРКА] Нельзя безопасно отделить проверочный адрес от VPN-сервера.' >&2; exit 1;
+  fptn_add_test_rule() {
+    fptn_valid_ipv4 "$FPTN_TARGET" || { echo '[ПРОВЕРКА] Некорректный проверочный адрес.' >&2; return 1; }
+    [ -n "$FPTN_ENDPOINT" ] && [ "$FPTN_ENDPOINT" != "$FPTN_TARGET" ] || {
+      echo '[ПРОВЕРКА] Нельзя безопасно отделить проверочный адрес от VPN-сервера.' >&2; exit 1;
+    }
+    if ip -4 rule show | awk '$1=="50:" {found=1} END {exit !found}'; then
+      echo '[ПРОВЕРКА] Приоритет 50 занят; существующие правила не трогаю.' >&2; exit 1
+    fi
+    FPTN_EXISTING=$(ip -4 route show table 30090 2>/dev/null || true)
+    [ -z "$FPTN_EXISTING" ] || { echo '[ПРОВЕРКА] Таблица 30090 занята; тест остановлен.' >&2; exit 1; }
+    ip -4 route add table 30090 "$FPTN_TARGET/32" dev fptn0 proto 186
+    FPTN_ROUTE_ADDED=1
+    # iif lo matches locally originated packets only. LAN devices keep their routes.
+    ip -4 rule add priority 50 iif lo to "$FPTN_TARGET/32" lookup 30090
+    FPTN_RULE_ADDED=1
   }
-  if ip -4 rule show | awk '$1=="50:" {found=1} END {exit !found}'; then
-    echo '[ПРОВЕРКА] Приоритет 50 занят; существующие правила не трогаю.' >&2; exit 1
-  fi
-  FPTN_EXISTING=$(ip -4 route show table 30090 2>/dev/null || true)
-  [ -z "$FPTN_EXISTING" ] || { echo '[ПРОВЕРКА] Таблица 30090 занята; тест остановлен.' >&2; exit 1; }
-  ip -4 route add table 30090 "$FPTN_TARGET/32" dev fptn0 proto 186
-  FPTN_ROUTE_ADDED=1
-  # iif lo matches locally originated packets only. LAN devices keep their routes.
-  ip -4 rule add priority 50 iif lo to "$FPTN_TARGET/32" lookup 30090
-  FPTN_RULE_ADDED=1
+  fptn_add_test_rule
   echo '[ПРОВЕРКА] Временный маршрут /32 установлен только для запроса с роутера.'
   if ! curl -4 --noproxy '*' --interface fptn0 --resolve "api.ipify.org:443:$FPTN_TARGET" \
     -fsS --connect-timeout 10 --max-time 20 https://api.ipify.org -o "$FPTN_DATA_DIR/vpn.txt"; then
@@ -215,9 +234,69 @@ fptn_check_data() (
   echo '[ПРОВЕРКА] УСПЕХ: HTTPS-запрос прошёл через fptn0, внешний IPv4 изменился.'
   fptn_remove_test_rule
   echo '[ПРОВЕРКА] Тестовое правило и маршрут удалены.'
+  if [ "${FPTN_LOAD_TEST:-0}" = 1 ]; then
+    FPTN_TARGET=$(cat "$FPTN_DATA_DIR/load-target.txt")
+    fptn_add_test_rule
+    # Find the actual ELF client without inspecting command lines (contain token).
+    FPTN_CLIENT_PID=''
+    FPTN_CLIENT_EXE=$(readlink -f ./fptn-client-cli)
+    for FPTN_PROC in /proc/[0-9]*/exe; do
+      if [ "$(readlink "$FPTN_PROC" 2>/dev/null || true)" = "$FPTN_CLIENT_EXE" ]; then
+        FPTN_CLIENT_PID=${FPTN_PROC#/proc/}; FPTN_CLIENT_PID=${FPTN_CLIENT_PID%/exe}
+        break
+      fi
+    done
+    echo '[НАГРУЗКА] Загрузка 5 МиБ через VPN, максимум 512 КиБ/с и 15 секунд. Тело ответа не записывается на флешку.'
+    fptn_cpu_snapshot() {
+      awk '/^cpu / {t=0; for(i=2;i<=9;i++) t+=$i; printf "%.0f %.0f\n", t, $5+$6; exit}' /proc/stat
+    }
+    set -- $(fptn_cpu_snapshot)
+    FPTN_PREV_TOTAL=$1; FPTN_PREV_IDLE=$2
+    FPTN_CPU_PEAK=0; FPTN_RSS_PEAK=0; FPTN_MEM_MIN=2147483647; FPTN_BUSY=0; FPTN_ABORT=0
+    curl -4 --noproxy '*' --interface fptn0 --resolve "speed.cloudflare.com:443:$FPTN_TARGET" \
+      -fsS --connect-timeout 5 --max-time 15 --limit-rate 512K --max-filesize 5242880 \
+      -o /dev/null -w '%{http_code} %{size_download} %{speed_download} %{time_total}\n' \
+      'https://speed.cloudflare.com/__down?bytes=5242880' > "$FPTN_DATA_DIR/load-result.txt" &
+    FPTN_CURL_PID=$!
+    while :; do
+      sleep 1
+      set -- $(fptn_cpu_snapshot)
+      FPTN_DELTA=$(($1-FPTN_PREV_TOTAL)); FPTN_IDLE_DELTA=$(($2-FPTN_PREV_IDLE))
+      FPTN_PREV_TOTAL=$1; FPTN_PREV_IDLE=$2
+      FPTN_CPU=0
+      if [ "$FPTN_DELTA" -gt 0 ]; then FPTN_CPU=$((100*(FPTN_DELTA-FPTN_IDLE_DELTA)/FPTN_DELTA)); fi
+      [ "$FPTN_CPU" -le "$FPTN_CPU_PEAK" ] || FPTN_CPU_PEAK=$FPTN_CPU
+      FPTN_MEM=$(awk '/^MemAvailable:/ {print $2; exit}' /proc/meminfo)
+      [ -n "$FPTN_MEM" ] || { echo '[НАГРУЗКА] Нет MemAvailable: загрузка остановлена.' >&2; FPTN_ABORT=1; break; }
+      [ "$FPTN_MEM" -ge "$FPTN_MEM_MIN" ] || FPTN_MEM_MIN=$FPTN_MEM
+      if [ -n "$FPTN_CLIENT_PID" ] && [ -r "/proc/$FPTN_CLIENT_PID/status" ]; then
+        FPTN_RSS=$(awk '/^VmRSS:/ {print $2; exit}' "/proc/$FPTN_CLIENT_PID/status")
+        FPTN_RSS=${FPTN_RSS:-0}
+        [ "$FPTN_RSS" -le "$FPTN_RSS_PEAK" ] || FPTN_RSS_PEAK=$FPTN_RSS
+      fi
+      if [ "$FPTN_CPU" -ge 90 ]; then FPTN_BUSY=$((FPTN_BUSY+1)); else FPTN_BUSY=0; fi
+      if [ "$FPTN_MEM" -lt 16384 ] || [ "$FPTN_BUSY" -ge 3 ]; then
+        echo '[НАГРУЗКА] Порог остановки: доступная память <16 МиБ или общий CPU >=90% три отсчёта подряд.' >&2
+        FPTN_ABORT=1; break
+      fi
+      kill -0 "$FPTN_CURL_PID" 2>/dev/null || break
+    done
+    if [ "$FPTN_ABORT" = 1 ]; then kill -TERM "$FPTN_CURL_PID" 2>/dev/null || true; fi
+    FPTN_DOWNLOAD_OK=1
+    wait "$FPTN_CURL_PID" || FPTN_DOWNLOAD_OK=0
+    FPTN_CURL_PID=''
+    printf '[НАГРУЗКА] Пик общего CPU (все ядра): %s%%; пик RSS клиента: %s КиБ; минимум MemAvailable: %s КиБ.\n' \
+      "$FPTN_CPU_PEAK" "$FPTN_RSS_PEAK" "$FPTN_MEM_MIN"
+    [ -n "$FPTN_CLIENT_PID" ] || echo '[НАГРУЗКА] PID клиента не найден: RSS недоступен.'
+    fptn_remove_test_rule
+    echo '[НАГРУЗКА] Тестовое правило и маршрут удалены.'
+    [ "$FPTN_ABORT" = 0 ] && [ "$FPTN_DOWNLOAD_OK" = 1 ] || { echo '[НАГРУЗКА] Загрузка не завершена.' >&2; exit 1; }
+    awk 'NF==4 {seen=1; printf "[НАГРУЗКА] HTTP %s, получено %s байт за %s с; средняя скорость %.2f Мбит/с (ограничена тестом).\n", $1,$2,$4,$3*8/1000000; if($1!=200 || $2!=5242880) exit 1} END {if(!seen) exit 1}' "$FPTN_DATA_DIR/load-result.txt"
+  fi
 )
 
 if [ "${FPTN_DATA_TEST:-0}" = 1 ]; then
+  if [ "${FPTN_LOAD_TEST:-0}" = 1 ]; then echo '[НАГРУЗКА] Короткая проверка ресурсов, не замер максимальной скорости.'; fi
   echo 'Тест на 90 секунд: один запрос проверки IP через временный /32. DNS и существующие маршруты не меняются.'
   fptn_check_data &
   FPTN_DATA_WORKER=$!
