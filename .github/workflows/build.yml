@@ -70,6 +70,6 @@ jobs:
           cache-to: type=gha,mode=max,scope=keenetic-client
       - uses: actions/upload-artifact@v4
         with:
-          name: keenetic-mipsel-client
+          name: fptn-native-client
           path: out/client/
           if-no-files-found: error
