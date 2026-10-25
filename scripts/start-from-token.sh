@@ -246,51 +246,115 @@ fptn_check_data() (
         break
       fi
     done
-    echo '[НАГРУЗКА] Загрузка 5 МиБ через VPN, максимум 512 КиБ/с и 15 секунд. Тело ответа не записывается на флешку.'
-    fptn_cpu_snapshot() {
-      awk '/^cpu / {t=0; for(i=2;i<=9;i++) t+=$i; printf "%.0f %.0f\n", t, $5+$6; exit}' /proc/stat
+    [ -n "$FPTN_CLIENT_PID" ] || { echo '[НАГРУЗКА] PID клиента не найден: отдельный CPU измерить нельзя.' >&2; exit 1; }
+    if [ "${FPTN_CONNECTION_STRATEGY:-rolling-tunnel}" = dual-rolling-tunnel ]; then
+      echo '[НАГРУЗКА] Жду READY второго туннеля перед замером простоя...'
+      FPTN_WAIT=0
+      until grep -q 'Connection #2 READY' "$FPTN_DATA_DIR/client.log"; do
+        [ "$FPTN_WAIT" -lt 25 ] || { echo '[НАГРУЗКА] Второй туннель не готов.' >&2; exit 1; }
+        sleep 1; FPTN_WAIT=$((FPTN_WAIT+1))
+      done
+    fi
+    # BEGIN RESOURCE READER: independently tested with synthetic /proc files.
+    fptn_read_sample() {
+      awk '
+        FILENAME==ARGV[1] && /^cpu / {for(i=2;i<=9;i++) total+=$i; idle=$5+$6}
+        FILENAME==ARGV[1] && /^cpu[0-9]+ / {cores++}
+        FILENAME==ARGV[2] {
+          # comm can contain spaces and parentheses. Strip through the final ") ".
+          sub(/^.*\) /, ""); ticks=$12+$13; started=$20
+        }
+        FILENAME==ARGV[3] && /^VmRSS:/ {rss=$2}
+        FILENAME==ARGV[4] && /^MemAvailable:/ {mem=$2; have_mem=1}
+        END {
+          if(!total || !cores || !started || !have_mem) exit 1
+          printf "%.0f %.0f %.0f %.0f %.0f %.0f %.0f\n", total,idle,ticks,rss,mem,cores,started
+        }' "$1" "$2" "$3" "$4"
     }
-    set -- $(fptn_cpu_snapshot)
-    FPTN_PREV_TOTAL=$1; FPTN_PREV_IDLE=$2
-    FPTN_CPU_PEAK=0; FPTN_RSS_PEAK=0; FPTN_MEM_MIN=2147483647; FPTN_BUSY=0; FPTN_ABORT=0
+    # END RESOURCE READER
+    fptn_snapshot() {
+      fptn_read_sample /proc/stat "/proc/$FPTN_CLIENT_PID/stat" "/proc/$FPTN_CLIENT_PID/status" /proc/meminfo
+    }
+    FPTN_START=''
+    FPTN_RSS_PEAK=0; FPTN_MEM_MIN=2147483647; FPTN_BUSY=0; FPTN_ABORT=0
+    fptn_phase_start() {
+      FPTN_SAMPLE=$(fptn_snapshot) || { echo '[НАГРУЗКА] Не удалось прочитать CPU/память.' >&2; exit 1; }
+      set -- $FPTN_SAMPLE
+      FPTN_PREV_TOTAL=$1; FPTN_PREV_IDLE=$2; FPTN_PREV_PROC=$3
+      FPTN_CORES=$6
+      if [ -n "$FPTN_START" ] && [ "$FPTN_START" != "$7" ]; then exit 1; fi
+      FPTN_START=$7
+      FPTN_PHASE_TICKS=0; FPTN_PHASE_BUSY=0; FPTN_PHASE_PROC=0
+      FPTN_CPU_PEAK=0; FPTN_PROC_PEAK=0; FPTN_SAMPLE_N=0
+    }
+    fptn_sample_interval() {
+      sleep 1
+      FPTN_SAMPLE=$(fptn_snapshot) || { echo '[НАГРУЗКА] Процесс завершился или метрики недоступны.' >&2; exit 1; }
+      set -- $FPTN_SAMPLE
+      [ "$FPTN_START" = "$7" ] || { echo '[НАГРУЗКА] PID клиента изменился.' >&2; exit 1; }
+      FPTN_DELTA=$(($1-FPTN_PREV_TOTAL)); FPTN_IDLE_DELTA=$(($2-FPTN_PREV_IDLE)); FPTN_PROC_DELTA=$(($3-FPTN_PREV_PROC))
+      FPTN_PREV_TOTAL=$1; FPTN_PREV_IDLE=$2; FPTN_PREV_PROC=$3
+      [ "$FPTN_DELTA" -gt 0 ] && [ "$FPTN_PROC_DELTA" -ge 0 ] || return 0
+      FPTN_CPU=$((1000*(FPTN_DELTA-FPTN_IDLE_DELTA)/FPTN_DELTA))
+      FPTN_PROC_CPU=$((1000*FPTN_PROC_DELTA/FPTN_DELTA))
+      FPTN_PHASE_TICKS=$((FPTN_PHASE_TICKS+FPTN_DELTA))
+      FPTN_PHASE_BUSY=$((FPTN_PHASE_BUSY+FPTN_DELTA-FPTN_IDLE_DELTA))
+      FPTN_PHASE_PROC=$((FPTN_PHASE_PROC+FPTN_PROC_DELTA))
+      FPTN_SAMPLE_N=$((FPTN_SAMPLE_N+1))
+      [ "$FPTN_CPU" -le "$FPTN_CPU_PEAK" ] || FPTN_CPU_PEAK=$FPTN_CPU
+      [ "$FPTN_PROC_CPU" -le "$FPTN_PROC_PEAK" ] || FPTN_PROC_PEAK=$FPTN_PROC_CPU
+      [ "$4" -le "$FPTN_RSS_PEAK" ] || FPTN_RSS_PEAK=$4
+      [ "$5" -ge "$FPTN_MEM_MIN" ] || FPTN_MEM_MIN=$5
+      printf '[CPU] %s #%s: всего %s.%s%%; FPTN %s.%s%%; RSS %s КиБ; доступно %s КиБ.\n' \
+        "$FPTN_PHASE" "$FPTN_SAMPLE_N" "$((FPTN_CPU/10))" "$((FPTN_CPU%10))" \
+        "$((FPTN_PROC_CPU/10))" "$((FPTN_PROC_CPU%10))" "$4" "$5"
+      if [ "$FPTN_CPU" -ge 900 ]; then FPTN_BUSY=$((FPTN_BUSY+1)); else FPTN_BUSY=0; fi
+      if [ "$5" -lt 16384 ] || [ "$FPTN_BUSY" -ge 3 ]; then
+        echo '[НАГРУЗКА] Порог остановки: доступная память <16 МиБ или общий CPU >=90% три отсчёта подряд.' >&2
+        FPTN_ABORT=1
+      fi
+    }
+    fptn_phase_summary() {
+      [ "$FPTN_PHASE_TICKS" -gt 0 ] || return 0
+      awk -v phase="$FPTN_PHASE" -v total="$FPTN_PHASE_TICKS" -v busy="$FPTN_PHASE_BUSY" \
+        -v proc="$FPTN_PHASE_PROC" -v peak="$FPTN_CPU_PEAK" -v pp="$FPTN_PROC_PEAK" \
+        'BEGIN {printf "[ИТОГ] %s: общий CPU средний %.1f%% / пик %.1f%%; FPTN средний %.1f%% / пик %.1f%%.\n", phase,100*busy/total,peak/10,100*proc/total,pp/10}'
+    }
+    fptn_idle_phase() {
+      FPTN_PHASE=$1
+      fptn_phase_start
+      FPTN_IDLE_N=0
+      while [ "$FPTN_IDLE_N" -lt 5 ] && [ "$FPTN_ABORT" = 0 ]; do
+        fptn_sample_interval; FPTN_IDLE_N=$((FPTN_IDLE_N+1))
+      done
+      fptn_phase_summary
+      [ "$FPTN_ABORT" = 0 ] || exit 1
+    }
+    echo '[НАГРУЗКА] CPU общий и FPTN: 100% = все логические процессоры вместе. Отсчёты около 1 секунды.'
+    fptn_idle_phase 'до загрузки'
+    echo '[НАГРУЗКА] Загрузка 5 МиБ через VPN, максимум 512 КиБ/с и 15 секунд. Тело ответа не записывается на флешку.'
+    FPTN_PHASE='загрузка'
+    fptn_phase_start
     curl -4 --noproxy '*' --interface fptn0 --resolve "speed.cloudflare.com:443:$FPTN_TARGET" \
       -fsS --connect-timeout 5 --max-time 15 --limit-rate 512K --max-filesize 5242880 \
       -o /dev/null -w '%{http_code} %{size_download} %{speed_download} %{time_total}\n' \
       'https://speed.cloudflare.com/__down?bytes=5242880' > "$FPTN_DATA_DIR/load-result.txt" &
     FPTN_CURL_PID=$!
     while :; do
-      sleep 1
-      set -- $(fptn_cpu_snapshot)
-      FPTN_DELTA=$(($1-FPTN_PREV_TOTAL)); FPTN_IDLE_DELTA=$(($2-FPTN_PREV_IDLE))
-      FPTN_PREV_TOTAL=$1; FPTN_PREV_IDLE=$2
-      FPTN_CPU=0
-      if [ "$FPTN_DELTA" -gt 0 ]; then FPTN_CPU=$((100*(FPTN_DELTA-FPTN_IDLE_DELTA)/FPTN_DELTA)); fi
-      [ "$FPTN_CPU" -le "$FPTN_CPU_PEAK" ] || FPTN_CPU_PEAK=$FPTN_CPU
-      FPTN_MEM=$(awk '/^MemAvailable:/ {print $2; exit}' /proc/meminfo)
-      [ -n "$FPTN_MEM" ] || { echo '[НАГРУЗКА] Нет MemAvailable: загрузка остановлена.' >&2; FPTN_ABORT=1; break; }
-      [ "$FPTN_MEM" -ge "$FPTN_MEM_MIN" ] || FPTN_MEM_MIN=$FPTN_MEM
-      if [ -n "$FPTN_CLIENT_PID" ] && [ -r "/proc/$FPTN_CLIENT_PID/status" ]; then
-        FPTN_RSS=$(awk '/^VmRSS:/ {print $2; exit}' "/proc/$FPTN_CLIENT_PID/status")
-        FPTN_RSS=${FPTN_RSS:-0}
-        [ "$FPTN_RSS" -le "$FPTN_RSS_PEAK" ] || FPTN_RSS_PEAK=$FPTN_RSS
-      fi
-      if [ "$FPTN_CPU" -ge 90 ]; then FPTN_BUSY=$((FPTN_BUSY+1)); else FPTN_BUSY=0; fi
-      if [ "$FPTN_MEM" -lt 16384 ] || [ "$FPTN_BUSY" -ge 3 ]; then
-        echo '[НАГРУЗКА] Порог остановки: доступная память <16 МиБ или общий CPU >=90% три отсчёта подряд.' >&2
-        FPTN_ABORT=1; break
-      fi
+      fptn_sample_interval
+      [ "$FPTN_ABORT" = 0 ] || break
       kill -0 "$FPTN_CURL_PID" 2>/dev/null || break
     done
+    fptn_phase_summary
     if [ "$FPTN_ABORT" = 1 ]; then kill -TERM "$FPTN_CURL_PID" 2>/dev/null || true; fi
     FPTN_DOWNLOAD_OK=1
     wait "$FPTN_CURL_PID" || FPTN_DOWNLOAD_OK=0
     FPTN_CURL_PID=''
-    printf '[НАГРУЗКА] Пик общего CPU (все ядра): %s%%; пик RSS клиента: %s КиБ; минимум MemAvailable: %s КиБ.\n' \
-      "$FPTN_CPU_PEAK" "$FPTN_RSS_PEAK" "$FPTN_MEM_MIN"
-    [ -n "$FPTN_CLIENT_PID" ] || echo '[НАГРУЗКА] PID клиента не найден: RSS недоступен.'
     fptn_remove_test_rule
     echo '[НАГРУЗКА] Тестовое правило и маршрут удалены.'
     [ "$FPTN_ABORT" = 0 ] && [ "$FPTN_DOWNLOAD_OK" = 1 ] || { echo '[НАГРУЗКА] Загрузка не завершена.' >&2; exit 1; }
+    fptn_idle_phase 'после загрузки'
+    printf '[НАГРУЗКА] Пик RSS клиента: %s КиБ; минимум MemAvailable: %s КиБ.\n' "$FPTN_RSS_PEAK" "$FPTN_MEM_MIN"
     awk 'NF==4 {seen=1; printf "[НАГРУЗКА] HTTP %s, получено %s байт за %s с; средняя скорость %.2f Мбит/с (ограничена тестом).\n", $1,$2,$4,$3*8/1000000; if($1!=200 || $2!=5242880) exit 1} END {if(!seen) exit 1}' "$FPTN_DATA_DIR/load-result.txt"
   fi
 )

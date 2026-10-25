@@ -66,8 +66,16 @@ fi
             # use of regex functions even when tests run against Ubuntu jq-full.
             real_awk = shutil.which("awk")
             mocks["awk"] = ('#!/bin/sh\n'
-                'case "$*" in *"/proc/meminfo"*) if [ "${FPTN_MOCK_LOW_MEM:-0}" = 1 ]; then echo 10240; exit 0; fi ;; esac\n'
+                'case "$*" in *"/proc/meminfo"*) if [ "${FPTN_MOCK_LOW_MEM:-0}" = 1 ]; then\n'
+                ' tick=$(cat "$FPTN_MOCK_TRACE.ticks" 2>/dev/null || echo 1000); tick=$((tick+400)); echo "$tick" > "$FPTN_MOCK_TRACE.ticks"\n'
+                ' echo "$tick 0 0 1024 10240 4 1"; exit 0; fi ;; esac\n'
                 'exec ' + real_awk + ' "$@"\n')
+            real_readlink = shutil.which("readlink")
+            # Fake client is a shell script, so its /proc/exe cannot identify it.
+            # Only in this test substitute PID 1 for exercising the sampler.
+            mocks["readlink"] = ('#!/bin/sh\n'
+                'case "$*" in "-f ./fptn-client-cli"|"/proc/1/exe") printf "%s/fptn-client-cli\\n" "$PWD"; exit 0 ;; esac\n'
+                'exec ' + real_readlink + ' "$@"\n')
             real_jq = shutil.which("jq")
             self.assertIsNotNone(real_jq)
             mocks["jq"] = ('#!/bin/sh\n'
@@ -90,6 +98,7 @@ if [ "${FPTN_DATA_TEST:-0}" = 1 ]; then
   touch "$FPTN_MOCK_MARKER"
   echo 'VPN SERVER IP: 203.0.113.106'
   echo 'Connection #1 READY'
+  echo 'Connection #2 READY'
   sleep 2
 fi
 ''')
@@ -104,7 +113,7 @@ fi
                 input=token + "\n" + choice, text=True, capture_output=True,
                 env={**os.environ, **(extra_env or {}), "FPTN_MOCK_MARKER": str(root / "ready"),
                      "FPTN_MOCK_TRACE": str(root / "trace"),
-                     "PATH": str(commands) + ":" + os.environ["PATH"]}, timeout=10)
+                     "PATH": str(commands) + ":" + os.environ["PATH"]}, timeout=30)
             self.assertNotIn(token, result.stdout + result.stderr)
             self.assertNotIn("secret-password", result.stdout + result.stderr)
             result.route_trace = (root / "trace").read_text()
@@ -177,7 +186,10 @@ fi
         result = self.run_launcher({"servers": [{"name": "NL"}]}, extra_env={"FPTN_LOAD_TEST": "1"})
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertIn('HTTP 200, получено 5242880 байт', result.stdout)
-        self.assertIn('Пик общего CPU', result.stdout)
+        self.assertIn('[ИТОГ] до загрузки:', result.stdout)
+        self.assertIn('[ИТОГ] загрузка:', result.stdout)
+        self.assertIn('[ИТОГ] после загрузки:', result.stdout)
+        self.assertIn('FPTN средний', result.stdout)
         self.assertIn('--limit-rate 512K --max-filesize 5242880', result.route_trace)
         self.assertIn('--max-time 15', result.route_trace)
         self.assertIn('--resolve speed.cloudflare.com:443:198.51.100.8', result.route_trace)
@@ -201,3 +213,55 @@ fi
         self.assertIn('Порог остановки:', result.stderr)
         self.assertIn('route del table 30090 198.51.100.8/32', result.route_trace)
         self.assertEqual(result.leftover_directories, [])
+
+
+class ResourceReaderTest(unittest.TestCase):
+    def test_proc_fields_with_spaces_parentheses_and_guest_ticks(self):
+        source = (ROOT / "scripts/start-from-token.sh").read_text()
+        reader = source.split("# BEGIN RESOURCE READER:", 1)[1].split("\n", 1)[1].split("# END RESOURCE READER", 1)[0]
+        with tempfile.TemporaryDirectory() as tmp:
+            root = pathlib.Path(tmp)
+            (root / "stat").write_text("cpu  100 20 30 400 50 6 7 8 90 91\ncpu0 1\ncpu1 1\n")
+            # Fields after comm start at state (original field 3).
+            fields = ["S"] + ["0"] * 19
+            fields[11], fields[12], fields[19] = "123", "45", "98765"
+            (root / "process").write_text("123 (odd ) name) " + " ".join(fields) + "\n")
+            (root / "status").write_text("VmRSS: 18356 kB\n")
+            (root / "meminfo").write_text("MemAvailable: 48192 kB\n")
+            result = subprocess.run(["sh", "-c", reader + '\nfptn_read_sample "$1" "$2" "$3" "$4"',
+                "test", *[str(root / f) for f in ["stat", "process", "status", "meminfo"]]],
+                text=True, capture_output=True, check=True)
+            self.assertEqual(result.stdout.strip(), "621 450 168 18356 48192 2 98765")
+
+    def run_intervals(self, idle_values):
+        source = (ROOT / 'scripts/start-from-token.sh').read_text()
+        functions = source.split('    fptn_phase_start() {', 1)[1].split("    echo '[НАГРУЗКА] CPU общий", 1)[0]
+        functions = 'fptn_phase_start() {' + functions
+        samples = ['1000 500 100 18000 48000 4 9']
+        for i, idle in enumerate(idle_values):
+            samples.append(f'{1400+400*i} {idle} {140+4*i} 18000 48000 4 9')
+        with tempfile.NamedTemporaryFile(mode='w') as fixture:
+            fixture.write('\n'.join(samples) + '\n'); fixture.flush()
+            shell = '''set -eu
+exec 3<"$1"
+fptn_snapshot() { IFS= read -r row <&3; printf '%s\\n' "$row"; }
+sleep() { :; }
+FPTN_START=''; FPTN_RSS_PEAK=0; FPTN_MEM_MIN=2147483647; FPTN_BUSY=0; FPTN_ABORT=0; FPTN_PHASE=test
+''' + functions + '''
+fptn_phase_start
+for interval in 1 2 3; do fptn_sample_interval; done
+fptn_phase_summary
+printf 'ABORT=%s\\n' "$FPTN_ABORT"
+'''
+            return subprocess.run(['sh', '-c', shell, 'test', fixture.name], text=True, capture_output=True, check=True)
+
+    def test_single_spike_is_distinct_from_average_and_does_not_abort(self):
+        result = self.run_intervals([520, 880, 1240])
+        self.assertIn('общий CPU средний 38.3% / пик 95.0%', result.stdout)
+        self.assertIn('FPTN средний 4.0% / пик 10.0%', result.stdout)
+        self.assertIn('ABORT=0', result.stdout)
+
+    def test_three_high_cpu_intervals_trigger_stop(self):
+        result = self.run_intervals([520, 540, 560])
+        self.assertIn('ABORT=1', result.stdout)
+        self.assertIn('Порог остановки:', result.stderr)
