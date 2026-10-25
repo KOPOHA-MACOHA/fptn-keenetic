@@ -1,0 +1,60 @@
+<!doctype html>
+<html lang="ru">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="color-scheme" content="dark">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self'; style-src 'self'; connect-src 'self'; img-src 'self'; object-src 'none'; base-uri 'none'; form-action 'self'; frame-src 'none'">
+  <title>FPTN · Keenetic</title>
+  <link rel="icon" href="data:,">
+  <link rel="stylesheet" href="style.css">
+  <script src="app.js" defer></script>
+</head>
+<body>
+  <div class="shell">
+    <header><a class="brand" href="./"><span class="mark">F</span><span>FPTN <small>KEENETIC</small></span></a><button id="logout" class="quiet" hidden>Выйти</button></header>
+    <section id="login" class="card login">
+      <span class="eyebrow">ЛОКАЛЬНАЯ ПАНЕЛЬ</span>
+      <h1>Управление подключением</h1>
+      <p>Введите код доступа, показанный при установке панели. Это отдельный код, не токен VPN.</p>
+      <form id="login-form"><label for="key">Код доступа</label><input id="key" type="password" autocomplete="current-password" required maxlength="128"><button class="primary" type="submit">Открыть панель</button></form>
+    </section>
+    <main id="dashboard" hidden>
+      <div class="heading"><div><span class="eyebrow">KEENETIC · OPKGTUN0</span><h1>Ваше подключение</h1></div><span class="tag">FPTN для Keenetic</span></div>
+      <section class="card overview">
+        <div class="status-heading"><span id="indicator" class="dot"></span><h2 id="status-title">Проверяем состояние…</h2><span id="memory" class="memory"></span></div>
+        <p id="status-text" class="status-text"></p>
+        <div class="actions"><button id="start" class="primary" data-command="start">Запустить</button><button id="stop" data-command="stop">Остановить</button><button id="restart" data-command="restart">Переподключить</button></div>
+        <p class="hint">Статус процесса и READY при запуске. Доступность сайтов проверяется отдельно.</p>
+      </section>
+      <div class="columns">
+        <section class="card">
+          <div class="section-heading"><span class="step">01</span><h2>Сервер и токен</h2></div>
+          <label for="server">VPN-сервер</label><select id="server" form="settings-form" required></select>
+          <details><summary>Заменить токен</summary><p class="hint">Текущий токен сохранён на роутере и не возвращается в браузер.</p><label for="token">Новый токен FPTN</label><textarea id="token" rows="3" spellcheck="false" autocomplete="off" placeholder="fptnb:…"></textarea><button id="preview" type="button">Прочитать серверы</button><p class="hint">Сначала прочитайте серверы, затем сохраните настройки.</p></details>
+        </section>
+        <section class="card">
+          <div class="section-heading"><span class="step">02</span><h2>Параметры подключения</h2></div>
+          <form id="settings-form">
+            <label for="strategy">Стратегия подключения</label>
+            <select id="strategy"><option value="rolling-tunnel">Скользящий туннель</option><option value="dual-rolling-tunnel" selected>Двойной скользящий туннель</option><option value="triple-rolling-tunnel">Тройной скользящий туннель</option></select>
+            <label for="mode">Метод обхода блокировок</label><select id="mode"><option value="obfuscation">Маскировка трафика · обфускация</option><option value="sni">Подмена домена · SNI + Reality</option></select>
+            <div id="sni-fields" hidden>
+              <label for="browser">Браузер</label><select id="browser"><option value="yandex">Yandex</option><option value="chrome">Chrome</option><option value="firefox">Firefox</option><option value="safari">Safari</option></select>
+              <label for="profile">Версия профиля</label><select id="profile"></select>
+              <label for="sni">Домен SNI</label><input id="sni" type="text" value="google.com" maxlength="253" spellcheck="false" autocomplete="off" placeholder="example.com">
+              <p class="hint">Автоподбор появится в отдельном обновлении. Сейчас укажите домен вручную.</p>
+            </div>
+            <button id="save" class="primary wide" type="submit">Сохранить настройки</button>
+            <p class="hint">Работающий клиент переподключится. Остановленный останется остановленным. При неудачном запуске панель попробует вернуть прежние настройки.</p>
+          </form>
+        </section>
+      </div>
+      <section class="card routing"><span class="routing-icon">↗</span><div><h2>Маршрутизация — в Keenetic</h2><p>Домены, подсети и выбор интерфейса задаются в штатной панели роутера. Интерфейс FPTN: <strong>OpkgTun0</strong>.</p></div></section>
+      <section class="card"><div class="section-heading log-heading"><h2>Журнал службы</h2><button id="refresh-logs" class="quiet">Обновить</button></div><pre id="logs">Нажмите «Обновить», чтобы прочитать журнал.</pre></section>
+      <footer>Локальная панель · Обновление состояния каждые 5 секунд · Автозапуск пока выключен</footer>
+    </main>
+    <div id="notice" role="status" aria-live="polite" hidden></div>
+  </div>
+</body>
+</html>

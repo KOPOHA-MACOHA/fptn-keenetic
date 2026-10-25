@@ -43,6 +43,42 @@ trim_logs() {
   done
 }
 
+# JSON is data, never sourced as shell code. Older jq builds need no regex support.
+validate_connection() {
+  SETTINGS=$(head -c 16385)
+  [ "${#SETTINGS}" -le 16384 ] || fail 'Слишком большие настройки.'
+  printf '%s' "$SETTINGS" | jq -e 'type=="object" and
+    (.bypass|type=="string") and (.strategy|type=="string") and
+    (.sni|type=="string")' >/dev/null 2>&1 || fail 'Некорректный JSON настроек.'
+  BYPASS=$(printf '%s' "$SETTINGS" | jq -r '.bypass')
+  STRATEGY=$(printf '%s' "$SETTINGS" | jq -r '.strategy')
+  SNI=$(printf '%s' "$SETTINGS" | jq -r '.sni')
+  case "$BYPASS" in
+    obfuscation|sni-spoofing-chrome-149|sni-spoofing-chrome-148|sni-spoofing-chrome-147|sni-spoofing-chrome-146|sni-spoofing-chrome-145|sni-spoofing-firefox-151|sni-spoofing-firefox-150|sni-spoofing-firefox-149|sni-spoofing-yandex-26-4|sni-spoofing-yandex-26-3|sni-spoofing-yandex-25|sni-spoofing-yandex-24|sni-spoofing-safari-26-5|sni-spoofing-safari-26-4) ;;
+    *) fail 'Неизвестный метод обхода.' ;;
+  esac
+  case "$STRATEGY" in rolling-tunnel|dual-rolling-tunnel|triple-rolling-tunnel) ;; *) fail 'Неизвестная стратегия.' ;; esac
+  printf '%s\n' "$SNI" | awk '
+    NR!=1 {exit 1}
+    length($0)<1 || length($0)>253 || $0 ~ /[^a-zA-Z0-9.-]/ {exit 1}
+    {n=split($0,a,"."); if(n<2) exit 1
+     for(i=1;i<=n;i++) if(length(a[i])<1 || length(a[i])>63 || a[i] ~ /^-|-$/) exit 1}
+  ' || fail 'Укажите корректный домен SNI латиницей.'
+  jq -n --arg bypass "$BYPASS" --arg strategy "$STRATEGY" --arg sni "$SNI" \
+    '{bypass:$bypass,strategy:$strategy,sni:$sni}'
+}
+connection_json() {
+  if [ -f "$CONF/connection.json" ]; then validate_connection < "$CONF/connection.json"
+  else printf '%s\n' '{"bypass":"obfuscation","strategy":"dual-rolling-tunnel","sni":"google.com"}'
+  fi
+}
+load_connection() {
+  SETTINGS=$(connection_json)
+  BYPASS=$(printf '%s' "$SETTINGS" | jq -r '.bypass')
+  STRATEGY=$(printf '%s' "$SETTINGS" | jq -r '.strategy')
+  SNI=$(printf '%s' "$SETTINGS" | jq -r '.sni')
+}
+
 configure() {
   [ ! -d "$RUN" ] || fail 'Сначала stop; при остаточном состоянии — recover.'
   TMP=$(mktemp -d "$CONF/setup.XXXXXX")
@@ -218,6 +254,7 @@ run_service() {
   done
 }
 attempt_service() {
+  load_connection
   # Re-read the uplink on every attempt: DHCP/failover can change it.
   GW=$(ip -4 route show table main default | awk '$1=="default" && $2=="via" {print $3; exit}')
   IFACE=$(ip -4 route show table main default | awk '$1=="default" {for(i=1;i<NF;i++) if($i=="dev") {print $(i+1); exit}}')
@@ -230,7 +267,7 @@ attempt_service() {
     --access-token "$TOKEN" --preferred-server "$SERVER" \
     --out-network-interface "$IFACE" --gateway-ip "$GW" \
     --tun-interface-name opkgtun0 --tun-interface-ip 10.0.0.1 --mtu-size 1420 \
-    --sni google.com --bypass-method obfuscation --connection-strategy dual-rolling-tunnel \
+    --sni "$SNI" --bypass-method "$BYPASS" --connection-strategy "$STRATEGY" \
     --enable-split-tunnel false --enable-ad-block false --blacklist-domains '' >> "$RUN/client.log" 2>&1 &
   CHILD=$!; record_pid "$CHILD" "$RUN/client.pid"; unset TOKEN
   N=0
@@ -257,6 +294,7 @@ attempt_service() {
 start_service() {
   for cmd in ip timeout nice nohup jq base64 stty; do command -v "$cmd" >/dev/null 2>&1 || fail "Нет команды $cmd"; done
   [ -s "$CONF/token" ] && [ -s "$CONF/server" ] || fail 'Сначала fptnctl configure.'
+  load_connection
   [ -f "$CONF/native-setup-complete" ] || fail 'Сначала fptnctl setup-interface.'
   ip link show dev opkgtun0 >/dev/null 2>&1 || fail 'Keenetic не создал opkgtun0.'
   mkdir -p "$ROOT/var/run"
@@ -312,6 +350,8 @@ show_logs() {
 }
 need_root
 case "${1:-}" in
+  get-settings) connection_json ;;
+  validate-settings) validate_connection ;;
   install) install_native "${2:-/opt/tmp/fptn-native-client}" ;;
   setup-interface) setup_interface ;;
   configure) mkdir -p "$CONF"; chmod 700 "$CONF"; configure ;;

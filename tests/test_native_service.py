@@ -1,4 +1,5 @@
 import hashlib
+import json
 import os
 import signal
 from pathlib import Path
@@ -61,6 +62,8 @@ int main(int argc,char**argv){
   if(!strcmp(argv[i],"opkgtun0")) name=1;
  }
  if(!native || !name) return 3;
+ char *record=getenv("FPTN_MOCK_ARGS");
+ if(record){FILE *f=fopen(record,"w");if(!f)return 4;for(int i=1;i<argc;i++)fprintf(f,"%s\n",argv[i]);fclose(f);}
  signal(SIGTERM,stop);
  char *suppress=getenv("FPTN_MOCK_SUPPRESS_READY");
  if(!suppress || access(suppress,F_OK)) {puts("Connection #1 READY"); fflush(stdout);}
@@ -77,6 +80,7 @@ int main(int argc,char**argv){
         mock=mock.replace("    mutation()\n    if a[1]=='rule':", "    if a[1:3]==['route','show']: done(output='default via 100.64.0.2 dev eth2.2\\n')\n    mutation()\n    if a[1]=='rule':")
         (self.bin/'ip').write_text(mock)
         self.env['FPTN_MOCK_SUPPRESS_READY']=str(self.root/'suppress-ready')
+        self.env['FPTN_MOCK_ARGS']=str(self.root/'client-args')
         return root
 
     def wait_for(self, predicate, timeout=15):
@@ -145,5 +149,17 @@ int main(int argc,char**argv){
         try:
             started=self.cmd('start'); self.assertNotEqual(started.returncode,0)
             self.assertFalse((root/'var/run/fptn-keenetic').exists())
+            self.assertEqual(self.state()['mutations'],0)
+        finally: self.cmd('stop')
+
+    def test_configured_browser_strategy_and_sni_reach_client(self):
+        root=self.prepare_native_client()
+        settings={'bypass':'sni-spoofing-firefox-151','strategy':'triple-rolling-tunnel','sni':'example.org'}
+        (root/'etc/fptn/connection.json').write_text(json.dumps(settings))
+        try:
+            started=self.cmd('start'); self.assertEqual(started.returncode,0,started.stdout+started.stderr)
+            args=(self.root/'client-args').read_text().splitlines()
+            for flag,value in [('--bypass-method',settings['bypass']),('--connection-strategy',settings['strategy']),('--sni',settings['sni'])]:
+                self.assertEqual(args[args.index(flag)+1],value)
             self.assertEqual(self.state()['mutations'],0)
         finally: self.cmd('stop')
