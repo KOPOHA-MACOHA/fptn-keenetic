@@ -17,6 +17,10 @@ proc_start() {
   [ -r "/proc/$1/stat" ] || return 1
   awk '{sub(/^.*\) /, ""); print $20}' "/proc/$1/stat"
 }
+proc_state() {
+  [ -r "/proc/$1/stat" ] || return 1
+  awk '{sub(/^.*\) /, ""); print $1}' "/proc/$1/stat"
+}
 
 record_pid() { printf '%s %s %s\n' "$1" "$(proc_start "$1")" "$(cat /proc/sys/kernel/random/boot_id)" > "$2"; }
 
@@ -26,12 +30,24 @@ alive() {
   [ -n "$BOOT" ] && [ "$BOOT" = "$(cat /proc/sys/kernel/random/boot_id)" ] || return 1
   case "$PID:$STAMP" in *[!0-9:]*|:|*:|:*) return 1 ;; esac
   [ "$PID" -gt 1 ] || return 1
+  case "$(proc_state "$PID" 2>/dev/null || true)" in ''|Z|X) return 1 ;; esac
   [ "$(proc_start "$PID" 2>/dev/null || true)" = "$STAMP" ] && kill -0 "$PID" 2>/dev/null
 }
 
 client_alive() {
   alive "$RUN/client.pid" || return 1
-  [ "$(readlink "/proc/$PID/exe" 2>/dev/null || true)" = "$(readlink -f "$LIB/fptn-client-cli")" ]
+  CLIENT_EXE=$(readlink "/proc/$PID/exe" 2>/dev/null || true)
+  EXPECTED_EXE=$(readlink -f "$LIB/fptn-client-cli")
+  case "$CLIENT_EXE" in "$EXPECTED_EXE"|"$EXPECTED_EXE (deleted)") return 0 ;; *) return 1 ;; esac
+}
+supervisor_owned() {
+  alive "$RUN/supervisor.pid" || return 1
+  SHELL_EXE=$(readlink "/proc/$PID/exe" 2>/dev/null || true)
+  case "$SHELL_EXE" in */sh|*/ash|*/dash|*/bash|*/busybox) ;; *) return 1 ;; esac
+  tr '\000' '\n' < "/proc/$PID/cmdline" | awk -v installed="$ROOT/bin/fptnctl" -v self="$SELF" '
+    $0==installed || $0==self {script=1}
+    $0=="_run" {run=1}
+    END {exit !(script && run)}'
 }
 
 trim_logs() {
@@ -232,9 +248,19 @@ stop_child() {
     kill -TERM "$PID" 2>/dev/null || true
     STOP_N=0
     while client_alive && [ "$STOP_N" -lt 10 ]; do sleep 1; STOP_N=$((STOP_N+1)); done
-    if client_alive; then kill -KILL "$PID" 2>/dev/null || true; fi
+    if client_alive; then
+      kill -KILL "$PID" 2>/dev/null || true
+      STOP_KILL_N=0
+      while client_alive && [ "$STOP_KILL_N" -lt 3 ]; do sleep 1; STOP_KILL_N=$((STOP_KILL_N+1)); done
+    fi
   fi
-  if [ -n "${CHILD:-}" ]; then wait "$CHILD" 2>/dev/null || true; fi
+  if [ -n "${CHILD:-}" ]; then
+    # Never wait indefinitely for a still-live process whose identity is unknown.
+    case "$(proc_state "$CHILD" 2>/dev/null || true)" in
+      ''|Z|X) wait "$CHILD" 2>/dev/null || true ;;
+      *) echo 'FPTN: дочерний процесс ещё жив; сохраняю PID для безопасного восстановления.' >&2; return 1 ;;
+    esac
+  fi
   CHILD=
   rm -f "$RUN/client.pid" "$RUN/ready"
 }
@@ -242,9 +268,9 @@ run_service() {
   record_pid "$$" "$RUN/supervisor.pid"
   finish() {
     trap '' INT TERM HUP
-    stop_child
-    [ ! -f "$RUN/client.log" ] || tail -c 65536 "$RUN/client.log" > "$CONF/last.log"
-    [ ! -f "$RUN/supervisor.log" ] || tail -c 16384 "$RUN/supervisor.log" > "$CONF/service-last.log"
+    stop_child || return 1
+    [ ! -f "$RUN/client.log" ] || tail -c 65536 "$RUN/client.log" > "$CONF/last.log" || true
+    [ ! -f "$RUN/supervisor.log" ] || tail -c 16384 "$RUN/supervisor.log" > "$CONF/service-last.log" || true
     rm -rf "$RUN"
   }
   trap finish EXIT
@@ -438,11 +464,45 @@ check_servers() (
 )
 stop_service() {
   [ -d "$RUN" ] || { echo 'FPTN остановлен.'; return 0; }
-  alive "$RUN/supervisor.pid" || fail 'Нет живого supervisor: recover.'
-  kill -TERM "$PID"
+  for RECORD in "$RUN/supervisor.pid" "$RUN/client.pid"; do
+    [ -f "$RECORD" ] || continue
+    RECORD_PID=; RECORD_STAMP=; RECORD_BOOT=
+    read -r RECORD_PID RECORD_STAMP RECORD_BOOT < "$RECORD" || true
+    case "$RECORD_PID:$RECORD_STAMP" in *[!0-9:]*|:|*:|:*) fail 'Повреждена PID-запись. Состояние сохранено для диагностики.' ;; esac
+    [ -n "$RECORD_BOOT" ] || fail 'В PID-записи нет boot-id. Состояние сохранено для диагностики.'
+  done
+  if alive "$RUN/supervisor.pid"; then
+    supervisor_owned || fail 'PID supervisor не принадлежит этой службе; остановка отменена.'
+    kill -TERM "$PID" 2>/dev/null || true
+  fi
+  # Also handle an orphaned client or an old supervisor stuck in its EXIT trap.
+  if alive "$RUN/client.pid"; then
+    client_alive || fail 'PID клиента не соответствует FPTN; остановка отменена.'
+    kill -TERM "$PID" 2>/dev/null || true
+  fi
   N=0
-  while alive "$RUN/supervisor.pid" && [ "$N" -lt 15 ]; do sleep 1; N=$((N+1)); done
-  [ ! -d "$RUN" ] || fail 'Остановка не завершилась: logs.'
+  while [ "$N" -lt 10 ]; do
+    if ! alive "$RUN/supervisor.pid" && ! alive "$RUN/client.pid"; then break; fi
+    sleep 1; N=$((N+1))
+  done
+  if alive "$RUN/client.pid"; then
+    client_alive || fail 'Изменилась идентичность клиента; PID не трогаю.'
+    kill -KILL "$PID" 2>/dev/null || true
+  fi
+  N=0
+  while alive "$RUN/client.pid" && [ "$N" -lt 3 ]; do sleep 1; N=$((N+1)); done
+  if alive "$RUN/client.pid"; then fail 'Клиент не завершился после SIGKILL. Файлы и PID сохранены; обновление запрещено.'; fi
+  if alive "$RUN/supervisor.pid"; then
+    supervisor_owned || fail 'Изменилась идентичность supervisor; PID не трогаю.'
+    # The client is gone: killing only this verified shell cannot orphan it.
+    kill -KILL "$PID" 2>/dev/null || true
+  fi
+  N=0
+  while alive "$RUN/supervisor.pid" && [ "$N" -lt 3 ]; do sleep 1; N=$((N+1)); done
+  alive "$RUN/supervisor.pid" && fail 'Supervisor не завершился; обновление запрещено.'
+  [ ! -f "$RUN/client.log" ] || tail -c 65536 "$RUN/client.log" > "$CONF/last.log" || true
+  [ ! -f "$RUN/supervisor.log" ] || tail -c 16384 "$RUN/supervisor.log" > "$CONF/service-last.log" || true
+  rm -rf "$RUN"
   echo 'Клиент остановлен. Штатный интерфейс и правила Keenetic сохранены.'
 }
 recover_service() {

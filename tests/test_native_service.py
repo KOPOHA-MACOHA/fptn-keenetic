@@ -198,3 +198,56 @@ int main(int argc,char**argv){
             self.assertEqual(data['state'],'reconnecting');self.assertFalse(data['connected'])
             self.assertEqual(self.state()['mutations'],0)
         finally:self.cmd('stop')
+
+    def test_stop_handles_replaced_executable_without_hanging(self):
+        root=self.prepare_native_client();run=root/'var/run/fptn-keenetic'
+        try:
+            started=self.cmd('start');self.assertEqual(started.returncode,0,started.stdout+started.stderr)
+            pid=int((run/'client.pid').read_text().split()[0])
+            binary=root/'libexec/fptn/fptn-client-cli';replacement=binary.with_suffix('.new')
+            replacement.write_bytes(binary.read_bytes());replacement.chmod(0o700);replacement.replace(binary)
+            self.assertTrue(os.readlink(f'/proc/{pid}/exe').endswith(' (deleted)'))
+            stopped=self.cmd('stop');self.assertEqual(stopped.returncode,0,stopped.stdout+stopped.stderr)
+            self.assertFalse(run.exists());self.assertEqual(self.state()['mutations'],0)
+        finally:self.cmd('stop')
+
+    def test_stop_handles_tracked_client_without_live_supervisor(self):
+        root=self.prepare_native_client();run=root/'var/run/fptn-keenetic';run.mkdir(parents=True)
+        binary=root/'libexec/fptn/fptn-client-cli'
+        process=subprocess.Popen([str(binary),'--keenetic-native','--tun-interface-name','opkgtun0'],env=self.env,stdout=subprocess.DEVNULL,stderr=subprocess.DEVNULL)
+        try:
+            stamp=Path(f'/proc/{process.pid}/stat').read_text().rsplit(') ',1)[1].split()[19]
+            boot=Path('/proc/sys/kernel/random/boot_id').read_text().strip()
+            (run/'client.pid').write_text(f'{process.pid} {stamp} {boot}\n')
+            (run/'supervisor.pid').write_text(f'999999999 1 {boot}\n')
+            stopped=self.cmd('stop');self.assertEqual(stopped.returncode,0,stopped.stdout+stopped.stderr)
+            process.wait(timeout=5);self.assertFalse(run.exists())
+        finally:
+            if process.poll() is None:process.kill();process.wait(timeout=5)
+
+    def test_stop_refuses_foreign_executable_even_with_matching_pid_stamp(self):
+        root=self.prepare_native_client();run=root/'var/run/fptn-keenetic';run.mkdir(parents=True)
+        process=subprocess.Popen(['sleep','30'])
+        try:
+            stamp=Path(f'/proc/{process.pid}/stat').read_text().rsplit(') ',1)[1].split()[19]
+            boot=Path('/proc/sys/kernel/random/boot_id').read_text().strip()
+            (run/'client.pid').write_text(f'{process.pid} {stamp} {boot}\n')
+            stopped=self.cmd('stop');self.assertNotEqual(stopped.returncode,0)
+            self.assertIsNone(process.poll());self.assertTrue(run.exists())
+        finally:process.terminate();process.wait(timeout=5)
+
+    def test_stop_kills_verified_stuck_supervisor_only_after_client_is_gone(self):
+        root=self.prepare_native_client();run=root/'var/run/fptn-keenetic';run.mkdir(parents=True)
+        controller=root/'bin/fptnctl';controller.parent.mkdir(parents=True)
+        controller.write_text('#!/bin/sh\ntrap "" TERM INT HUP\n: > "$FPTN_PREFIX/supervisor-test-ready"\nwhile :; do sleep 1; done\n');controller.chmod(0o700)
+        process=subprocess.Popen(['sh',str(controller),'_run'],env=self.env,stdout=subprocess.DEVNULL,stderr=subprocess.DEVNULL)
+        try:
+            self.wait_for(lambda:(root/'supervisor-test-ready').exists())
+            stamp=Path(f'/proc/{process.pid}/stat').read_text().rsplit(') ',1)[1].split()[19]
+            boot=Path('/proc/sys/kernel/random/boot_id').read_text().strip()
+            (run/'supervisor.pid').write_text(f'{process.pid} {stamp} {boot}\n')
+            stopped=self.cmd('stop');self.assertEqual(stopped.returncode,0,stopped.stdout+stopped.stderr)
+            process.wait(timeout=5);self.assertEqual(process.returncode,-signal.SIGKILL)
+            self.assertFalse(run.exists());self.assertEqual(self.state()['mutations'],0)
+        finally:
+            if process.poll() is None:process.kill();process.wait(timeout=5)

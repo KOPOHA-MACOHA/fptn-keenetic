@@ -7,10 +7,13 @@ export PATH
 umask 077
 fail() { echo "ОШИБКА: $*" >&2; exit 1; }
 [ "$(id -u)" = 0 ] || fail 'Запустите от root.'
-[ "${1:-}" = install ] || fail 'Использование: sh install-web-ui.sh install COMMIT [LAN_IP]'
+[ "${1:-}" = install ] || fail 'Использование: sh install-web-ui.sh install UI_COMMIT [LAN_IP] [CLIENT_COMMIT]'
 REV=${2:-}
 case "$REV" in *[!a-f0-9]*|'') fail 'Нужен полный SHA коммита.' ;; esac
 [ "${#REV}" -eq 40 ] || fail 'Нужен полный SHA коммита.'
+CLIENT_REV=${4:-$REV}
+case "$CLIENT_REV" in *[!a-f0-9]*|'') fail 'Некорректный SHA бинарника.' ;; esac
+[ "${#CLIENT_REV}" -eq 40 ] || fail 'Нужен полный SHA бинарника.'
 LAN=${3:-192.168.1.1}
 printf '%s\n' "$LAN" | awk -F. 'NF!=4 {exit 1} {for(i=1;i<=4;i++) if($i!~/^[0-9]+$/ || $i>255 || length($i)>3) exit 1}' || fail 'Некорректный IPv4 LAN.'
 PORT=1111
@@ -52,12 +55,23 @@ ORIGIN_EXISTED=no
 META_EXISTED=no
 CLIENT_UPDATE=no
 WAS_RUNNING=no
+SERVICE_STOPPED=no
+CLIENT_SWAPPED=no
+RESTART_ATTEMPTED=no
+INSTALL_LOCK=no
 finish() {
   trap '' INT TERM HUP
+  RESTORE_SAFE=yes
   if [ "$CHANGED" = yes ] && [ "$DONE" != yes ]; then
     echo 'Установка не завершилась. Восстанавливаю файлы и lighttpd.' >&2
-    if [ "$CLIENT_UPDATE" = yes ]; then
-      /opt/bin/fptnctl stop || { echo 'Клиент не остановлен; безопасный откат прерван. Файлы сохранены в резервной копии.' >&2; return 1; }
+    if [ "$RESTART_ATTEMPTED" = yes ] || [ -d /opt/var/run/fptn-keenetic ]; then
+      if ! sh "$STAGE/scripts/fptn-native-service.sh" stop; then
+        echo 'Новый клиент не остановлен. Оставляю его файлы на месте; резервная копия сохранена.' >&2
+        RESTORE_SAFE=no
+      fi
+    fi
+    if [ "$RESTORE_SAFE" = yes ]; then
+    if [ "$CLIENT_SWAPPED" = yes ]; then
       cp -p "$BACKUP/fptn-client-cli" /opt/libexec/fptn/fptn-client-cli.restore
       mv /opt/libexec/fptn/fptn-client-cli.restore /opt/libexec/fptn/fptn-client-cli
       cp -p "$BACKUP/SHA256SUMS" /opt/libexec/fptn/SHA256SUMS
@@ -74,8 +88,10 @@ finish() {
     else rm -f "$CONF/web-meta.json"; fi
     [ "$KEY_CREATED" = no ] || rm -f "$CONF/web-key"
     "$INIT" restart || echo 'Не удалось перезапустить lighttpd при откате; резервная копия сохранена.' >&2
-    if [ "$CLIENT_UPDATE" = yes ] && [ "$WAS_RUNNING" = yes ]; then /opt/bin/fptnctl start || true; fi
+    if [ "$SERVICE_STOPPED" = yes ] && [ "$WAS_RUNNING" = yes ]; then /opt/bin/fptnctl start || true; fi
+    fi
   fi
+  [ "$INSTALL_LOCK" = no ] || rm -rf /opt/var/run/fptn-web/action
   rm -rf "$STAGE"
 }
 trap finish EXIT
@@ -94,7 +110,7 @@ sh -n "$STAGE/scripts/fptn-native-service.sh"
 if ! /opt/libexec/fptn/fptn-client-cli --help | grep -q -- '--keenetic-probe-only'; then
   CLIENT_UPDATE=yes
   mkdir -p "$STAGE/client"
-  CLIENT_BASE=https://github.com/KOPOHA-MACOHA/fptn-keenetic/releases/download/native-$REV
+  CLIENT_BASE=https://github.com/KOPOHA-MACOHA/fptn-keenetic/releases/download/native-$CLIENT_REV
   echo 'Для проверки серверов и состояния нужен клиент 0.4.0. Скачиваю готовый бинарник для Hopper.'
   curl -fL --connect-timeout 15 --max-time 180 "$CLIENT_BASE/fptn-client-cli" -o "$STAGE/client/fptn-client-cli"
   curl -fL --connect-timeout 15 --max-time 60 "$CLIENT_BASE/SHA256SUMS" -o "$STAGE/client/SHA256SUMS.all"
@@ -119,15 +135,24 @@ fi
 if [ -f "$CONF/web-origin" ]; then ORIGIN_EXISTED=yes; cp -p "$CONF/web-origin" "$BACKUP/web-origin"; fi
 if [ -f "$CONF/web-meta.json" ]; then META_EXISTED=yes; cp -p "$CONF/web-meta.json" "$BACKUP/web-meta.json"; fi
 echo "Резервная копия: $BACKUP"
-CHANGED=yes
+mkdir /opt/var/run/fptn-web/action 2>/dev/null || fail 'Параллельно началась операция панели. Изменений нет.'
+INSTALL_LOCK=yes
+printf 'update\n' > /opt/var/run/fptn-web/action/action
 if [ "$CLIENT_UPDATE" = yes ]; then
   [ ! -d /opt/var/run/fptn-keenetic ] || WAS_RUNNING=yes
-  /opt/bin/fptnctl stop
+  # Use the verified new stop implementation, not the installed faulty one.
+  if ! sh "$STAGE/scripts/fptn-native-service.sh" stop; then
+    fail 'Не удалось остановить старую службу. Бинарник, панель и конфигурация не заменялись.'
+  fi
+  SERVICE_STOPPED=yes
+  CHANGED=yes
   cp "$STAGE/client/fptn-client-cli" /opt/libexec/fptn/fptn-client-cli.new
   chmod 700 /opt/libexec/fptn/fptn-client-cli.new
   mv /opt/libexec/fptn/fptn-client-cli.new /opt/libexec/fptn/fptn-client-cli
+  CLIENT_SWAPPED=yes
   (cd /opt/libexec/fptn; sha256sum fptn-client-cli brotli > SHA256SUMS.new; mv SHA256SUMS.new SHA256SUMS)
 fi
+CHANGED=yes
 mkdir -p "$WEB"
 chmod 755 "$WEB"
 cp "$STAGE/web/"* "$WEB/"
@@ -170,7 +195,10 @@ KEY=$(cat "$CONF/web-key")
 printf 'header = "Authorization: Bearer %s"\n' "$KEY" |
   curl --noproxy '*' -K - -fsS --max-time 15 "$ORIGIN/api.cgi?status" |
   jq -e '.uiVersion=="0.4.0" and (.service.state|type=="string") and (.busy|type=="boolean")' >/dev/null || fail 'Версия или состояние API не соответствуют панели.'
-if [ "$CLIENT_UPDATE" = yes ] && [ "$WAS_RUNNING" = yes ]; then /opt/bin/fptnctl start || fail 'Обновлённый клиент не запустился.'; fi
+if [ "$CLIENT_UPDATE" = yes ] && [ "$WAS_RUNNING" = yes ]; then
+  RESTART_ATTEMPTED=yes
+  /opt/bin/fptnctl start || fail 'Обновлённый клиент не запустился.'
+fi
 DONE=yes
 echo
 echo "Панель 0.4.0: $ORIGIN/?v=$REV"
