@@ -78,6 +78,25 @@ load_connection() {
   STRATEGY=$(printf '%s' "$SETTINGS" | jq -r '.strategy')
   SNI=$(printf '%s' "$SETTINGS" | jq -r '.sni')
 }
+validate_server_policy() {
+  POLICY=$(head -c 65537)
+  [ "${#POLICY}" -le 65536 ] || fail 'Слишком большой список серверов.'
+  printf '%s' "$POLICY" | jq -ce 'select(type=="object" and
+    (.mode=="auto" or .mode=="manual") and
+    (.favorites|type=="array" and length<=512 and all(.[]; type=="string" and length>0 and length<=128 and all(explode[]; .>=32 and .!=127))) and
+    (.excluded|type=="array" and length<=512 and all(.[]; type=="string" and length>0 and length<=128 and all(explode[]; .>=32 and .!=127)))) |
+    {mode:.mode,favorites:(.favorites|unique),excluded:(.excluded|unique)}' || fail 'Некорректная политика серверов.'
+}
+server_policy_json() {
+  if [ -f "$CONF/server-policy.json" ]; then validate_server_policy < "$CONF/server-policy.json"
+  else printf '%s\n' '{"mode":"manual","favorites":[],"excluded":[]}'
+  fi
+}
+capture_selected() {
+  SELECTED=$(awk '/KEENETIC_SELECTED: / {sub(/^.*KEENETIC_SELECTED: /, ""); name=$0} END {print name}' "$RUN/client.log")
+  if [ -n "$SELECTED" ]; then ATTEMPT_SELECTED=$SELECTED; printf '%s\n' "$SELECTED" > "$RUN/active-server"; fi
+  return 0
+}
 
 configure() {
   [ ! -d "$RUN" ] || fail 'Сначала stop; при остаточном состоянии — recover.'
@@ -232,8 +251,10 @@ run_service() {
   trap 'exit 0' TERM INT HUP
   EVER_READY=no
   BACKOFF=5
+  FORCE_AUTO=no
+  printf '[]\n' > "$RUN/failed-servers.json"
   while :; do
-    rm -f "$RUN/ready"
+    rm -f "$RUN/ready" "$RUN/active-server"
     echo 'FPTN: подключение.' > "$RUN/state"
     # Each attempt needs a fresh READY, not a line left by the previous client.
     if [ -s "$RUN/client.log" ]; then
@@ -242,7 +263,19 @@ run_service() {
     : > "$RUN/client.log"
     attempt_service
     stop_child
+    if [ -f "$CONF/server-policy.json" ] && [ -n "$ATTEMPT_SELECTED" ]; then
+      jq --arg name "$ATTEMPT_SELECTED" '. + [$name] | unique' "$RUN/failed-servers.json" > "$RUN/failed-servers.new"
+      mv "$RUN/failed-servers.new" "$RUN/failed-servers.json"
+      FORCE_AUTO=yes
+      echo 'FPTN: повторный автовыбор, неработающий сервер временно пропускается.'
+      # Try other candidates even when the first process failed before READY.
+      sleep 1
+      continue
+    fi
     [ "$EVER_READY" = yes ] || fail 'Первое подключение не удалось: fptnctl logs.'
+    # A whole selection pass failed. Start a fresh pass after bounded backoff.
+    printf '[]\n' > "$RUN/failed-servers.json"
+    FORCE_AUTO=yes
     echo "FPTN: клиент завершился; повтор через $BACKOFF секунд." > "$RUN/state"
     cat "$RUN/state"
     trim_logs
@@ -254,6 +287,7 @@ run_service() {
   done
 }
 attempt_service() {
+  ATTEMPT_SELECTED=
   load_connection
   # Re-read the uplink on every attempt: DHCP/failover can change it.
   GW=$(ip -4 route show table main default | awk '$1=="default" && $2=="via" {print $3; exit}')
@@ -263,20 +297,29 @@ attempt_service() {
     return 0
   fi
   TOKEN=$(cat "$CONF/token"); SERVER=$(cat "$CONF/server")
-  nice -n 10 "$LIB/fptn-client-cli" --keenetic-connect --keenetic-native \
+  set -- --keenetic-connect --keenetic-native \
     --access-token "$TOKEN" --preferred-server "$SERVER" \
     --out-network-interface "$IFACE" --gateway-ip "$GW" \
     --tun-interface-name opkgtun0 --tun-interface-ip 10.0.0.1 --mtu-size 1420 \
     --sni "$SNI" --bypass-method "$BYPASS" --connection-strategy "$STRATEGY" \
-    --enable-split-tunnel false --enable-ad-block false --blacklist-domains '' >> "$RUN/client.log" 2>&1 &
+    --enable-split-tunnel false --enable-ad-block false --blacklist-domains ''
+  READY_TIMEOUT=60
+  if [ -f "$CONF/server-policy.json" ]; then
+    READY_TIMEOUT=540
+    set -- "$@" --keenetic-server-policy "$CONF/server-policy.json" --keenetic-skip-file "$RUN/failed-servers.json"
+    [ "$FORCE_AUTO" = no ] || set -- "$@" --keenetic-auto-select
+    echo 'FPTN: выбор сервера — избранные, затем остальные разрешённые.' > "$RUN/state"
+  fi
+  nice -n 10 "$LIB/fptn-client-cli" "$@" >> "$RUN/client.log" 2>&1 &
   CHILD=$!; record_pid "$CHILD" "$RUN/client.pid"; unset TOKEN
   N=0
   until grep -q 'Connection #1 READY' "$RUN/client.log"; do
-    client_alive || { echo 'FPTN: клиент завершился до READY.'; return 0; }
-    [ "$N" -lt 60 ] || { echo 'FPTN: нет READY за 60 секунд.'; return 0; }
+    client_alive || { capture_selected; echo 'FPTN: клиент завершился до READY.'; return 0; }
+    [ "$N" -lt "$READY_TIMEOUT" ] || { capture_selected; echo 'FPTN: превышено время выбора сервера и запуска.'; return 0; }
     trim_logs; sleep 1; N=$((N+1))
   done
   : > "$RUN/ready"
+  capture_selected
   EVER_READY=yes
   echo 'FPTN: READY получен для текущего процесса.'
   STABLE_N=0
@@ -284,7 +327,7 @@ attempt_service() {
     trim_logs; sleep 2
     STABLE_N=$((STABLE_N+1))
     # Reset only after a stable minute, so rapid crash loops keep backing off.
-    [ "$STABLE_N" -lt 30 ] || BACKOFF=5
+    if [ "$STABLE_N" -eq 30 ]; then BACKOFF=5; printf '[]\n' > "$RUN/failed-servers.json"; fi
   done
   CLIENT_RC=0
   wait "$CHILD" || CLIENT_RC=$?
@@ -295,6 +338,12 @@ start_service() {
   for cmd in ip timeout nice nohup jq base64 stty; do command -v "$cmd" >/dev/null 2>&1 || fail "Нет команды $cmd"; done
   [ -s "$CONF/token" ] && [ -s "$CONF/server" ] || fail 'Сначала fptnctl configure.'
   load_connection
+  START_TIMEOUT=70
+  if [ -f "$CONF/server-policy.json" ]; then
+    server_policy_json >/dev/null
+    "$LIB/fptn-client-cli" --help | grep -q -- '--keenetic-server-policy' || fail 'Для автовыбора нужен клиент 0.3.0 с --keenetic-server-policy.'
+    START_TIMEOUT=600
+  fi
   [ -f "$CONF/native-setup-complete" ] || fail 'Сначала fptnctl setup-interface.'
   ip link show dev opkgtun0 >/dev/null 2>&1 || fail 'Keenetic не создал opkgtun0.'
   mkdir -p "$ROOT/var/run"
@@ -305,7 +354,7 @@ start_service() {
   nohup sh "$SELF" _run > "$RUN/supervisor.log" 2>&1 < /dev/null &
   trap - EXIT
   N=0
-  while [ "$N" -lt 70 ]; do
+  while [ "$N" -lt "$START_TIMEOUT" ]; do
     if [ -f "$RUN/ready" ]; then status_service; return 0; fi
     [ -d "$RUN" ] || { show_logs; fail 'Клиент не запустился.'; }
     sleep 1; N=$((N+1))
@@ -316,7 +365,8 @@ status_service() {
   if alive "$RUN/supervisor.pid"; then
     if [ -f "$RUN/ready" ] && client_alive; then
       echo 'FPTN native: клиент запущен, READY получен при старте.'
-      printf 'Сервер: '; cat "$CONF/server"
+      printf 'Сервер: '
+      if [ -s "$RUN/active-server" ]; then cat "$RUN/active-server"; else cat "$CONF/server"; fi
       echo 'Интерфейс: OpkgTun0 / opkgtun0. CIDR, домены, маршруты и firewall — в Keenetic.'
     elif [ -f "$RUN/state" ]; then cat "$RUN/state"
     else echo 'FPTN: запуск или остановка.'; fi
@@ -352,6 +402,8 @@ need_root
 case "${1:-}" in
   get-settings) connection_json ;;
   validate-settings) validate_connection ;;
+  get-server-policy) server_policy_json ;;
+  validate-server-policy) validate_server_policy ;;
   install) install_native "${2:-/opt/tmp/fptn-native-client}" ;;
   setup-interface) setup_interface ;;
   configure) mkdir -p "$CONF"; chmod 700 "$CONF"; configure ;;

@@ -57,6 +57,7 @@ touch '{created}'
 volatile sig_atomic_t stopped=0;
 void stop(int s){stopped=1;}
 int main(int argc,char**argv){
+ if(argc==2 && !strcmp(argv[1],"--help")){puts("--keenetic-server-policy");return 0;}
  int native=0,name=0; for(int i=1;i<argc;i++){
   if(!strcmp(argv[i],"--keenetic-native")) native=1;
   if(!strcmp(argv[i],"opkgtun0")) name=1;
@@ -65,6 +66,9 @@ int main(int argc,char**argv){
  char *record=getenv("FPTN_MOCK_ARGS");
  if(record){FILE *f=fopen(record,"w");if(!f)return 4;for(int i=1;i<argc;i++)fprintf(f,"%s\n",argv[i]);fclose(f);}
  signal(SIGTERM,stop);
+ puts("KEENETIC_SELECTED: CZ");fflush(stdout);
+ char *fail_once=getenv("FPTN_MOCK_FAIL_ONCE");
+ if(fail_once && !access(fail_once,F_OK)){unlink(fail_once);return 5;}
  char *suppress=getenv("FPTN_MOCK_SUPPRESS_READY");
  if(!suppress || access(suppress,F_OK)) {puts("Connection #1 READY"); fflush(stdout);}
  while(!stopped) sleep(1); return 0;
@@ -163,3 +167,17 @@ int main(int argc,char**argv){
                 self.assertEqual(args[args.index(flag)+1],value)
             self.assertEqual(self.state()['mutations'],0)
         finally: self.cmd('stop')
+
+    def test_policy_reselects_after_failure_before_first_ready(self):
+        root=self.prepare_native_client()
+        (root/'etc/fptn/server-policy.json').write_text(json.dumps({'mode':'auto','favorites':['CZ'],'excluded':[]}))
+        marker=self.root/'fail-once';marker.touch();self.env['FPTN_MOCK_FAIL_ONCE']=str(marker)
+        try:
+            started=self.cmd('start');self.assertEqual(started.returncode,0,started.stdout+started.stderr)
+            args=(self.root/'client-args').read_text().splitlines()
+            self.assertIn('--keenetic-auto-select',args)
+            self.assertIn('--keenetic-server-policy',args)
+            self.assertIn('--keenetic-skip-file',args)
+            self.assertEqual(json.loads((root/'var/run/fptn-keenetic/failed-servers.json').read_text()),['CZ'])
+            self.assertEqual(self.state()['mutations'],0)
+        finally:self.cmd('stop')

@@ -48,7 +48,7 @@ worker() {
     trap '' INT TERM HUP
     if [ "$rollback" = yes ]; then
       if "$CTL" stop >> "$LOCK/output" 2>&1; then
-        for key in token server connection.json; do
+        for key in token server connection.json server-policy.json; do
           if [ -f "$LOCK/old-$key" ]; then cp -p "$LOCK/old-$key" "$CONF/$key"
           else rm -f "$CONF/$key"; fi
         done
@@ -69,7 +69,7 @@ worker() {
     rm -f "$RUN/failed-request.json"
     if [ "$rollback" = yes ]; then
       mkdir -p "$CONF/web-recovery"
-      for key in token server connection.json; do
+      for key in token server connection.json server-policy.json; do
         [ ! -f "$LOCK/old-$key" ] || cp -p "$LOCK/old-$key" "$CONF/web-recovery/$key"
       done
     fi
@@ -90,7 +90,20 @@ worker() {
       SERVER=$(jq -r '.server' "$LOCK/request.json")
       printf '%s' "$TOKEN_JSON" | jq -e --arg name "$SERVER" 'any(.servers[]; .name==$name)' >/dev/null || exit 1
       jq '.connection' "$LOCK/request.json" | "$CTL" validate-settings > "$LOCK/new-connection.json" || exit 1
-      for key in token server connection.json; do
+      if jq -e 'has("policy")' "$LOCK/request.json" >/dev/null; then
+        POLICY=$(jq '.policy' "$LOCK/request.json" | "$CTL" validate-server-policy)
+      else POLICY=$("$CTL" get-server-policy); fi
+      printf '%s' "$TOKEN_JSON" | jq -e --arg server "$SERVER" --argjson policy "$POLICY" '
+        [.servers[].name] as $names |
+        ($policy.excluded|map(ascii_downcase)) as $denied |
+        [$names[] | select((ascii_downcase as $k | $denied|index($k))==null)] as $allowed |
+        ($allowed|length>0 and length<=64) and
+        all(($policy.favorites+$policy.excluded)[]; . as $n | $names|index($n)!=null) and
+        ($policy.mode=="auto" or ($allowed|index($server)!=null))' >/dev/null || {
+          echo 'Проверьте списки серверов: нужен хотя бы один разрешённый, максимум 64; ручной сервер не должен быть исключён.' >> "$LOCK/output"; exit 1;
+        }
+      printf '%s\n' "$POLICY" > "$LOCK/new-server-policy.json"
+      for key in token server connection.json server-policy.json; do
         [ ! -f "$CONF/$key" ] || cp -p "$CONF/$key" "$LOCK/old-$key"
       done
       # Existing CLI status is informational; inspect its owned runtime record too.
@@ -100,7 +113,8 @@ worker() {
       printf '%s\n' "$TOKEN" > "$CONF/token.new"
       printf '%s\n' "$SERVER" > "$CONF/server.new"
       cp "$LOCK/new-connection.json" "$CONF/connection.json.new"
-      for key in token server connection.json; do
+      cp "$LOCK/new-server-policy.json" "$CONF/server-policy.json.new"
+      for key in token server connection.json server-policy.json; do
         chmod 600 "$CONF/$key.new"; mv "$CONF/$key.new" "$CONF/$key"
       done
       unset TOKEN TOKEN_JSON
@@ -152,10 +166,11 @@ case "${REQUEST_METHOD:-}" in
         ;;
       settings)
         CONNECTION=$("$CTL" get-settings) || error '500 Internal Server Error' 'Некорректные настройки подключения.'
+        POLICY=$("$CTL" get-server-policy) || error '500 Internal Server Error' 'Некорректные списки серверов.'
         SERVERS=$(decode_token < "$CONF/token") || error '500 Internal Server Error' 'Не удалось прочитать серверы из сохранённого токена.'
         SERVER=$(cat "$CONF/server")
-        respond '200 OK' "$(printf '%s' "$SERVERS" | jq --arg server "$SERVER" --argjson connection "$CONNECTION" \
-          '{server:$server,servers:[.servers[].name],connection:$connection}')"
+        respond '200 OK' "$(printf '%s' "$SERVERS" | jq --arg server "$SERVER" --argjson connection "$CONNECTION" --argjson policy "$POLICY" \
+          '{server:$server,servers:[.servers[].name],connection:$connection,policy:$policy}')"
         ;;
       logs)
         { "$CTL" logs 2>&1 || true; [ ! -f "$RUN/action.log" ] || tail -c 8192 "$RUN/action.log"; } |
@@ -190,6 +205,9 @@ case "${REQUEST_METHOD:-}" in
       printf '%s' "$BODY" | jq -e '(.server|type=="string" and length>0 and length<=128) and
         (.token // ""|type=="string" and length<=262144)' >/dev/null 2>&1 || error '400 Bad Request' 'Некорректный сервер или токен.'
       printf '%s' "$BODY" | jq '.connection' | "$CTL" validate-settings >/dev/null 2>&1 || error '400 Bad Request' 'Проверьте стратегию, метод обхода и домен SNI.'
+      if printf '%s' "$BODY" | jq -e 'has("policy")' >/dev/null; then
+        printf '%s' "$BODY" | jq '.policy' | "$CTL" validate-server-policy >/dev/null 2>&1 || error '400 Bad Request' 'Проверьте списки серверов.'
+      fi
       ;; *) error '400 Bad Request' 'Неизвестное действие.' ;; esac
     mkdir "$LOCK" 2>/dev/null || error '409 Conflict' 'Дождитесь завершения предыдущей операции.'
     trap 'rm -rf "$LOCK"' EXIT

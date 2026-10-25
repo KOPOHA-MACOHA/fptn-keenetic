@@ -30,7 +30,12 @@
       <div class="columns">
         <section class="card">
           <div class="section-heading"><span class="step">01</span><h2>Сервер и токен</h2></div>
-          <label for="server">VPN-сервер</label><select id="server" form="settings-form" required></select>
+          <label for="selection-mode">Выбор сервера</label><select id="selection-mode"><option value="manual">Указать сервер</option><option value="auto">Автоматически · избранные сначала</option></select>
+          <div id="manual-server"><label for="server">VPN-сервер</label><select id="server" form="settings-form" required></select></div>
+          <p class="hint">При обрыве — автовыбор: сначала избранные, затем остальные. Выбирается сервер с наименьшим временем успешного входа.</p>
+          <div class="server-list-heading"><h3>Серверы</h3><span id="server-count" class="hint"></span></div>
+          <p class="hint">★ — избранный, × — исключённый. Исключённые серверы не проверяются. Списки применятся после сохранения.</p>
+          <div id="server-list" class="server-list"></div>
           <details><summary>Заменить токен</summary><p class="hint">Текущий токен сохранён на роутере и не возвращается в браузер.</p><label for="token">Новый токен FPTN</label><textarea id="token" rows="3" spellcheck="false" autocomplete="off" placeholder="fptnb:…"></textarea><button id="preview" type="button">Прочитать серверы</button><p class="hint">Сначала прочитайте серверы, затем сохраните настройки.</p></details>
         </section>
         <section class="card">

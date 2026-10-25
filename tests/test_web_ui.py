@@ -50,7 +50,7 @@ class WebUiTest(unittest.TestCase):
 import json,os,pathlib,shutil,subprocess,sys
 root=pathlib.Path(os.environ['FPTN_PREFIX']); conf=root/'etc/fptn'; run=root/'var/run/fptn-keenetic'
 action=sys.argv[1]
-if action in ('get-settings','validate-settings'):
+if action in ('get-settings','validate-settings','get-server-policy','validate-server-policy'):
     sys.exit(subprocess.call(['sh',os.environ['FPTN_REAL_SERVICE'],action]))
 with (root/'trace').open('a') as f: f.write(action+'\\n')
 if action=='status':
@@ -183,6 +183,22 @@ else: sys.exit(2)
             subprocess.run(['sh','-n',str(path)],check=True,capture_output=True)
         if shutil.which('node'):
             subprocess.run(['node','--check',str(ROOT/'web/app.js')],check=True,capture_output=True)
+
+    def test_server_policy_roundtrip_and_no_all_excluded_configuration(self):
+        policy={'mode':'auto','favorites':[self.names[1]],'excluded':[self.names[0]]}
+        self.assertEqual(self.save(policy=policy)[0],202)
+        self.assertTrue(self.wait_worker()['ok'])
+        self.assertEqual(self.request('settings')[1]['policy'],policy)
+        self.assertEqual(self.save(policy={'mode':'auto','favorites':[],'excluded':self.names})[0],202)
+        self.assertFalse(self.wait_worker()['ok'])
+        self.assertEqual(self.request('settings')[1]['policy'],policy)
+
+    def test_manual_excluded_server_is_not_applied_and_policy_input_is_data(self):
+        self.assertEqual(self.save(policy={'mode':'manual','favorites':[],'excluded':[self.names[0]]})[0],202)
+        self.assertFalse(self.wait_worker()['ok'])
+        self.assertFalse((self.conf/'server-policy.json').exists())
+        self.assertEqual(self.save(policy={'mode':'auto; exit','favorites':[],'excluded':[]})[0],400)
+        self.assertEqual(self.save(policy={'mode':'auto','favorites':'bad','excluded':[]})[0],400)
 
 
 if __name__ == '__main__':

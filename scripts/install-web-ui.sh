@@ -49,10 +49,18 @@ CHANGED=no
 DONE=no
 KEY_CREATED=no
 ORIGIN_EXISTED=no
+CLIENT_UPDATE=no
+WAS_RUNNING=no
 finish() {
   trap '' INT TERM HUP
   if [ "$CHANGED" = yes ] && [ "$DONE" != yes ]; then
     echo 'Установка не завершилась. Восстанавливаю файлы и lighttpd.' >&2
+    if [ "$CLIENT_UPDATE" = yes ]; then
+      /opt/bin/fptnctl stop || { echo 'Клиент не остановлен; безопасный откат прерван. Файлы сохранены в резервной копии.' >&2; return 1; }
+      cp -p "$BACKUP/fptn-client-cli" /opt/libexec/fptn/fptn-client-cli.restore
+      mv /opt/libexec/fptn/fptn-client-cli.restore /opt/libexec/fptn/fptn-client-cli
+      cp -p "$BACKUP/SHA256SUMS" /opt/libexec/fptn/SHA256SUMS
+    fi
     cp -p "$BACKUP/fptnctl" /opt/bin/fptnctl.restore
     mv /opt/bin/fptnctl.restore /opt/bin/fptnctl
     rm -rf "$WEB"
@@ -63,6 +71,7 @@ finish() {
     else rm -f "$CONF/web-origin"; fi
     [ "$KEY_CREATED" = no ] || rm -f "$CONF/web-key"
     "$INIT" restart || echo 'Не удалось перезапустить lighttpd при откате; резервная копия сохранена.' >&2
+    if [ "$CLIENT_UPDATE" = yes ] && [ "$WAS_RUNNING" = yes ]; then /opt/bin/fptnctl start || true; fi
   fi
   rm -rf "$STAGE"
 }
@@ -78,17 +87,42 @@ done
 (cd "$STAGE"; sha256sum -c SHA256SUMS) || fail 'Контрольные суммы не совпали.'
 sh -n "$STAGE/web/api.cgi"
 sh -n "$STAGE/scripts/fptn-native-service.sh"
+if ! /opt/libexec/fptn/fptn-client-cli --help | grep -q -- '--keenetic-server-policy'; then
+  CLIENT_UPDATE=yes
+  mkdir -p "$STAGE/client"
+  CLIENT_BASE=https://github.com/KOPOHA-MACOHA/fptn-keenetic/releases/download/native-$REV
+  echo 'Для политики серверов нужен клиент 0.3.0. Скачиваю готовый бинарник для Hopper.'
+  curl -fL --connect-timeout 15 --max-time 180 "$CLIENT_BASE/fptn-client-cli" -o "$STAGE/client/fptn-client-cli"
+  curl -fL --connect-timeout 15 --max-time 60 "$CLIENT_BASE/SHA256SUMS" -o "$STAGE/client/SHA256SUMS.all"
+  awk '$2=="fptn-client-cli"' "$STAGE/client/SHA256SUMS.all" > "$STAGE/client/SHA256SUMS"
+  [ -s "$STAGE/client/SHA256SUMS" ] || fail 'В выпуске нет контрольной суммы клиента.'
+  (cd "$STAGE/client"; sha256sum -c SHA256SUMS) || fail 'Бинарник повреждён.'
+  chmod 700 "$STAGE/client/fptn-client-cli"
+  "$STAGE/client/fptn-client-cli" --help | grep -q -- '--keenetic-server-policy' || fail 'Бинарник не поддерживает политику серверов или не подходит платформе.'
+fi
 # Existing settings must be accepted by the updated controller before installation.
 sh "$STAGE/scripts/fptn-native-service.sh" get-settings >/dev/null
 mkdir -p "$CONF" /opt/share /opt/var/run/fptn-web
 chmod 700 "$CONF" /opt/var/run/fptn-web
 BACKUP=$(mktemp -d "$CONF/web-install-backup.XXXXXX")
 cp -p /opt/bin/fptnctl "$BACKUP/fptnctl"
+if [ "$CLIENT_UPDATE" = yes ]; then
+  cp -p /opt/libexec/fptn/fptn-client-cli "$BACKUP/fptn-client-cli"
+  cp -p /opt/libexec/fptn/SHA256SUMS "$BACKUP/SHA256SUMS"
+fi
 [ ! -e "$FRAGMENT" ] || cp -p "$FRAGMENT" "$BACKUP/95-fptn.conf"
 [ ! -d "$WEB" ] || cp -pR "$WEB" "$BACKUP/web"
 if [ -f "$CONF/web-origin" ]; then ORIGIN_EXISTED=yes; cp -p "$CONF/web-origin" "$BACKUP/web-origin"; fi
 echo "Резервная копия: $BACKUP"
 CHANGED=yes
+if [ "$CLIENT_UPDATE" = yes ]; then
+  [ ! -d /opt/var/run/fptn-keenetic ] || WAS_RUNNING=yes
+  /opt/bin/fptnctl stop
+  cp "$STAGE/client/fptn-client-cli" /opt/libexec/fptn/fptn-client-cli.new
+  chmod 700 /opt/libexec/fptn/fptn-client-cli.new
+  mv /opt/libexec/fptn/fptn-client-cli.new /opt/libexec/fptn/fptn-client-cli
+  (cd /opt/libexec/fptn; sha256sum fptn-client-cli brotli > SHA256SUMS.new; mv SHA256SUMS.new SHA256SUMS)
+fi
 mkdir -p "$WEB"
 chmod 755 "$WEB"
 cp "$STAGE/web/"* "$WEB/"
@@ -126,10 +160,12 @@ KEY=$(cat "$CONF/web-key")
 printf 'header = "Authorization: Bearer %s"\n' "$KEY" |
   curl --noproxy '*' -K - -fsS --max-time 15 "$ORIGIN/api.cgi?status" |
   jq -e '(.status|type=="string") and (.busy|type=="boolean")' >/dev/null || fail 'Авторизованный запрос к API не прошёл.'
+if [ "$CLIENT_UPDATE" = yes ] && [ "$WAS_RUNNING" = yes ]; then /opt/bin/fptnctl start || fail 'Обновлённый клиент не запустился.'; fi
 DONE=yes
 echo
 echo "Панель: $ORIGIN/"
 echo "Код доступа: $KEY"
 echo 'Это код панели, не токен VPN. Сохраните его.'
-echo 'FPTN, его токен, сервер, маршруты и DNS не переключались. Автозапуск FPTN не включался.'
-echo 'Для применения параметров используйте панель. Старый supervisor обновится при следующем запуске клиента.'
+echo 'Токен, выбранный сервер, маршруты и DNS сохранены. Автозапуск FPTN не включался.'
+if [ "$CLIENT_UPDATE" = yes ]; then echo 'Бинарник обновлён; прежнее состояние службы восстановлено.'
+else echo 'Для применения параметров используйте панель; supervisor обновится при следующем запуске.'; fi
