@@ -3,38 +3,51 @@
 set -eu
 export LC_ALL=C LANG=C
 umask 077
-SET_NAME='_NDM_OGDN_4_@domain-list9'
-for cmd in smartdns ipset ndmc timeout nslookup netstat; do
+SET_NAME="fptn_probe_4_@$$"
+for cmd in smartdns ipset timeout nslookup netstat; do
   command -v "$cmd" >/dev/null 2>&1 || { echo "Нет команды $cmd" >&2; exit 1; }
 done
 [ "$(id -u)" = 0 ] || { echo 'Нужен root.' >&2; exit 1; }
-ipset list "$SET_NAME" >/dev/null
 if netstat -lnptu 2>/dev/null | awk '$4 ~ /:15353$/ {found=1} END {exit !found}'; then
   echo 'Порт 15353 занят; тест не запускался.' >&2; exit 1
 fi
 WORK=$(mktemp -d "${TMPDIR:-/opt/tmp}/smartdns-ipset-probe.XXXXXX")
 PROBE_PID=''
-RESTORE=0
+SET_CREATED=0
 cleanup() {
   trap '' INT TERM HUP
   if [ -n "$PROBE_PID" ]; then
     kill -TERM "$PROBE_PID" 2>/dev/null || true
     wait "$PROBE_PID" 2>/dev/null || true
   fi
-  if [ "$RESTORE" = 1 ]; then
-    echo '[ПРОВЕРКА] Восстанавливаю два временных IP в штатном списке.'
-    ndmc -c 'object-group fqdn domain-list9 include 8.6.112.0/32' || true
-    ndmc -c 'object-group fqdn domain-list9 include 8.47.69.0/32' || true
+  CLEAN_FAILED=0
+  if [ "$SET_CREATED" = 1 ]; then
+    if ipset destroy "$SET_NAME"; then
+      echo "[ПРОВЕРКА] Временный набор $SET_NAME удалён."
+    else
+      echo "[ПРОВЕРКА] Не удалось удалить временный набор $SET_NAME." >&2
+      CLEAN_FAILED=1
+    fi
   fi
   for log in "$WORK/console.log" "$WORK/probe.log"; do
     [ ! -f "$log" ] || { echo '[ПРОВЕРКА] Журнал временного процесса:'; tail -n 12 "$log"; }
   done
   rm -rf "$WORK"
+  [ "$CLEAN_FAILED" = 0 ] || exit 1
 }
 trap cleanup EXIT
 trap 'exit 130' INT
 trap 'exit 143' TERM
 trap 'exit 129' HUP
+if ipset list "$SET_NAME" >/dev/null 2>&1; then
+  echo "Проверочный набор $SET_NAME уже существует; не изменяю его." >&2; exit 1
+fi
+ipset create "$SET_NAME" hash:net family inet hashsize 64 maxelem 64
+SET_CREATED=1
+ipset save "$SET_NAME" > "$WORK/before.set"
+if awk '$1=="add" {found=1} END {exit !found}' "$WORK/before.set"; then
+  echo 'Проверочный набор не пуст до запуска — результат был бы неоднозначным.' >&2; exit 1
+fi
 cat > "$WORK/probe.conf" <<EOF
 server-name fptn-ipset-probe
 bind 127.0.0.1:15353
@@ -57,14 +70,19 @@ timeout -s TERM 15 smartdns -f -c "$WORK/probe.conf" -p "$WORK/probe.pid" > "$WO
 PROBE_PID=$!
 sleep 1
 kill -0 "$PROBE_PID" 2>/dev/null || { echo 'Временный SmartDNS не запустился.' >&2; exit 1; }
-RESTORE=1
-ndmc -c 'object-group fqdn domain-list9 no include 8.6.112.0/32'
-ndmc -c 'object-group fqdn domain-list9 no include 8.47.69.0/32'
 echo '[ПРОВЕРКА] Набор до DNS-запроса:'
 ipset list "$SET_NAME"
 echo '[ПРОВЕРКА] Один запрос через временный процесс, upstream — действующий SmartDNS на :53.'
-timeout -s TERM 8 nslookup api.ipify.org 127.0.0.1:15353
+timeout -s TERM 8 nslookup api.ipify.org 127.0.0.1:15353 > "$WORK/answer"
+cat "$WORK/answer"
 echo '[ПРОВЕРКА] Набор после DNS-запроса:'
 ipset list "$SET_NAME"
-echo '[ПРОВЕРКА] Если в Members появились адреса, SmartDNS умеет наполнять этот набор.'
-echo '[ПРОВЕРКА] Основной SmartDNS и его конфигурация не менялись.'
+ipset save "$SET_NAME" > "$WORK/after.set"
+awk '/^Name:/ {answer=1} answer && /^Address/ {for(i=2;i<=NF;i++) if($i~/^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+$/) print $i}' "$WORK/answer" > "$WORK/answer.ips"
+if awk 'FILENAME==ARGV[1] {answers[$1]=1; next} $1=="add" {split($3,a,"/"); if(a[1] in answers) found=1} END {exit !found}' "$WORK/answer.ips" "$WORK/after.set"; then
+  echo '[ПРОВЕРКА] PASS: IP из DNS-ответа появился в изначально пустом проверочном наборе.'
+else
+  echo '[ПРОВЕРКА] Запись IP из DNS-ответа в проверочный набор не подтверждена.' >&2
+  exit 1
+fi
+echo '[ПРОВЕРКА] Рабочий набор Keenetic, его списки и основной SmartDNS не изменялись.'
