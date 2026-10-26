@@ -75,7 +75,12 @@ class WebOperationTest(unittest.TestCase):
     def test_concurrent_reservations_have_one_owner_and_complete_journal(self):
         env={**self.env,'FPTN_OWNER_PID':str(os.getpid())};children=[]
         for _ in range(3):children.append(subprocess.Popen(['sh',str(ROOT/'scripts/fptn-web-auth.sh'),'op-reserve'],env=env,stdin=subprocess.PIPE,stdout=subprocess.PIPE,stderr=subprocess.PIPE,text=True))
-        results=[child.communicate(json.dumps({'action':'check'}),timeout=10) for child in children]
+        for child in children:
+            child.stdin.write(json.dumps({'action':'check'}));child.stdin.close();child.stdin=None
+        try:results=[child.communicate(timeout=10) for child in children]
+        finally:
+            for child in children:
+                if child.poll() is None:child.kill();child.communicate()
         self.assertEqual(sum(c.returncode==0 for c in children),1,results)
         winner=next(json.loads(out)['id'] for c,(out,err) in zip(children,results) if c.returncode==0)
         owner=json.loads((self.run/'action/owner.json').read_text());self.assertEqual(owner['id'],winner)

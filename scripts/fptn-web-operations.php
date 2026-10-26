@@ -1,6 +1,8 @@
 <?php
 // Included by the private PHP helper, never directly served by lighttpd.
 $directory = $run . '/action';
+// Never hold the operation mutex while waiting for a caller to finish stdin.
+$pendingRequest=$action==='op-reserve' ? json_decode((string)file_get_contents('php://stdin',false,null,0,300001),true) : null;
 if (!is_dir($run)) mkdir($run, 0700, true);
 $mutex = fopen($run . '/operation.lock', 'c');
 if (!$mutex || !flock($mutex, LOCK_EX)) failAuth('Не удалось проверить операцию.');
@@ -61,7 +63,7 @@ if ($action === 'op-own') {
 }
 if ($action === 'op-reserve') {
     if (is_dir($directory)) failAuth('Дождитесь операции или восстановите управление в панели.');
-    $body=json_decode((string)file_get_contents('php://stdin',false,null,0,300001),true);
+    $body=$pendingRequest;
     $name=$body['action']??'';
     if (!in_array($name,['start','stop','restart','save','check','enable','disable','update'],true)) failAuth('Некорректная операция.');
     $id=bin2hex(random_bytes(16));$prepared=$run.'/reserve-'.$id;
