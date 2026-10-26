@@ -259,10 +259,6 @@ else: sys.exit(2)
         self.assertIn('data-ui-version="0.10.0"',page)
         self.assertIn('app.js?v=0.10.0',page)
 
-
-if __name__ == '__main__':
-    unittest.main()
-
     def test_failed_save_restores_previous_actual_firmware_mtu(self):
         old=self.settings();(self.conf/'connection.json').write_text(json.dumps(old))
         self.client_run.mkdir();(self.root/'interface-mtu').write_text('1440')
@@ -271,3 +267,7 @@ if __name__ == '__main__':
         self.assertEqual((self.root/'interface-mtu').read_text(),'1440')
         self.assertEqual(json.loads((self.conf/'connection.json').read_text()),old)
         self.assertTrue(self.client_run.exists())
+
+
+if __name__ == '__main__':
+    unittest.main()
