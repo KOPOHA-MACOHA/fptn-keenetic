@@ -41,6 +41,7 @@ decode_token() {
 
 restore_saved_settings() {
   "$CTL" stop >> "$LOCK/output" 2>&1 || return 1
+  if [ -f "$LOCK/old-interface-mtu" ]; then "$CTL" set-interface-mtu "$(cat "$LOCK/old-interface-mtu")" >> "$LOCK/output" 2>&1 || return 1; fi
   for key in token server connection.json server-policy.json fallback.json; do
     if [ -f "$LOCK/old-$key" ]; then cp -p "$LOCK/old-$key" "$CONF/$key" || return 1
     else rm -f "$CONF/$key" || return 1; fi
@@ -126,6 +127,9 @@ worker() {
       # Existing CLI status is informational; inspect its owned runtime record too.
       if [ -d "$ROOT/var/run/fptn-keenetic" ]; then was_running=yes; fi
       printf '%s\n' "$was_running" > "$LOCK/was-running"
+      if jq -e '.mtu>0' "$LOCK/new-connection.json" >/dev/null; then
+        "$CTL" get-interface-mtu > "$LOCK/old-interface-mtu" || exit 1
+      fi
       : > "$LOCK/rollback-needed"
       rollback=yes
       "$CTL" stop >> "$LOCK/output" 2>&1
@@ -164,7 +168,7 @@ ORIGIN=$(cat "$CONF/web-origin")
 [ -z "${HTTP_ORIGIN:-}" ] || [ "$HTTP_ORIGIN" = "$ORIGIN" ] || error '403 Forbidden' 'Запрос с другого сайта запрещён.'
 if [ "${QUERY_STRING:-}" = auth-info ] && [ "${REQUEST_METHOD:-}" = GET ]; then
   INFO=$(sh "$LIB/web-auth.sh" info) || error '503 Service Unavailable' 'Не удалось проверить настройки входа.'
-  respond '200 OK' "$(printf '%s' "$INFO" | jq '. + {uiVersion:"0.9.0"}')"
+  respond '200 OK' "$(printf '%s' "$INFO" | jq '. + {uiVersion:"0.10.0"}')"
 fi
 case "${QUERY_STRING:-}:${REQUEST_METHOD:-}" in login:POST|setup:POST)
   [ "${CONTENT_TYPE:-}" = application/json ] || error '415 Unsupported Media Type' 'Ожидается JSON.'
@@ -230,7 +234,7 @@ case "${REQUEST_METHOD:-}" in
         RESULT='null'; [ ! -r "$RUN/result.json" ] || RESULT=$(cat "$RUN/result.json")
         respond '200 OK' "$(jq -n --arg status "$TEXT" --arg rss "${RSS:-0}" --arg operation "$OPERATION" \
           --argjson operationState "$OP_STATE" --argjson autostart "$AUTOSTART" --argjson service "$SERVICE" --argjson report "$REPORT" --argjson meta "$META" --argjson busy "$BUSY" --argjson result "$RESULT" \
-          '{operationState:$operationState,autostart:$autostart,status:$status,service:$service,report:$report,uiVersion:"0.9.0",clientVersion:($meta.clientVersion // "неизвестна"),revision:($meta.revision // ""),operation:$operation,rssKiB:($rss|tonumber),busy:$busy,result:$result}')"
+          '{operationState:$operationState,autostart:$autostart,status:$status,service:$service,report:$report,uiVersion:"0.10.0",clientVersion:($meta.clientVersion // "неизвестна"),revision:($meta.revision // ""),operation:$operation,rssKiB:($rss|tonumber),busy:$busy,result:$result}')"
         ;;
       updates)
         UPDATE=$(sh "$LIB/web-update.sh" status) || error '500 Internal Server Error' 'Не удалось прочитать обновление.'

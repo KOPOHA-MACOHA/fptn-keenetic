@@ -61,6 +61,8 @@ root=pathlib.Path(os.environ['FPTN_PREFIX']); conf=root/'etc/fptn'; run=root/'va
 action=sys.argv[1]
 if action in ('get-settings','validate-settings','get-server-policy','validate-server-policy','get-fallback','validate-fallback'):
     sys.exit(subprocess.call(['sh',os.environ['FPTN_REAL_SERVICE'],action]))
+if action=='get-interface-mtu':print((root/'interface-mtu').read_text() if (root/'interface-mtu').exists() else '1420');sys.exit(0)
+if action=='set-interface-mtu':(root/'interface-mtu').write_text(sys.argv[2]);sys.exit(0)
 if action=='status-json':
     live=run.exists();print(json.dumps({'state':'running' if live else 'stopped','message':'Туннель подключён' if live else 'Служба остановлена','selectedServer':'CZ' if live else '', 'connected':live,'supervisorAlive':live,'clientAlive':live,'canStart':not live,'canStop':live,'canRestart':live}));sys.exit(0)
 with (root/'trace').open('a') as f: f.write(action+'\\n')
@@ -71,6 +73,7 @@ elif action=='stop':
 elif action=='start':
     assert signal.getsignal(signal.SIGTERM)!=signal.SIG_IGN, 'restarted client inherited ignored TERM'
     settings=json.loads((conf/'connection.json').read_text()) if (conf/'connection.json').exists() else {}
+    if settings.get('mtu',0)>0:(root/'interface-mtu').write_text(str(settings['mtu']))
     if settings.get('sni')=='fails.example':
         print('Подключение не удалось');sys.exit(1)
     run.mkdir(parents=True,exist_ok=True); print('READY')
@@ -107,7 +110,7 @@ else: sys.exit(2)
         return json.loads((self.run/'result.json').read_text())
 
     def settings(self, **overrides):
-        return {'bypass': 'obfuscation', 'strategy': 'dual-rolling-tunnel', 'sni': 'google.com', **overrides}
+        return {'bypass': 'obfuscation', 'strategy': 'dual-rolling-tunnel', 'sni': 'google.com', 'mtu':0, 'outInterface':'', **overrides}
 
     def save(self, **overrides):
         return self.request(body={'action': 'save', 'server': self.names[0],
@@ -232,7 +235,7 @@ else: sys.exit(2)
     def test_status_exposes_explicit_state_and_versions(self):
         (self.conf/'web-meta.json').write_text(json.dumps({'clientVersion':'0.4.0','revision':'abc'}))
         status,data=self.request()
-        self.assertEqual(status,200);self.assertEqual(data['uiVersion'],'0.9.0')
+        self.assertEqual(status,200);self.assertEqual(data['uiVersion'],'0.10.0')
         self.assertEqual(data['clientVersion'],'0.4.0')
         self.assertTrue(data['service']['canStart']);self.assertFalse(data['service']['canStop'])
         self.client_run.mkdir()
@@ -253,9 +256,18 @@ else: sys.exit(2)
     def test_entry_page_is_not_cached_and_assets_are_versioned(self):
         page=subprocess.run(['sh',str(ROOT/'web/index.cgi')],capture_output=True,check=True).stdout.decode()
         self.assertIn('Cache-Control: no-store',page)
-        self.assertIn('data-ui-version="0.9.0"',page)
-        self.assertIn('app.js?v=0.9.0',page)
+        self.assertIn('data-ui-version="0.10.0"',page)
+        self.assertIn('app.js?v=0.10.0',page)
 
 
 if __name__ == '__main__':
     unittest.main()
+
+    def test_failed_save_restores_previous_actual_firmware_mtu(self):
+        old=self.settings();(self.conf/'connection.json').write_text(json.dumps(old))
+        self.client_run.mkdir();(self.root/'interface-mtu').write_text('1440')
+        self.assertEqual(self.save(connection=self.settings(mtu=1300,sni='fails.example'))[0],202)
+        self.assertFalse(self.wait_worker()['ok'])
+        self.assertEqual((self.root/'interface-mtu').read_text(),'1440')
+        self.assertEqual(json.loads((self.conf/'connection.json').read_text()),old)
+        self.assertTrue(self.client_run.exists())

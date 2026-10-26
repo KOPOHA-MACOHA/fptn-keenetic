@@ -70,6 +70,12 @@ validate_connection() {
   BYPASS=$(printf '%s' "$SETTINGS" | jq -r '.bypass')
   STRATEGY=$(printf '%s' "$SETTINGS" | jq -r '.strategy')
   SNI=$(printf '%s' "$SETTINGS" | jq -r '.sni')
+  MTU=$(printf '%s' "$SETTINGS" | jq -r '.mtu // 0')
+  OUT_IFACE=$(printf '%s' "$SETTINGS" | jq -r '.outInterface // ""')
+  printf '%s' "$SETTINGS" | jq -e '(if has("mtu") then .mtu else 0 end) as $mtu | (if has("outInterface") then .outInterface else "" end) as $iface |
+    ($mtu|type=="number" and floor==. and (.==0 or (.>=576 and .<=65535))) and
+    ($iface|type=="string" and length<=15 and all(explode[]; (.>=48 and .<=57) or (.>=65 and .<=90) or (.>=97 and .<=122) or .==45 or .==46 or .==95))' >/dev/null || fail 'Проверьте MTU и имя исходящего интерфейса.'
+  case "$OUT_IFACE" in -*) fail 'Неверное имя интерфейса.' ;; opkgtun0) fail 'Сам туннель FPTN не может быть исходящим интерфейсом.' ;; esac
   case "$BYPASS" in
     obfuscation|sni-spoofing-chrome-149|sni-spoofing-chrome-148|sni-spoofing-chrome-147|sni-spoofing-chrome-146|sni-spoofing-chrome-145|sni-spoofing-firefox-151|sni-spoofing-firefox-150|sni-spoofing-firefox-149|sni-spoofing-yandex-26-4|sni-spoofing-yandex-26-3|sni-spoofing-yandex-25|sni-spoofing-yandex-24|sni-spoofing-safari-26-5|sni-spoofing-safari-26-4) ;;
     *) fail 'Неизвестный метод обхода.' ;;
@@ -81,12 +87,12 @@ validate_connection() {
     {n=split($0,a,"."); if(n<2) exit 1
      for(i=1;i<=n;i++) if(length(a[i])<1 || length(a[i])>63 || a[i] ~ /^-|-$/) exit 1}
   ' || fail 'Укажите корректный домен SNI латиницей.'
-  jq -n --arg bypass "$BYPASS" --arg strategy "$STRATEGY" --arg sni "$SNI" \
-    '{bypass:$bypass,strategy:$strategy,sni:$sni}'
+  jq -n --arg bypass "$BYPASS" --arg strategy "$STRATEGY" --arg sni "$SNI" --argjson mtu "$MTU" --arg outInterface "$OUT_IFACE" \
+    '{bypass:$bypass,strategy:$strategy,sni:$sni,mtu:$mtu,outInterface:$outInterface}'
 }
 connection_json() {
   if [ -f "$CONF/connection.json" ]; then validate_connection < "$CONF/connection.json"
-  else printf '%s\n' '{"bypass":"obfuscation","strategy":"dual-rolling-tunnel","sni":"google.com"}'
+  else printf '%s\n' '{"bypass":"obfuscation","strategy":"dual-rolling-tunnel","sni":"google.com","mtu":0,"outInterface":""}'
   fi
 }
 load_connection() {
@@ -94,7 +100,36 @@ load_connection() {
   BYPASS=$(printf '%s' "$SETTINGS" | jq -r '.bypass')
   STRATEGY=$(printf '%s' "$SETTINGS" | jq -r '.strategy')
   SNI=$(printf '%s' "$SETTINGS" | jq -r '.sni')
+  MTU=$(printf '%s' "$SETTINGS" | jq -r '.mtu // 0')
+  OUT_IFACE=$(printf '%s' "$SETTINGS" | jq -r '.outInterface // ""')
 }
+interface_mtu() {
+  VALUE=$(ip -o link show dev opkgtun0 | awk '{for(i=1;i<NF;i++) if($i=="mtu") {print $(i+1); exit}}')
+  case "$VALUE" in ''|*[!0-9]*) echo 'Не удалось прочитать MTU OpkgTun0.' >&2; return 1 ;; esac
+  [ "$VALUE" -ge 576 ] && [ "$VALUE" -le 65535 ] || return 1
+  printf '%s\n' "$VALUE"
+}
+set_native_mtu() {
+  case "${1:-}" in ''|*[!0-9]*) return 1 ;; esac
+  [ "${#1}" -le 5 ] && [ "$1" -ge 576 ] && [ "$1" -le 65535 ] || return 1
+  [ -f "$CONF/native-interface" ] && [ "$(cat "$CONF/native-interface")" = OpkgTun0 ] || { echo 'OpkgTun0 не принадлежит FPTN.' >&2; return 1; }
+  CURRENT_MTU=$(interface_mtu) || return 1
+  [ "$CURRENT_MTU" != "$1" ] || return 0
+  # Change only this owned interface's MTU through the firmware API.
+  ndmc -c "interface OpkgTun0 ip mtu $1" || return 1
+  [ "$(interface_mtu)" = "$1" ] || { echo 'Keenetic не применил MTU.' >&2; return 1; }
+}
+resolve_uplink() {
+  if [ -n "$OUT_IFACE" ]; then
+    ip link show dev "$OUT_IFACE" >/dev/null 2>&1 || { echo "Нет исходящего интерфейса $OUT_IFACE." >&2; return 1; }
+    ROUTE=$(ip -4 route show table main default dev "$OUT_IFACE")
+  else ROUTE=$(ip -4 route show table main default); fi
+  GW=$(printf '%s\n' "$ROUTE" | awk '$1=="default" && $2=="via" {print $3; exit}')
+  IFACE=$(printf '%s\n' "$ROUTE" | awk '$1=="default" {for(i=1;i<NF;i++) if($i=="dev") {print $(i+1); exit}}')
+  [ -z "$OUT_IFACE" ] || [ "$IFACE" = "$OUT_IFACE" ] || { echo 'Нет подходящего default route выбранного интерфейса в main.' >&2; return 1; }
+  [ -n "$GW" ] && [ -n "$IFACE" ] || { echo 'Не найден IPv4-шлюз исходящего интерфейса.' >&2; return 1; }
+}
+
 validate_server_policy() {
   POLICY=$(head -c 65537)
   [ "${#POLICY}" -le 65536 ] || fail 'Слишком большой список серверов.'
@@ -380,24 +415,21 @@ attempt_service() {
   ATTEMPT_SELECTED=; ATTEMPT_READY=no; ATTEMPT_STABLE=no
   load_connection
   # Re-read the uplink on every attempt: DHCP/failover can change it.
-  GW=$(ip -4 route show table main default | awk '$1=="default" && $2=="via" {print $3; exit}')
-  IFACE=$(ip -4 route show table main default | awk '$1=="default" {for(i=1;i<NF;i++) if($i=="dev") {print $(i+1); exit}}')
-  if [ -z "$GW" ] || [ -z "$IFACE" ]; then
-    echo 'FPTN: не найден обычный шлюз.'
-    return 0
-  fi
+  resolve_uplink || return 0
+  if [ "$MTU" -eq 0 ]; then MTU=$(interface_mtu) || return 0
+  else set_native_mtu "$MTU" || return 0; fi
   if [ "$USE_PLAN" = yes ]; then
     BYPASS=$(jq -r .connection.bypass "$RUN/attempt.json")
     SNI=$(jq -r .connection.sni "$RUN/attempt.json")
   fi
-  jq -n --arg bypass "$BYPASS" --arg sni "$SNI" --arg strategy "$STRATEGY" --argjson automatic "$([ "$USE_PLAN" = yes ] && echo true || echo false)" '{bypass:$bypass,sni:$sni,strategy:$strategy,automatic:$automatic}' > "$RUN/effective-connection.new"
+  jq -n --arg bypass "$BYPASS" --arg sni "$SNI" --arg strategy "$STRATEGY" --argjson mtu "$MTU" --arg outInterface "$IFACE" --argjson automatic "$([ "$USE_PLAN" = yes ] && echo true || echo false)" '{bypass:$bypass,sni:$sni,strategy:$strategy,mtu:$mtu,outInterface:$outInterface,automatic:$automatic}' > "$RUN/effective-connection.new"
   mv "$RUN/effective-connection.new" "$RUN/effective-connection.json"
   rm -f "$RUN/server-checks.json"
   TOKEN=$(cat "$CONF/token"); SERVER=$(cat "$CONF/server")
   set -- --keenetic-connect --keenetic-native \
     --access-token "$TOKEN" --preferred-server "$SERVER" \
     --out-network-interface "$IFACE" --gateway-ip "$GW" \
-    --tun-interface-name opkgtun0 --tun-interface-ip 10.0.0.1 --mtu-size 1420 \
+    --tun-interface-name opkgtun0 --tun-interface-ip 10.0.0.1 --mtu-size "$MTU" \
     --sni "$SNI" --bypass-method "$BYPASS" --connection-strategy "$STRATEGY" \
     --enable-split-tunnel false --enable-ad-block false --blacklist-domains ''
   READY_TIMEOUT=60
@@ -541,9 +573,7 @@ check_servers() (
   trap 'exit 1' INT TERM HUP
   server_policy_json > "$CHECK_TMP/policy.json"
   TOKEN=$(cat "$CONF/token")
-  GW=$(ip -4 route show table main default | awk '$1=="default" && $2=="via" {print $3; exit}')
-  IFACE=$(ip -4 route show table main default | awk '$1=="default" {for(i=1;i<NF;i++) if($i=="dev") {print $(i+1); exit}}')
-  [ -n "$GW" ] && [ -n "$IFACE" ] || fail 'Не найден обычный шлюз.'
+  resolve_uplink || fail 'Не удалось выбрать исходящий интерфейс.'
   nice -n 10 timeout -s TERM 600 "$LIB/fptn-client-cli" --keenetic-connect --keenetic-native \
     --keenetic-probe-only --keenetic-probe-report "$CHECK_RUN/server-checks.json" \
     --keenetic-server-policy "$CHECK_TMP/policy.json" --access-token "$TOKEN" \
@@ -646,6 +676,8 @@ case "${1:-}" in
   validate-fallback) sh "$LIB/web-auth.sh" transport-validate ;;
   get-settings) connection_json ;;
   validate-settings) validate_connection ;;
+  get-interface-mtu) interface_mtu ;;
+  set-interface-mtu) [ ! -d "$RUN" ] || fail 'Сначала остановите FPTN.'; set_native_mtu "${2:-}" ;;
   get-server-policy) server_policy_json ;;
   validate-server-policy) validate_server_policy ;;
   status-json) status_json ;;

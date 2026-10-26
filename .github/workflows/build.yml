@@ -19,6 +19,7 @@ on:
       - 'tests/test_transport_plan.py'
       - 'tests/test_web*.py'
       - 'tests/test_native_service.py'
+      - 'tests/test_native_transport_options.py'
       - 'tests/test_lighttpd_entry.py'
       - '.github/workflows/check-runtime.yml'
       - '.github/workflows/check-upstream.yml'

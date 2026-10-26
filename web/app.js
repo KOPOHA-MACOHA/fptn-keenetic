@@ -1,5 +1,5 @@
 'use strict';
-const UI_VERSION = '0.9.0';
+const UI_VERSION = '0.10.0';
 const $ = id => document.getElementById(id);
 if (window.top !== window.self) { document.documentElement.replaceChildren(); throw new Error('Panel cannot be framed'); }
 const profiles = {yandex:['26-4','26-3','25','24'],chrome:['149','148','147','146','145'],firefox:['151','150','149'],safari:['26-5','26-4']};
@@ -19,7 +19,7 @@ async function api(query,body){
   if(response.status===401){loggedOut();throw new Error(data.error||'Войдите по логину и паролю.');}
   if(!response.ok)throw new Error(data.error||'Ошибка запроса');return data;
 }
-function collectSettings(){return {server:$('server').value,token:$('token').value.trim(),connection:{strategy:$('strategy').value,bypass:$('mode').value==='obfuscation'?'obfuscation':$('profile').value,sni:$('sni').value.trim()||'google.com'},fallback:$('fallback-enabled').checked?{enabled:$('fallback-enabled').checked,profiles:fallbackProfiles.filter(id=>$(id).checked).map(id=>$(id).value),domains:$('fallback-domains').value.split(/\r?\n/).map(s=>s.trim()).filter(Boolean),budget:Number($('fallback-budget').value)}:{...savedFallback,enabled:false},policy:{mode:$('selection-mode').value,favorites:[...favorites].sort(),excluded:[...excluded].sort()}};}
+function collectSettings(){return {server:$('server').value,token:$('token').value.trim(),connection:{mtu:Number($('mtu').value||0),outInterface:$('out-interface').value.trim(),strategy:$('strategy').value,bypass:$('mode').value==='obfuscation'?'obfuscation':$('profile').value,sni:$('sni').value.trim()||'google.com'},fallback:$('fallback-enabled').checked?{enabled:$('fallback-enabled').checked,profiles:fallbackProfiles.filter(id=>$(id).checked).map(id=>$(id).value),domains:$('fallback-domains').value.split(/\r?\n/).map(s=>s.trim()).filter(Boolean),budget:Number($('fallback-budget').value)}:{...savedFallback,enabled:false},policy:{mode:$('selection-mode').value,favorites:[...favorites].sort(),excluded:[...excluded].sort()}};}
 function updateDirty(){
   dirty=loaded&&JSON.stringify(collectSettings())!==savedSnapshot;
   $('unsaved').hidden=!dirty;
@@ -81,6 +81,7 @@ function fillProfiles(selected){const browser=$('browser').value;$('profile').re
 function showSni(){$('sni-fields').hidden=$('mode').value!=='sni';}
 async function loadSettings(){
   const data=await api('settings');const policy=data.policy||{mode:'manual',favorites:[],excluded:[]};favorites=new Set(policy.favorites);excluded=new Set(policy.excluded);$('selection-mode').value=policy.mode;fillServers(data.servers,data.server);
+  $('mtu').value=String(data.connection.mtu??0);$('out-interface').value=data.connection.outInterface||'';
   $('strategy').value=data.connection.strategy;const bypass=data.connection.bypass;$('mode').value=bypass==='obfuscation'?'obfuscation':'sni';if(bypass!=='obfuscation')$('browser').value=bypass.split('-')[2];fillProfiles(bypass);$('sni').value=data.connection.sni;showSni();const fallback=data.fallback||{enabled:false,profiles:['sni-spoofing-chrome-149','sni-spoofing-firefox-151'],domains:[],budget:60};savedFallback=JSON.parse(JSON.stringify(fallback));$('fallback-enabled').checked=fallback.enabled;for(const id of fallbackProfiles)$(id).checked=fallback.profiles.includes($(id).value);$('fallback-domains').value=(fallback.domains.length?fallback.domains:[data.connection.sni]).join('\n');$('fallback-budget').value=String(fallback.budget);$('fallback-fields').hidden=!fallback.enabled;previewToken='';$('token').value='';loaded=true;savedSnapshot=JSON.stringify(collectSettings());updateDirty();
 }
 function applyStatus(data){
@@ -95,7 +96,7 @@ function applyStatus(data){
   const titles={stopped:'Служба остановлена',starting:'Запускаем службу',selecting:'Выбираем сервер',retrying:'Ожидаем повторного подключения',reconnecting:'Восстанавливаем соединение',stale:'Служба требует восстановления'};
   $('status-title').textContent=service.state==='running'?(service.connected?'Туннель подключён':'Клиент запущен'):titles[service.state]||'Состояние неизвестно';
   $('indicator').className='dot'+(service.connected?' active':['starting','selecting','retrying','reconnecting'].includes(service.state)?' busy':'');
-  const effective=service.effectiveConnection;$('effective-connection').textContent=effective?(service.state==='running'?'Используется: ':'Попытка: ')+(effective.bypass==='obfuscation'?'маскировка трафика':effective.bypass.replace('sni-spoofing-','')+' · SNI '+effective.sni):'Параметры активного подключения появятся после переподключения.';
+  const effective=service.effectiveConnection;$('effective-connection').textContent=effective?(service.state==='running'?'Используется: ':'Попытка: ')+(effective.bypass==='obfuscation'?'маскировка трафика':effective.bypass.replace('sni-spoofing-','')+' · SNI '+effective.sni)+(effective.mtu?' · MTU '+effective.mtu:'')+(effective.outInterface?' · '+effective.outInterface:''):'Параметры активного подключения появятся после переподключения.';
   $('status-message').textContent=service.message;$('status-text').textContent=data.status;
   $('active-server').textContent=service.selectedServer||'Нет активного сервера';
   $('memory').textContent=data.rssKiB?'ОЗУ '+(data.rssKiB/1024).toFixed(1)+' МиБ':'';
@@ -176,8 +177,8 @@ $('login-form').addEventListener('submit',async event=>{event.preventDefault();
 $('logout').addEventListener('click',async()=>{try{await api('logout',{});}catch(error){notice(error.message,true);}finally{loggedOut();}});
 $('reload-ui').addEventListener('click',()=>{window.location.href='/?v='+Date.now();});
 $('browser').addEventListener('change',()=>{fillProfiles();updateDirty();});$('mode').addEventListener('change',()=>{showSni();updateDirty();});$('selection-mode').addEventListener('change',()=>{showSelection();updateDirty();});
-for(const id of ['server','strategy','profile','sni','token'])$(id).addEventListener('input',updateDirty);
-for(const id of ['server','strategy','profile','sni'])$(id).addEventListener('change',updateDirty);
+for(const id of ['server','strategy','profile','sni','token','mtu','out-interface'])$(id).addEventListener('input',updateDirty);
+for(const id of ['server','strategy','profile','sni','mtu','out-interface'])$(id).addEventListener('change',updateDirty);
 $('fallback-enabled').addEventListener('change',()=>{$('fallback-fields').hidden=!$('fallback-enabled').checked;updateDirty();});
 for(const id of fallbackProfiles)$(id).addEventListener('change',()=>{if(fallbackProfiles.filter(name=>$(name).checked).length>2){$(id).checked=false;notice('Можно выбрать до двух запасных профилей.',true);}updateDirty();});
 for(const id of ['fallback-domains','fallback-budget'])$(id).addEventListener('change',updateDirty);

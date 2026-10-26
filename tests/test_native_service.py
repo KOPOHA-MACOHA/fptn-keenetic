@@ -125,6 +125,7 @@ int main(int argc,char**argv){
         for key,value in {'token':'secret-token','server':'CZ','native-interface':'OpkgTun0','native-setup-complete':''}.items():
             (conf/key).write_text(value+'\n')
         mock=(self.bin/'ip').read_text()
+        mock=mock.replace("    if 'link' in a:\n", "    if 'link' in a and 'opkgtun0' in a: done(output='52: opkgtun0: <UP> mtu '+str(s.get('mtu',1420))+' qdisc fq_codel\\n')\n    if 'link' in a:\n",1)
         mock=mock.replace("    if a[1:3]==['route','show']:","    if a[1:3]==['route','show'] and '30091' in a:",1)
         mock=mock.replace("    mutation()\n    if a[1]=='rule':", "    if a[1:3]==['route','show']: done(output='default via 100.64.0.2 dev eth2.2\\n')\n    mutation()\n    if a[1]=='rule':")
         (self.bin/'ip').write_text(mock)
