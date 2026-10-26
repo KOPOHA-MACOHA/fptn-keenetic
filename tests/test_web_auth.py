@@ -34,7 +34,7 @@ class WebAuthTest(unittest.TestCase):
 
     def cgi(self,query,body=None,**headers):
         encoded=json.dumps(body).encode() if body is not None else b''
-        env={**self.env,'HTTP_HOST':'192.168.1.1:1111','REQUEST_METHOD':'POST' if body is not None else 'GET','QUERY_STRING':query,'CONTENT_TYPE':'application/json','CONTENT_LENGTH':str(len(encoded)),'SCRIPT_FILENAME':str(ROOT/'web/api.cgi'),**headers}
+        env={**self.env,'HTTP_HOST':'192.168.1.1:1111','REQUEST_METHOD':'POST' if body is not None else 'GET','QUERY_STRING':query,'CONTENT_TYPE':'application/json','CONTENT_LENGTH':str(len(encoded)),'SCRIPT_FILENAME':str(ROOT/'web/api.cgi'),'SERVER_SOFTWARE':'lighttpd','SERVER_NAME':'192.168.1.1','GATEWAY_INTERFACE':'CGI/1.1',**headers}
         result=subprocess.run(['sh',str(ROOT/'web/api.cgi')],env=env,input=encoded,capture_output=True,timeout=15)
         self.assertEqual(result.returncode,0,result.stderr.decode())
         header,data=result.stdout.decode().split('\r\n\r\n',1)

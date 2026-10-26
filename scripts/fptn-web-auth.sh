@@ -20,7 +20,10 @@ FILE=$DIR/web-auth.php
 [ -f "$DIR/fptn-web-auth.php" ] && FILE=$DIR/fptn-web-auth.php
 # -n isolates this helper from unrelated PHP extensions/auto-prepend settings.
 # The helper is outside the document root and accepts data only on stdin.
-FPTN_PREFIX=$ROOT FPTN_AUTH_ACTION=$ACTION REQUEST_METHOD= REDIRECT_STATUS=200 \
-  SCRIPT_FILENAME=$FILE SCRIPT_NAME= QUERY_STRING= CONTENT_LENGTH= CONTENT_TYPE= \
-  PATH_TRANSLATED= GATEWAY_INTERFACE= HTTP_AUTHORIZATION= \
+# Empty CGI variables still enable PHP's CGI mode and make it ignore -q/-f.
+# Remove them in this child only so php-cgi actually parses command-line flags.
+unset SERVER_SOFTWARE SERVER_NAME GATEWAY_INTERFACE REQUEST_METHOD
+unset SCRIPT_FILENAME SCRIPT_NAME QUERY_STRING CONTENT_LENGTH CONTENT_TYPE
+unset PATH_TRANSLATED REDIRECT_STATUS HTTP_AUTHORIZATION FCGI_ROLE
+FPTN_PREFIX=$ROOT FPTN_AUTH_ACTION=$ACTION \
   "$PHP" -n -q -d cgi.force_redirect=0 -d display_errors=stderr -d log_errors=0 -f "$FILE"
