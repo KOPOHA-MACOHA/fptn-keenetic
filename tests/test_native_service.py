@@ -102,6 +102,16 @@ int main(int argc,char**argv){
  if(record){FILE *f=fopen(record,"w");if(!f)return 4;for(int i=1;i<argc;i++)fprintf(f,"%s\n",argv[i]);fclose(f);}
  signal(SIGTERM,stop);
  puts("KEENETIC_SELECTED: CZ");fflush(stdout);
+ char *trace=getenv("FPTN_MOCK_TRANSPORT_TRACE");char *method="",*sni="";
+ for(int i=1;i+1<argc;i++){if(!strcmp(argv[i],"--bypass-method"))method=argv[i+1];if(!strcmp(argv[i],"--sni"))sni=argv[i+1];}
+ if(trace){FILE*f=fopen(trace,"a");if(f){fprintf(f,"%s %s\n",method,sni);fclose(f);}}
+ char *required=getenv("FPTN_MOCK_REQUIRED_BYPASS");
+ if(getenv("FPTN_MOCK_AUTH_DENIED")){
+  for(int i=1;i+1<argc;i++)if(!strcmp(argv[i],"--keenetic-probe-report")){FILE*f=fopen(argv[i+1],"w");if(f){fputs("{\"complete\":true,\"results\":[{\"name\":\"CZ\",\"code\":401,\"ok\":false}]}",f);fclose(f);}}
+  return 6;
+ }
+ if(getenv("FPTN_MOCK_ALWAYS_FAIL") || (required && strcmp(required,method)))return 6;
+
  char *fail_once=getenv("FPTN_MOCK_FAIL_ONCE");
  if(fail_once && !access(fail_once,F_OK)){unlink(fail_once);return 5;}
  char *suppress=getenv("FPTN_MOCK_SUPPRESS_READY");

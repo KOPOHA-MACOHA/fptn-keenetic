@@ -57,6 +57,7 @@ DONE=no
 AUTH_HELPER_EXISTED=no
 AUTH_PHP_EXISTED=no
 OPS_EXISTED=no
+TRANSPORT_EXISTED=no
 ORIGIN_EXISTED=no
 META_EXISTED=no
 CLIENT_UPDATE=no
@@ -98,6 +99,8 @@ finish() {
     else rm -f /opt/libexec/fptn/web-auth.php; fi
     if [ "$OPS_EXISTED" = yes ]; then cp -p "$BACKUP/web-operations.php" /opt/libexec/fptn/web-operations.php
     else rm -f /opt/libexec/fptn/web-operations.php; fi
+    if [ "$TRANSPORT_EXISTED" = yes ]; then cp -p "$BACKUP/transport-plan.php" /opt/libexec/fptn/transport-plan.php
+    else rm -f /opt/libexec/fptn/transport-plan.php; fi
     FPTN_OPERATION_ID= "$INIT" restart || echo 'Не удалось перезапустить lighttpd при откате; резервная копия сохранена.' >&2
     if [ "$SERVICE_STOPPED" = yes ] && [ "$WAS_RUNNING" = yes ]; then /opt/bin/fptnctl start || true; fi
     fi
@@ -111,7 +114,7 @@ BASE=https://raw.githubusercontent.com/KOPOHA-MACOHA/fptn-keenetic/$REV
 echo 'Скачиваю панель и управляющий скрипт. Сборка зависимостей не требуется.'
 mkdir -p "$STAGE/web" "$STAGE/scripts"
 curl -fL --connect-timeout 15 --max-time 60 "$BASE/web/SHA256SUMS" -o "$STAGE/SHA256SUMS"
-for path in web/index.html web/index.cgi web/style.css web/app.js web/api.cgi scripts/fptn-native-service.sh scripts/fptn-web-auth.sh scripts/fptn-web-auth.php scripts/fptn-web-operations.php; do
+for path in web/index.html web/index.cgi web/style.css web/app.js web/api.cgi scripts/fptn-native-service.sh scripts/fptn-web-auth.sh scripts/fptn-web-auth.php scripts/fptn-web-operations.php scripts/fptn-transport-plan.php; do
   curl -fL --connect-timeout 15 --max-time 60 "$BASE/$path" -o "$STAGE/$path"
 done
 (cd "$STAGE"; sha256sum -c SHA256SUMS) || fail 'Контрольные суммы не совпали.'
@@ -122,7 +125,7 @@ sh -n "$STAGE/web/api.cgi"
 sh -n "$STAGE/web/index.cgi"
 # Exercise the real entry file before any installed file or process is changed.
 sh "$STAGE/web/index.cgi" > "$STAGE/entry-check" || fail 'Стартовый CGI не смог прочитать страницу. Установленные файлы не менялись.'
-grep -Fq 'data-ui-version="0.7.0"' "$STAGE/entry-check" || fail 'Стартовый CGI не выдал HTML панели. Установленные файлы не менялись.' 
+grep -Fq 'data-ui-version="0.8.0"' "$STAGE/entry-check" || fail 'Стартовый CGI не выдал HTML панели. Установленные файлы не менялись.' 
 sh -n "$STAGE/scripts/fptn-native-service.sh"
 CLIENT_INTEGRITY=no
 if (cd /opt/libexec/fptn; awk '$2=="fptn-client-cli"' SHA256SUMS | sha256sum -c - >/dev/null 2>&1); then CLIENT_INTEGRITY=yes; fi
@@ -148,6 +151,7 @@ cp -p /opt/bin/fptnctl "$BACKUP/fptnctl"
 if [ -f /opt/libexec/fptn/web-auth.sh ]; then AUTH_HELPER_EXISTED=yes; cp -p /opt/libexec/fptn/web-auth.sh "$BACKUP/web-auth.sh"; fi
 if [ -f /opt/libexec/fptn/web-auth.php ]; then AUTH_PHP_EXISTED=yes; cp -p /opt/libexec/fptn/web-auth.php "$BACKUP/web-auth.php"; fi
 if [ -f /opt/libexec/fptn/web-operations.php ]; then OPS_EXISTED=yes; cp -p /opt/libexec/fptn/web-operations.php "$BACKUP/web-operations.php"; fi
+if [ -f /opt/libexec/fptn/transport-plan.php ]; then TRANSPORT_EXISTED=yes; cp -p /opt/libexec/fptn/transport-plan.php "$BACKUP/transport-plan.php"; fi
 if [ "$CLIENT_UPDATE" = yes ]; then
   cp -p /opt/libexec/fptn/fptn-client-cli "$BACKUP/fptn-client-cli"
   cp -p /opt/libexec/fptn/SHA256SUMS "$BACKUP/SHA256SUMS"
@@ -181,9 +185,12 @@ mv /opt/libexec/fptn/web-auth.php.new /opt/libexec/fptn/web-auth.php
 cp "$STAGE/scripts/fptn-web-operations.php" /opt/libexec/fptn/web-operations.php.new
 chmod 600 /opt/libexec/fptn/web-operations.php.new
 mv /opt/libexec/fptn/web-operations.php.new /opt/libexec/fptn/web-operations.php
+cp "$STAGE/scripts/fptn-transport-plan.php" /opt/libexec/fptn/transport-plan.php.new
+chmod 600 /opt/libexec/fptn/transport-plan.php.new
+mv /opt/libexec/fptn/transport-plan.php.new /opt/libexec/fptn/transport-plan.php
 printf '%s\n' "$ORIGIN" > "$CONF/web-origin"
 CLIENT_VERSION=$(/opt/libexec/fptn/fptn-client-cli --version)
-jq -n --arg version "$CLIENT_VERSION" --arg revision "$REV" '{uiVersion:"0.7.0",clientVersion:$version,revision:$revision}' > "$CONF/web-meta.json.new"
+jq -n --arg version "$CLIENT_VERSION" --arg revision "$REV" '{uiVersion:"0.8.0",clientVersion:$version,revision:$revision}' > "$CONF/web-meta.json.new"
 mv "$CONF/web-meta.json.new" "$CONF/web-meta.json"
 cat > "$FRAGMENT" <<EOF
 # Managed by fptn-web-ui. Credentials live outside the document root.
@@ -209,7 +216,7 @@ check_panel() {
   PANEL_ERROR='Страница панели не отвечает.'
   curl --noproxy '*' -fsS -D "$STAGE/headers" --connect-timeout 1 --max-time 2 "$ORIGIN/" -o "$STAGE/page" 2>/dev/null || return 1
   PANEL_ERROR='На порту открылась другая версия панели.'
-  grep -Fq 'data-ui-version="0.7.0"' "$STAGE/page" || return 1
+  grep -Fq 'data-ui-version="0.8.0"' "$STAGE/page" || return 1
   PANEL_CACHE_WARNING=no
   grep -iq '^Cache-Control:.*no-store' "$STAGE/headers" || PANEL_CACHE_WARNING=yes
   PANEL_ERROR='Не прошла проверка ограничения доступа к API.'
@@ -217,7 +224,7 @@ check_panel() {
   [ "$CODE" = 401 ] || return 1
   PANEL_ERROR='API настройки входа не готово или отвечает другой версией.'
   curl --noproxy '*' -fsS --connect-timeout 1 --max-time 2 "$ORIGIN/api.cgi?auth-info" -o "$STAGE/auth-info.json" 2>/dev/null || return 1
-  jq -e '.uiVersion=="0.7.0" and (.configured|type=="boolean") and (.rootAvailable|type=="boolean")' "$STAGE/auth-info.json" >/dev/null 2>&1 || return 1
+  jq -e '.uiVersion=="0.8.0" and (.configured|type=="boolean") and (.rootAvailable|type=="boolean")' "$STAGE/auth-info.json" >/dev/null 2>&1 || return 1
   return 0
 }
 # rc.func may report failed before the daemon becomes visible. Decide from the
@@ -237,7 +244,7 @@ until check_panel; do
   fi
   sleep 1
 done
-echo 'lighttpd отвечает: страница и API панели 0.7.0 проверены.'
+echo 'lighttpd отвечает: страница и API панели 0.8.0 проверены.'
 if [ "$PANEL_CACHE_WARNING" = yes ]; then
   echo "Откройте свежую страницу по ссылке $ORIGIN/?v=$REV (заголовок кэша применится после перезагрузки lighttpd)."
 fi
@@ -258,7 +265,7 @@ if [ "$CLIENT_UPDATE" = yes ]; then
 fi
 # Record the final ELF version after replacing it; the web preflight used the old client.
 CLIENT_VERSION=$(/opt/libexec/fptn/fptn-client-cli --version)
-jq -n --arg version "$CLIENT_VERSION" --arg revision "$REV" '{uiVersion:"0.7.0",clientVersion:$version,revision:$revision}' > "$CONF/web-meta.json.new"
+jq -n --arg version "$CLIENT_VERSION" --arg revision "$REV" '{uiVersion:"0.8.0",clientVersion:$version,revision:$revision}' > "$CONF/web-meta.json.new"
 mv "$CONF/web-meta.json.new" "$CONF/web-meta.json"
 
 if [ "$CLIENT_UPDATE" = yes ] && [ "$WAS_RUNNING" = yes ]; then
@@ -267,7 +274,7 @@ if [ "$CLIENT_UPDATE" = yes ] && [ "$WAS_RUNNING" = yes ]; then
 fi
 DONE=yes
 echo
-echo "Панель 0.7.0: $ORIGIN/?v=$REV"
+echo "Панель 0.8.0: $ORIGIN/?v=$REV"
 rm -f "$CONF/web-key"
 echo 'Откройте панель: создайте логин и пароль или войдите через root Entware.'
 echo 'Пароль в терминале не нужен. Существующие настройки входа сохраняются.'

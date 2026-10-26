@@ -41,7 +41,7 @@ decode_token() {
 
 restore_saved_settings() {
   "$CTL" stop >> "$LOCK/output" 2>&1 || return 1
-  for key in token server connection.json server-policy.json; do
+  for key in token server connection.json server-policy.json fallback.json; do
     if [ -f "$LOCK/old-$key" ]; then cp -p "$LOCK/old-$key" "$CONF/$key" || return 1
     else rm -f "$CONF/$key" || return 1; fi
   done
@@ -74,7 +74,7 @@ worker() {
     rm -f "$RUN/failed-request.json"
     if [ -f "$LOCK/rollback-needed" ]; then
       mkdir -p "$CONF/web-recovery"
-      for key in token server connection.json server-policy.json; do
+      for key in token server connection.json server-policy.json fallback.json; do
         [ ! -f "$LOCK/old-$key" ] || cp -p "$LOCK/old-$key" "$CONF/web-recovery/$key"
       done
     fi
@@ -114,7 +114,10 @@ worker() {
           echo 'Проверьте списки серверов: нужен хотя бы один разрешённый, максимум 64; ручной сервер не должен быть исключён.' >> "$LOCK/output"; exit 1;
         }
       printf '%s\n' "$POLICY" > "$LOCK/new-server-policy.json"
-      for key in token server connection.json server-policy.json; do
+      if jq -e 'has("fallback")' "$LOCK/request.json" >/dev/null; then FALLBACK=$(jq .fallback "$LOCK/request.json")
+      else FALLBACK=$("$CTL" get-fallback); fi
+      jq --argjson fallback "$FALLBACK" --argjson policy "$POLICY" '{fallback:$fallback,policy:$policy}' "$LOCK/request.json" | "$CTL" validate-fallback > "$LOCK/new-fallback.json" || exit 1
+      for key in token server connection.json server-policy.json fallback.json; do
         [ ! -f "$CONF/$key" ] || cp -p "$CONF/$key" "$LOCK/old-$key"
       done
       rm -f "$RUN/server-checks.json"
@@ -128,7 +131,8 @@ worker() {
       printf '%s\n' "$SERVER" > "$CONF/server.new"
       cp "$LOCK/new-connection.json" "$CONF/connection.json.new"
       cp "$LOCK/new-server-policy.json" "$CONF/server-policy.json.new"
-      for key in token server connection.json server-policy.json; do
+      cp "$LOCK/new-fallback.json" "$CONF/fallback.json.new"
+      for key in token server connection.json server-policy.json fallback.json; do
         chmod 600 "$CONF/$key.new"; mv "$CONF/$key.new" "$CONF/$key"
       done
       unset TOKEN TOKEN_JSON
@@ -158,7 +162,7 @@ ORIGIN=$(cat "$CONF/web-origin")
 [ -z "${HTTP_ORIGIN:-}" ] || [ "$HTTP_ORIGIN" = "$ORIGIN" ] || error '403 Forbidden' 'Запрос с другого сайта запрещён.'
 if [ "${QUERY_STRING:-}" = auth-info ] && [ "${REQUEST_METHOD:-}" = GET ]; then
   INFO=$(sh "$LIB/web-auth.sh" info) || error '503 Service Unavailable' 'Не удалось проверить настройки входа.'
-  respond '200 OK' "$(printf '%s' "$INFO" | jq '. + {uiVersion:"0.7.0"}')"
+  respond '200 OK' "$(printf '%s' "$INFO" | jq '. + {uiVersion:"0.8.0"}')"
 fi
 case "${QUERY_STRING:-}:${REQUEST_METHOD:-}" in login:POST|setup:POST)
   [ "${CONTENT_TYPE:-}" = application/json ] || error '415 Unsupported Media Type' 'Ожидается JSON.'
@@ -224,15 +228,16 @@ case "${REQUEST_METHOD:-}" in
         RESULT='null'; [ ! -r "$RUN/result.json" ] || RESULT=$(cat "$RUN/result.json")
         respond '200 OK' "$(jq -n --arg status "$TEXT" --arg rss "${RSS:-0}" --arg operation "$OPERATION" \
           --argjson operationState "$OP_STATE" --argjson autostart "$AUTOSTART" --argjson service "$SERVICE" --argjson report "$REPORT" --argjson meta "$META" --argjson busy "$BUSY" --argjson result "$RESULT" \
-          '{operationState:$operationState,autostart:$autostart,status:$status,service:$service,report:$report,uiVersion:"0.7.0",clientVersion:($meta.clientVersion // "неизвестна"),revision:($meta.revision // ""),operation:$operation,rssKiB:($rss|tonumber),busy:$busy,result:$result}')"
+          '{operationState:$operationState,autostart:$autostart,status:$status,service:$service,report:$report,uiVersion:"0.8.0",clientVersion:($meta.clientVersion // "неизвестна"),revision:($meta.revision // ""),operation:$operation,rssKiB:($rss|tonumber),busy:$busy,result:$result}')"
         ;;
       settings)
         CONNECTION=$("$CTL" get-settings) || error '500 Internal Server Error' 'Некорректные настройки подключения.'
+        FALLBACK=$("$CTL" get-fallback) || error '500 Internal Server Error' 'Некорректные настройки резервных методов.'
         POLICY=$("$CTL" get-server-policy) || error '500 Internal Server Error' 'Некорректные списки серверов.'
         SERVERS=$(decode_token < "$CONF/token") || error '500 Internal Server Error' 'Не удалось прочитать серверы из сохранённого токена.'
         SERVER=$(cat "$CONF/server")
-        respond '200 OK' "$(printf '%s' "$SERVERS" | jq --arg server "$SERVER" --argjson connection "$CONNECTION" --argjson policy "$POLICY" \
-          '{server:$server,servers:[.servers[].name],connection:$connection,policy:$policy}')"
+        respond '200 OK' "$(printf '%s' "$SERVERS" | jq --arg server "$SERVER" --argjson fallback "$FALLBACK" --argjson connection "$CONNECTION" --argjson policy "$POLICY" \
+          '{fallback:$fallback,server:$server,servers:[.servers[].name],connection:$connection,policy:$policy}')"
         ;;
       logs)
         { "$CTL" logs 2>&1 || true; [ ! -f "$RUN/action.log" ] || tail -c 8192 "$RUN/action.log"; } |
@@ -269,6 +274,11 @@ case "${REQUEST_METHOD:-}" in
       printf '%s' "$BODY" | jq '.connection' | "$CTL" validate-settings >/dev/null 2>&1 || error '400 Bad Request' 'Проверьте стратегию, метод обхода и домен SNI.'
       if printf '%s' "$BODY" | jq -e 'has("policy")' >/dev/null; then
         printf '%s' "$BODY" | jq '.policy' | "$CTL" validate-server-policy >/dev/null 2>&1 || error '400 Bad Request' 'Проверьте списки серверов.'
+      fi
+      if printf '%s' "$BODY" | jq -e 'has("fallback")' >/dev/null; then
+        if printf '%s' "$BODY" | jq -e 'has("policy")' >/dev/null; then DRAFT_POLICY=$(printf '%s' "$BODY" | jq .policy)
+        else DRAFT_POLICY=$("$CTL" get-server-policy); fi
+        printf '%s' "$BODY" | jq --argjson policy "$DRAFT_POLICY" '{fallback:.fallback,policy:$policy}' | "$CTL" validate-fallback >/dev/null 2>&1 || error '400 Bad Request' 'Для подбора нужны 1–8 избранных, до двух профилей и до двух корректных SNI.'
       fi
       ;; *) error '400 Bad Request' 'Неизвестное действие.' ;; esac
     if [ "$ACTION" = recover ]; then

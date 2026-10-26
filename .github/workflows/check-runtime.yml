@@ -26,6 +26,8 @@ jobs:
         run: |
           python3 -m unittest discover -s tests -p 'test_web_operations.py' -v
           python3 -m unittest discover -s tests -p 'test_web_auth.py' -v
+      - name: Verify bounded favorite transport fallback
+        run: sudo --preserve-env=PATH python3 -m unittest discover -s tests -p 'test_transport_plan.py' -v
       - name: Verify scripts, UI, credentials and upgrade rollback
         run: |
           python3 scripts/package-web.py --check

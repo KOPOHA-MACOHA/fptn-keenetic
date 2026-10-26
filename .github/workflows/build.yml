@@ -11,6 +11,8 @@ on:
       - 'scripts/fptn-web-auth.sh'
       - 'scripts/fptn-web-auth.php'
       - 'scripts/fptn-web-operations.php'
+      - 'scripts/fptn-transport-plan.php'
+      - 'tests/test_transport_plan.py'
       - 'tests/test_web*.py'
       - 'tests/test_native_service.py'
       - 'tests/test_lighttpd_entry.py'

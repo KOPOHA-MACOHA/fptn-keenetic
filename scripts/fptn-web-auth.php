@@ -79,6 +79,10 @@ function makeSession(array $data): array {
     if (file_put_contents($folder . '/' . hash('sha256', $token), $record, LOCK_EX) === false) failAuth('Не удалось сохранить сессию.');
     return ['key' => $token, 'expiresIn' => 43200];
 }
+if (strpos($action,'transport-')===0){
+    $planner=__DIR__.'/transport-plan.php';if(!is_file($planner))$planner=__DIR__.'/fptn-transport-plan.php';
+    require $planner;exit;
+}
 if (strpos($action, 'op-') === 0) {
     $operations=__DIR__.'/web-operations.php';
     if (!is_file($operations)) $operations=__DIR__.'/fptn-web-operations.php';

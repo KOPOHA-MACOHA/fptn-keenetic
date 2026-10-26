@@ -109,6 +109,52 @@ server_policy_json() {
   else printf '%s\n' '{"mode":"manual","favorites":[],"excluded":[]}'
   fi
 }
+fallback_json() {
+  if [ ! -f "$CONF/fallback.json" ] && [ ! -f "$LIB/transport-plan.php" ]; then
+    printf '%s\n' '{"enabled":false,"profiles":["sni-spoofing-chrome-149","sni-spoofing-firefox-151"],"domains":[],"budget":60}'
+  else sh "$LIB/web-auth.sh" transport-settings; fi
+}
+make_transport_plan() {
+  USE_PLAN=no; PLAN_INDEX=0; FAVORITES_DEADLINE=0
+  [ -f "$CONF/fallback.json" ] || return 0
+  [ "$REPORT_CAPABLE" = yes ] || return 0
+  if ! FPTN_FORCE_AUTO=$FORCE_AUTO sh "$LIB/web-auth.sh" transport-plan > "$RUN/transport-plan.new"; then
+    echo 'FPTN: резервный подбор недоступен; используем сохранённые параметры.'
+    rm -f "$RUN/transport-plan.new"; return 0
+  fi
+  if jq -e '.enabled==true and (.plans|length>0)' "$RUN/transport-plan.new" >/dev/null; then
+    mv "$RUN/transport-plan.new" "$RUN/transport-plan.json"
+    PLAN_COUNT=$(jq '.plans|length' "$RUN/transport-plan.json")
+    FAVORITES_BUDGET=$(jq .budget "$RUN/transport-plan.json")
+    printf '[]\n' > "$RUN/auth-denied.json"
+    USE_PLAN=yes
+  else rm -f "$RUN/transport-plan.new"; fi
+}
+next_transport_attempt() {
+  while [ "$PLAN_INDEX" -lt "$PLAN_COUNT" ]; do
+    jq --argjson index "$PLAN_INDEX" '.plans[$index]' "$RUN/transport-plan.json" > "$RUN/attempt.json"
+    PLAN_INDEX=$((PLAN_INDEX+1))
+    BUDGETED=$(jq -r .budgeted "$RUN/attempt.json")
+    PLAN_TIMEOUT=$(jq .timeout "$RUN/attempt.json")
+    if [ "$BUDGETED" = true ]; then
+      NOW=$(date +%s)
+      [ "$FAVORITES_DEADLINE" -gt 0 ] || FAVORITES_DEADLINE=$((NOW+FAVORITES_BUDGET))
+      REMAINING=$((FAVORITES_DEADLINE-NOW))
+      if [ "$REMAINING" -le 0 ]; then continue; fi
+      [ "$PLAN_TIMEOUT" -le "$REMAINING" ] || PLAN_TIMEOUT=$REMAINING
+    fi
+    if ! jq -e --slurpfile denied "$RUN/auth-denied.json" '[.eligible[] | . as $name | select(($denied[0]|index($name))==null)]|length>0' "$RUN/attempt.json" >/dev/null; then continue; fi
+    jq --slurpfile denied "$RUN/auth-denied.json" '.policy | .excluded=(.excluded+$denied[0]|unique)' "$RUN/attempt.json" > "$RUN/attempt-policy.json"
+    return 0
+  done
+  return 1
+}
+record_auth_denials() {
+  if [ -f "$RUN/server-checks.json" ]; then
+    jq --slurpfile report "$RUN/server-checks.json" '. + [$report[0].results[]? | select(.code==401 or .code==403) | .name] | unique' "$RUN/auth-denied.json" > "$RUN/auth-denied.new" 2>/dev/null || return 0
+    mv "$RUN/auth-denied.new" "$RUN/auth-denied.json"
+  fi
+}
 capture_selected() {
   SELECTED=$(awk '/KEENETIC_SELECTED: / {sub(/^.*KEENETIC_SELECTED: /, ""); name=$0} END {print name}' "$RUN/client.log")
   if [ -n "$SELECTED" ]; then ATTEMPT_SELECTED=$SELECTED; printf '%s\n' "$SELECTED" > "$RUN/active-server"; fi
@@ -282,6 +328,7 @@ run_service() {
   BACKOFF=5
   FORCE_AUTO=no
   printf '[]\n' > "$RUN/failed-servers.json"
+  make_transport_plan
   while :; do
     rm -f "$RUN/ready" "$RUN/active-server" "$RUN/link.json"
     printf 'starting\n' > "$RUN/phase"
@@ -291,9 +338,18 @@ run_service() {
       tail -c 65536 "$RUN/client.log" > "$CONF/last.log"
     fi
     : > "$RUN/client.log"
-    attempt_service
-    stop_child
-    if [ -f "$CONF/server-policy.json" ] && [ -n "$ATTEMPT_SELECTED" ]; then
+    if [ "$USE_PLAN" = yes ] && ! next_transport_attempt; then
+      ATTEMPT_SELECTED=; ATTEMPT_READY=no; ATTEMPT_STABLE=no
+    else
+      attempt_service
+      stop_child
+      if [ "$USE_PLAN" = yes ]; then
+        record_auth_denials
+        if [ "$ATTEMPT_STABLE" = yes ]; then FORCE_AUTO=yes; make_transport_plan; continue; fi
+        [ "$PLAN_INDEX" -ge "$PLAN_COUNT" ] || { sleep 1; continue; }
+      fi
+    fi
+    if [ "$USE_PLAN" != yes ] && [ -f "$CONF/server-policy.json" ] && [ -n "$ATTEMPT_SELECTED" ]; then
       jq --arg name "$ATTEMPT_SELECTED" '. + [$name] | unique' "$RUN/failed-servers.json" > "$RUN/failed-servers.new"
       mv "$RUN/failed-servers.new" "$RUN/failed-servers.json"
       FORCE_AUTO=yes
@@ -317,10 +373,11 @@ run_service() {
     while [ "$WAIT_N" -lt "$BACKOFF" ]; do sleep 1; WAIT_N=$((WAIT_N+1)); done
     BACKOFF=$((BACKOFF*2))
     [ "$BACKOFF" -le 60 ] || BACKOFF=60
+    make_transport_plan
   done
 }
 attempt_service() {
-  ATTEMPT_SELECTED=
+  ATTEMPT_SELECTED=; ATTEMPT_READY=no; ATTEMPT_STABLE=no
   load_connection
   # Re-read the uplink on every attempt: DHCP/failover can change it.
   GW=$(ip -4 route show table main default | awk '$1=="default" && $2=="via" {print $3; exit}')
@@ -329,6 +386,13 @@ attempt_service() {
     echo 'FPTN: не найден обычный шлюз.'
     return 0
   fi
+  if [ "$USE_PLAN" = yes ]; then
+    BYPASS=$(jq -r .connection.bypass "$RUN/attempt.json")
+    SNI=$(jq -r .connection.sni "$RUN/attempt.json")
+  fi
+  jq -n --arg bypass "$BYPASS" --arg sni "$SNI" --arg strategy "$STRATEGY" --argjson automatic "$([ "$USE_PLAN" = yes ] && echo true || echo false)" '{bypass:$bypass,sni:$sni,strategy:$strategy,automatic:$automatic}' > "$RUN/effective-connection.new"
+  mv "$RUN/effective-connection.new" "$RUN/effective-connection.json"
+  rm -f "$RUN/server-checks.json"
   TOKEN=$(cat "$CONF/token"); SERVER=$(cat "$CONF/server")
   set -- --keenetic-connect --keenetic-native \
     --access-token "$TOKEN" --preferred-server "$SERVER" \
@@ -340,7 +404,16 @@ attempt_service() {
   if [ "$REPORT_CAPABLE" = yes ]; then
     set -- "$@" --keenetic-status-file "$RUN/link.json" --keenetic-probe-report "$RUN/server-checks.json"
   fi
-  if [ -f "$CONF/server-policy.json" ]; then
+  if [ "$USE_PLAN" = yes ]; then
+    READY_TIMEOUT=$PLAN_TIMEOUT
+    set -- "$@" --keenetic-server-policy "$RUN/attempt-policy.json" --keenetic-auto-select
+    STAGE=$(jq -r .stage "$RUN/attempt.json")
+    case "$STAGE" in cached) STAGE_LABEL='последний рабочий вариант' ;; manual) STAGE_LABEL='выбранный сервер' ;; favorites) STAGE_LABEL='избранные' ;; *) STAGE_LABEL='остальные серверы' ;; esac
+    METHOD_LABEL='обфускация'
+    [ "$BYPASS" = obfuscation ] || METHOD_LABEL="${BYPASS#sni-spoofing-}, SNI $SNI"
+    echo "Пробуем: $STAGE_LABEL · $METHOD_LABEL ($PLAN_INDEX/$PLAN_COUNT)." > "$RUN/state"
+    printf 'selecting\n' > "$RUN/phase"
+  elif [ -f "$CONF/server-policy.json" ]; then
     READY_TIMEOUT=540
     set -- "$@" --keenetic-server-policy "$CONF/server-policy.json" --keenetic-skip-file "$RUN/failed-servers.json"
     [ "$FORCE_AUTO" = no ] || set -- "$@" --keenetic-auto-select
@@ -358,14 +431,18 @@ attempt_service() {
   : > "$RUN/ready"
   printf 'running\n' > "$RUN/phase"
   capture_selected
-  EVER_READY=yes
+  EVER_READY=yes; ATTEMPT_READY=yes
   echo 'FPTN: READY получен для текущего процесса.'
   STABLE_N=0
   while client_alive; do
     trim_logs; sleep 2
-    STABLE_N=$((STABLE_N+1))
+    if [ "$USE_PLAN" = yes ] && ! jq -e '.state=="connected"' "$RUN/link.json" >/dev/null 2>&1; then STABLE_N=0
+    else STABLE_N=$((STABLE_N+1)); fi
     # Reset only after a stable minute, so rapid crash loops keep backing off.
-    if [ "$STABLE_N" -eq 30 ]; then BACKOFF=5; printf '[]\n' > "$RUN/failed-servers.json"; fi
+    if [ "$STABLE_N" -eq 30 ]; then
+      BACKOFF=5; ATTEMPT_STABLE=yes; printf '[]\n' > "$RUN/failed-servers.json"
+      if [ "$USE_PLAN" = yes ]; then sh "$LIB/web-auth.sh" transport-cache >/dev/null || true; fi
+    fi
   done
   CLIENT_RC=0
   wait "$CHILD" || CLIENT_RC=$?
@@ -381,6 +458,10 @@ start_service() {
     server_policy_json >/dev/null
     "$LIB/fptn-client-cli" --help | grep -q -- '--keenetic-server-policy' || fail 'Для автовыбора нужен клиент 0.3.0 с --keenetic-server-policy.'
     START_TIMEOUT=600
+  fi
+  if [ -f "$CONF/fallback.json" ] && jq -e '.enabled==true' "$CONF/fallback.json" >/dev/null; then
+    "$LIB/fptn-client-cli" --help | grep -q -- '--keenetic-probe-only' || fail 'Для резервного подбора нужен клиент 0.4.0.'
+    START_TIMEOUT=$((START_TIMEOUT+240))
   fi
   [ -f "$CONF/native-setup-complete" ] || fail 'Сначала fptnctl setup-interface.'
   if [ "${1:-}" != boot ]; then ip link show dev opkgtun0 >/dev/null 2>&1 || fail 'Keenetic не создал opkgtun0.'; fi
@@ -438,15 +519,17 @@ status_json() {
     stopped) MESSAGE='Служба остановлена.' ;;
     running) if [ "$CONNECTED" = true ]; then MESSAGE='Туннель FPTN подключён.'; else MESSAGE='Клиент запущен; текущее состояние туннеля не подтверждено.'; fi ;;
     reconnecting) MESSAGE='Соединение потеряно. FPTN восстанавливает туннель.' ;;
-    selecting) MESSAGE='Проверяем серверы и выбираем подключение.' ;;
+    selecting) MESSAGE='Проверяем серверы и выбираем подключение.'; [ ! -s "$RUN/state" ] || MESSAGE=$(cat "$RUN/state") ;;
     retrying) MESSAGE='Ожидаем следующую попытку подключения.' ;;
     stale) MESSAGE='Осталось состояние завершённой службы. Требуется fptnctl recover.' ;;
     *) MESSAGE='Служба запускается.' ;;
   esac
+  EFFECTIVE=null
+  if [ "$CLIENT" = true ] && [ -f "$RUN/effective-connection.json" ]; then EFFECTIVE=$(cat "$RUN/effective-connection.json"); fi
   CAN_START=false; [ "$STATE" != stopped ] || CAN_START=true
   jq -n --arg state "$STATE" --arg message "$MESSAGE" --arg server "$ACTIVE" \
-    --argjson supervisor "$SUPERVISOR" --argjson client "$CLIENT" --argjson connected "$CONNECTED" --argjson canStart "$CAN_START" \
-    '{state:$state,message:$message,selectedServer:$server,supervisorAlive:$supervisor,clientAlive:$client,connected:$connected,canStart:$canStart,canStop:$supervisor,canRestart:$supervisor}'
+    --argjson effective "$EFFECTIVE" --argjson supervisor "$SUPERVISOR" --argjson client "$CLIENT" --argjson connected "$CONNECTED" --argjson canStart "$CAN_START" \
+    '{effectiveConnection:$effective,state:$state,message:$message,selectedServer:$server,supervisorAlive:$supervisor,clientAlive:$client,connected:$connected,canStart:$canStart,canStop:$supervisor,canRestart:$supervisor}'
 }
 check_servers() (
   "$LIB/fptn-client-cli" --help | grep -q -- '--keenetic-probe-only' || fail 'Для проверки нужен клиент 0.4.0.'
@@ -559,6 +642,8 @@ case "${1:-}" in
   _boot) [ ! -f "$CONF/autostart" ] || start_service boot ;;
   web-reset-login) sh "$LIB/web-auth.sh" reset ;;
   web-password) echo 'Логин и пароль задаются в браузере. Для сброса: fptnctl web-reset-login.' ;;
+  get-fallback) fallback_json ;;
+  validate-fallback) sh "$LIB/web-auth.sh" transport-validate ;;
   get-settings) connection_json ;;
   validate-settings) validate_connection ;;
   get-server-policy) server_policy_json ;;

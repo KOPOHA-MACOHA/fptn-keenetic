@@ -9,7 +9,7 @@ ROOT=Path(__file__).resolve().parents[1]
 NODE=r'''
 const fs=require('fs'),vm=require('vm'),assert=require('assert');
 const html=fs.readFileSync(process.argv[2],'utf8');
-const initial={'auth-choice':'panel',browser:'yandex',mode:'obfuscation','selection-mode':'manual',strategy:'dual-rolling-tunnel',sni:'google.com'};
+const initial={'auth-choice':'panel','fallback-budget':'60','fallback-chrome':'sni-spoofing-chrome-149','fallback-firefox':'sni-spoofing-firefox-151','fallback-yandex':'sni-spoofing-yandex-26-4','fallback-safari':'sni-spoofing-safari-26-5',browser:'yandex',mode:'obfuscation','selection-mode':'manual',strategy:'dual-rolling-tunnel',sni:'google.com'};
 class Element{
  constructor(id){this.id=id;this.value=initial[id]||'';this.children=[];this.listeners={};this.dataset={};this.disabled=false;this.hidden=false;this.textContent='';this.className='';this.classList={add:()=>{},toggle:()=>{}};}
  replaceChildren(...nodes){this.children=nodes;if(['server','profile'].includes(this.id))this.value=nodes[0]?.value||'';}
@@ -29,7 +29,7 @@ const document={hidden:false,documentElement:new Element('root'),getElementById:
  throw new Error('Unexpected selector '+selector);
 }};
 const settings={server:'CZ',servers:['CZ','DE'],connection:{bypass:'obfuscation',strategy:'dual-rolling-tunnel',sni:'google.com'},policy:{mode:'manual',favorites:[],excluded:[]}};
-const stopped={status:'FPTN остановлен',uiVersion:'0.7.0',clientVersion:'0.4.0',revision:'1234567890',busy:false,report:null,service:{state:'stopped',message:'Служба остановлена',selectedServer:'',connected:false,supervisorAlive:false,canStart:true,canStop:false,canRestart:false}};
+const stopped={status:'FPTN остановлен',uiVersion:'0.8.0',clientVersion:'0.4.0',revision:'1234567890',busy:false,report:null,service:{state:'stopped',message:'Служба остановлена',selectedServer:'',connected:false,supervisorAlive:false,canStart:true,canStop:false,canRestart:false}};
 const win={location:{href:''}};win.top=win;win.self=win;
 let authState={configured:false,mode:null,rootAvailable:true};const requests=[];
 const context={console,document,window:win,Option:class{constructor(text,value){this.text=text;this.value=value;}},sessionStorage:{getItem(){return '';},setItem(){},removeItem(){}},setInterval(){},setTimeout(){return 1;},clearTimeout(){},fetch:async(url,options={})=>{
@@ -58,6 +58,7 @@ const run=code=>vm.runInContext(code,context);
  context.data=running;run('applyStatus(data)');
  assert(elements.start.disabled&&!elements.stop.disabled,'running: stop only');
  assert(elements['active-server'].textContent==='CZ');
+ running.service.effectiveConnection={bypass:'sni-spoofing-chrome-149',sni:'example.net',strategy:'dual-rolling-tunnel'};context.data=running;run('applyStatus(data)');assert(elements['effective-connection'].textContent.includes('chrome-149')&&elements['effective-connection'].textContent.includes('example.net'));assert(elements.mode.value==='obfuscation','effective fallback must not overwrite saved settings');
  elements.server.value='DE';elements.server.dispatch('change');
  assert(!elements.unsaved.hidden&&!elements.save.disabled,'draft must be visible and applicable');
  assert(elements.save.textContent==='Применить и переподключить');
@@ -117,7 +118,7 @@ class FrontendTest(unittest.TestCase):
         sh=shutil.which('sh')
         result=subprocess.run([sh,str(ROOT/'web/index.cgi')],env={**os.environ,'PATH':'','SCRIPT_FILENAME':'/wrong/inherited/path'},capture_output=True,text=True)
         self.assertEqual(result.returncode,0,result.stderr)
-        self.assertIn('data-ui-version="0.7.0"',result.stdout)
+        self.assertIn('data-ui-version="0.8.0"',result.stdout)
         self.assertIn('Cache-Control: no-store',result.stdout)
 
     def test_real_ui_status_buttons_roles_drafts_and_versions(self):

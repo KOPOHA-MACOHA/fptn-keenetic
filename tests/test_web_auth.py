@@ -20,6 +20,7 @@ class WebAuthTest(unittest.TestCase):
         self.run=self.root/'var/run/fptn-web';lib=self.root/'libexec/fptn';lib.mkdir(parents=True)
         for ext in ['sh','php']:shutil.copyfile(ROOT/f'scripts/fptn-web-auth.{ext}',lib/f'web-auth.{ext}')
         shutil.copyfile(ROOT/'scripts/fptn-web-operations.php',lib/'web-operations.php')
+        shutil.copyfile(ROOT/'scripts/fptn-transport-plan.php',lib/'transport-plan.php')
         self.password='test password!123'
         bin=self.root/'bin';bin.mkdir();(bin/'id').write_text('#!/bin/sh\necho 0\n');(bin/'id').chmod(0o700)
         self.env={**os.environ,'FPTN_PREFIX':str(self.root),'PATH':str(bin)+':'+os.environ['PATH'],'FPTN_TEST_PATH':str(bin)+':'+os.environ['PATH']}
