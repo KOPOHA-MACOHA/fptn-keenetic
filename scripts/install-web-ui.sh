@@ -193,15 +193,32 @@ cat > "$FRAGMENT" <<EOF
 EOF
 chmod 600 "$FRAGMENT"
 lighttpd -tt -f "$MAIN" || fail 'lighttpd отверг настройки панели.'
-"$INIT" restart || fail 'Не удалось перезапустить lighttpd.'
-sleep 1
-curl --noproxy '*' -fsS -D "$STAGE/headers" --connect-timeout 5 --max-time 10 "$ORIGIN/" -o "$STAGE/page" || fail 'Страница панели не отвечает.'
-grep -Fq 'data-ui-version="0.6.0"' "$STAGE/page" || fail 'На порту открылась другая версия панели.'
-grep -iq '^Cache-Control:.*no-store' "$STAGE/headers" || fail 'Страница панели кэшируется.'
-CODE=$(curl --noproxy '*' -sS -o /dev/null -w '%{http_code}' --max-time 10 "$ORIGIN/api.cgi?status")
-[ "$CODE" = 401 ] || fail 'Проверка ограничения доступа к API не прошла.'
-curl --noproxy '*' -fsS --max-time 15 "$ORIGIN/api.cgi?auth-info" |
-  jq -e '.uiVersion=="0.6.0" and (.configured|type=="boolean") and (.rootAvailable|type=="boolean")' >/dev/null || fail 'Не удалось проверить экран настройки входа.'
+if ! "$INIT" restart; then
+  echo 'Init-скрипт сообщил failed. Проверяю, поднялись ли lighttpd и панель.' >&2
+fi
+check_panel() {
+  PANEL_ERROR='Страница панели не отвечает.'
+  curl --noproxy '*' -fsS -D "$STAGE/headers" --connect-timeout 1 --max-time 2 "$ORIGIN/" -o "$STAGE/page" 2>/dev/null || return 1
+  PANEL_ERROR='На порту открылась другая версия панели.'
+  grep -Fq 'data-ui-version="0.6.0"' "$STAGE/page" || return 1
+  PANEL_ERROR='Страница панели кэшируется.'
+  grep -iq '^Cache-Control:.*no-store' "$STAGE/headers" || return 1
+  PANEL_ERROR='Не прошла проверка ограничения доступа к API.'
+  CODE=$(curl --noproxy '*' -sS -o /dev/null -w '%{http_code}' --connect-timeout 1 --max-time 2 "$ORIGIN/api.cgi?status" 2>/dev/null) || return 1
+  [ "$CODE" = 401 ] || return 1
+  PANEL_ERROR='API настройки входа не готово или отвечает другой версией.'
+  curl --noproxy '*' -fsS --connect-timeout 1 --max-time 2 "$ORIGIN/api.cgi?auth-info" -o "$STAGE/auth-info.json" 2>/dev/null || return 1
+  jq -e '.uiVersion=="0.6.0" and (.configured|type=="boolean") and (.rootAvailable|type=="boolean")' "$STAGE/auth-info.json" >/dev/null 2>&1 || return 1
+  return 0
+}
+# rc.func may report failed before the daemon becomes visible. Decide from the
+# actual listener's responses, also when restart itself returned success.
+PANEL_DEADLINE=$(( $(date +%s) + 30 ))
+until check_panel; do
+  [ "$(date +%s)" -lt "$PANEL_DEADLINE" ] || fail "Панель не готова после ожидания: $PANEL_ERROR"
+  sleep 1
+done
+echo 'lighttpd отвечает: страница и API панели 0.6.0 проверены.'
 if [ "$CLIENT_UPDATE" = yes ] && [ "$WAS_RUNNING" = yes ]; then
   RESTART_ATTEMPTED=yes
   /opt/bin/fptnctl start || fail 'Обновлённый клиент не запустился.'

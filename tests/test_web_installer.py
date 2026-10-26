@@ -12,6 +12,10 @@ MOCK=r'''#!/usr/bin/env python3
 import json,os,pathlib,shutil,subprocess,sys
 root=pathlib.Path(os.environ['FPTN_PREFIX']);args=sys.argv[1:];command=pathlib.Path(sys.argv[0]).name
 if command=='id': print(0)
+elif command=='sleep':pass
+elif command=='date':
+ clock=root/'clock';now=int(clock.read_text()) if clock.exists() else 1000
+ clock.write_text(str(now+1));print(now)
 elif command=='php-cgi':
  if (root/'fail-php').exists():sys.exit(1)
  print(json.dumps({'configured':True,'mode':'panel','rootAvailable':True}))
@@ -21,6 +25,14 @@ elif command=='lighttpd':
  if '-p' in args:print('server.modules = ( "mod_cgi" )')
 elif command=='curl':
  url=next(a for a in args if a.startswith('http'))
+ if url.startswith('http://192.168.1.1:1111'):
+  with (root/'http-probes').open('a') as f:f.write(url+'\n')
+  if (root/'web-down').exists():sys.exit(7)
+  warm=root/'web-warmup'
+  if warm.exists():
+   left=int(warm.read_text())
+   if left>0:warm.write_text(str(left-1));sys.exit(7)
+   warm.unlink()
  out=pathlib.Path(args[args.index('-o')+1]) if '-o' in args else None
  payload=root.parent/'payload'
  if 'raw.githubusercontent.com' in url:
@@ -29,7 +41,10 @@ elif command=='curl':
  elif '-w' in args:print('401',end='')
  elif 'api.cgi?' in url:
   if '-K' in args:sys.stdin.read()
-  print(json.dumps({'uiVersion':'0.6.0','service':{'state':'stopped'},'busy':False,'status':'stopped','configured':True,'rootAvailable':True}))
+  info={'uiVersion':'old' if (root/'wrong-api').exists() else '0.6.0','service':{'state':'stopped'},'busy':False,'status':'stopped','configured':True,'rootAvailable':True}
+  text=json.dumps(info)
+  if out:out.write_text(text)
+  else:print(text)
  else:
   result=subprocess.run(['sh',str(root/'share/fptn-web/index.cgi')],capture_output=True,check=True)
   header,body=result.stdout.split(b'\r\n\r\n',1)
@@ -48,7 +63,7 @@ class WebInstallerTest(unittest.TestCase):
             (self.root/name).mkdir(parents=True,exist_ok=True)
         self.trace=self.base/'trace'
         self.env={**os.environ,'FPTN_PREFIX':str(self.root),'FPTN_TEST_TRACE':str(self.trace)}
-        for name in ['id','ip','netstat','lighttpd','curl','php-cgi']:
+        for name in ['id','ip','netstat','lighttpd','curl','php-cgi','date','sleep']:
             path=self.root/'bin'/name;path.write_text(MOCK);path.chmod(0o700)
         (self.root/'etc/fptn/web-auth.json').write_text('{"username":"admin","hash":"test"}')
         for key in ['token','server']:(self.root/'etc/fptn'/key).write_text('dummy\n')
@@ -58,7 +73,10 @@ class WebInstallerTest(unittest.TestCase):
         (self.root/'share/fptn-web/index.html').write_text('original UI')
         init=self.root/'etc/init.d/S80lighttpd';init.write_text('''#!/bin/sh
 echo lighttpd-restart >> "$FPTN_TEST_TRACE"
-if [ -f "$FPTN_PREFIX/fail-restart" ]; then rm "$FPTN_PREFIX/fail-restart"; exit 1; fi
+if [ -f "$FPTN_PREFIX/fail-restart" ]; then rm "$FPTN_PREFIX/fail-restart"; touch "$FPTN_PREFIX/web-down"; exit 1; fi
+rm -f "$FPTN_PREFIX/web-down"
+if [ -f "$FPTN_PREFIX/delayed-restart" ]; then printf '2\n' > "$FPTN_PREFIX/web-warmup"; exit 1; fi
+if [ -f "$FPTN_PREFIX/false-failed-restart" ]; then exit 1; fi
 ''');init.chmod(0o700)
         def controller(label):return '''#!/bin/sh
 echo LABEL-$1 >> "$FPTN_TEST_TRACE"
@@ -122,6 +140,28 @@ esac
         self.assertTrue((self.root/'var/run/fptn-keenetic').exists())
         self.assertFalse((self.root/'var/run/fptn-web/action').exists())
         self.assertEqual((self.root/'libexec/fptn/fptn-client-cli').read_bytes(),(self.payload/'client/fptn-client-cli').read_bytes())
+
+    def test_failed_restart_return_code_with_healthy_http_does_not_roll_back(self):
+        (self.root/'false-failed-restart').touch();result=self.execute()
+        self.assertEqual(result.returncode,0,result.stdout+result.stderr)
+        self.assertEqual(self.trace.read_text().splitlines().count('lighttpd-restart'),1)
+        self.assertIn('staged-start',self.trace.read_text())
+        self.assertNotIn('Восстанавливаю файлы',result.stderr)
+        self.assertIn('api.cgi?auth-info',(self.root/'http-probes').read_text())
+
+    def test_failed_restart_with_delayed_daemon_waits_for_actual_readiness(self):
+        (self.root/'delayed-restart').touch();result=self.execute()
+        self.assertEqual(result.returncode,0,result.stdout+result.stderr)
+        self.assertGreaterEqual((self.root/'http-probes').read_text().splitlines().count('http://192.168.1.1:1111/'),3)
+        self.assertEqual(self.trace.read_text().splitlines().count('lighttpd-restart'),1)
+        self.assertNotIn('Восстанавливаю файлы',result.stderr)
+
+    def test_responsive_page_with_wrong_api_version_is_not_treated_as_ready(self):
+        (self.root/'wrong-api').touch();result=self.execute()
+        self.assertNotEqual(result.returncode,0)
+        self.assert_original_files()
+        self.assertIn('API настройки входа',result.stderr)
+        self.assertTrue((self.root/'var/run/fptn-keenetic').exists())
 
     def test_failed_web_restart_restores_files_and_previous_service(self):
         (self.root/'fail-restart').touch();result=self.execute()
