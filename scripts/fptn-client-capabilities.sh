@@ -8,9 +8,20 @@ CLIENT=${1:-$ROOT/libexec/fptn/fptn-client-cli}
 CACHE=$ROOT/var/run/fptn-capabilities
 fail() { echo "FPTN capabilities: $*" >&2; exit 1; }
 fingerprint() {
-  if command -v stat >/dev/null 2>&1; then stat -Lc '%d:%i:%s:%Y:%Z' "$CLIENT"
-  else busybox stat -Lc '%d:%i:%s:%Y:%Z' "$CLIENT"; fi
+  # Minimal BusyBox supports -L/-t but omits FEATURE_STAT_FORMAT (-c).
+  # GNU and minimal BusyBox share the first 13 fields after the filename.
+  if command -v stat >/dev/null 2>&1; then RECORD=$(stat -L -t "$CLIENT") || return 1
+  else RECORD=$(busybox stat -L -t "$CLIENT") || return 1; fi
+  printf '%s\n' "$RECORD" | awk -v file="$CLIENT" '
+    NR!=1 || substr($0,1,length(file)+1)!=file " " {exit 1}
+    { $0=substr($0,length(file)+2)
+      if(NF<14 || $1!~/^[0-9]+$/ || $6!~/^[0-9a-fA-F]+$/ ||
+          $7!~/^[0-9]+$/ || $12!~/^[0-9]+$/ || $13!~/^[0-9]+$/) exit 1
+      # Ignore atime: reading/executing the binary can change it.
+      printf "%s:%s:%s:%s:%s\n",$6,$7,$1,$12,$13
+    }'
 }
+
 [ -x "$CLIENT" ] || fail 'Клиент не установлен.'
 KEY=$(fingerprint) || fail 'Не удалось определить файл клиента.'
 mkdir -p "$CACHE"; chmod 700 "$CACHE"

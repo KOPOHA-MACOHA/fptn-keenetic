@@ -16,6 +16,31 @@ class CapabilitiesTest(unittest.TestCase):
         self.help=self.root/('help-'+str(time.time_ns()));self.help.write_text(help_text)
         code='#!/bin/sh\necho "$1" >> '+shlex.quote(str(self.root/'calls'))+'\ncase "$1" in\n --help) cat '+shlex.quote(str(self.help))+' ;;\n --version) echo '+shlex.quote(version)+' ;;\n *) exit 1 ;;\nesac\n'
         new=self.lib/'next';new.write_text(code);new.chmod(0o700);new.replace(self.client)
+    def minimal_busybox_stat(self):
+        stat=self.bin/'stat';stat.write_text('''#!/usr/bin/env python3
+import os,pathlib,sys
+root=pathlib.Path(os.environ['FPTN_PREFIX']);args=sys.argv[1:]
+assert len(args)==3 and args[:2]==['-L','-t'], 'minimal BusyBox stat accepts only -L/-t'
+p=args[2];s=os.stat(p)
+f=root/'stat-reads';n=int(f.read_text())+1 if f.exists() else 1;f.write_text(str(n))
+# Exact FEATURE_STAT_FORMAT=n terse layout; access time changes on each read.
+print(p,s.st_size,s.st_blocks,format(s.st_mode,'x'),s.st_uid,s.st_gid,format(s.st_dev,'x'),s.st_ino,s.st_nlink,'0','0',n,int(s.st_mtime),int(s.st_ctime),s.st_blksize)
+''');stat.chmod(0o700)
+    def test_minimal_busybox_stat_caches_ignores_atime_and_detects_replacement(self):
+        self.minimal_busybox_stat();self.replace_client(client_fixture.help_text());first=self.discover()
+        self.assertEqual(self.discover(),first)
+        self.assertEqual((self.root/'calls').read_text().splitlines(),['--help','--version'])
+        self.replace_client('obfuscation sni-spoofing-chrome-150 dual-rolling-tunnel\n')
+        second=self.discover();self.assertNotEqual(first['sha256'],second['sha256']);self.assertIn('sni-spoofing-chrome-150',second['methods'])
+    def test_minimal_busybox_stat_handles_filename_with_spaces(self):
+        import shutil
+        self.minimal_busybox_stat();target=self.lib/'client with spaces';shutil.copyfile(self.client,target);target.chmod(0o700)
+        r=subprocess.run(['sh',str(ROOT/'scripts/fptn-client-capabilities.sh'),str(target)],env=self.env,text=True,capture_output=True,timeout=12)
+        self.assertEqual(r.returncode,0,r.stderr);self.assertIn('obfuscation',json.loads(r.stdout)['methods'])
+    def test_malformed_terse_metadata_is_not_accepted(self):
+        stat=self.bin/'stat';stat.write_text('#!/bin/sh\necho broken\n');stat.chmod(0o700)
+        self.assertNotEqual(self.execute().returncode,0)
+
     def test_actual_help_parsed_and_only_readonly_flags_are_executed(self):
         self.replace_client(client_fixture.help_text());data=self.discover()
         self.assertEqual(data['schema'],1);self.assertEqual(data['clientVersion'],'0.4.0');self.assertEqual(len(data['sha256']),64)

@@ -47,7 +47,7 @@ elif command=='curl':
   if 'auth-info' in url:
    with (root.parent/'trace').open('a') as f:f.write('http-auth-info\n')
   if '-K' in args:sys.stdin.read()
-  info={'uiVersion':'old' if (root/'wrong-api').exists() else '0.11.0','service':{'state':'stopped'},'busy':False,'status':'stopped','configured':True,'rootAvailable':True}
+  info={'uiVersion':'old' if (root/'wrong-api').exists() else '0.11.1','service':{'state':'stopped'},'busy':False,'status':'stopped','configured':True,'rootAvailable':True}
   text=json.dumps(info)
   if out:out.write_text(text)
   else:print(text)
@@ -221,3 +221,11 @@ sys.exit(result.returncode)
         self.env['FPTN_OPERATION_ID']='d'*32
         result=self.execute();self.assertNotEqual(result.returncode,0)
         self.assert_original_files();self.assertTrue(lock.exists())
+
+    def test_installer_supports_minimal_busybox_stat_without_format_option(self):
+        import test_client_capabilities
+        self.bin=self.root/'bin'
+        test_client_capabilities.CapabilitiesTest.minimal_busybox_stat(self)
+        result=self.execute();self.assertEqual(result.returncode,0,result.stdout+result.stderr)
+        self.assertTrue((self.root/'libexec/fptn/client-capabilities.sh').exists())
+        self.assertGreater(int((self.root/'stat-reads').read_text()),0)
