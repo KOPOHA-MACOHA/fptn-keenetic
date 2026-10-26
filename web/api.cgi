@@ -168,7 +168,7 @@ ORIGIN=$(cat "$CONF/web-origin")
 [ -z "${HTTP_ORIGIN:-}" ] || [ "$HTTP_ORIGIN" = "$ORIGIN" ] || error '403 Forbidden' 'Запрос с другого сайта запрещён.'
 if [ "${QUERY_STRING:-}" = auth-info ] && [ "${REQUEST_METHOD:-}" = GET ]; then
   INFO=$(sh "$LIB/web-auth.sh" info) || error '503 Service Unavailable' 'Не удалось проверить настройки входа.'
-  respond '200 OK' "$(printf '%s' "$INFO" | jq '. + {uiVersion:"0.11.1"}')"
+  respond '200 OK' "$(printf '%s' "$INFO" | jq '. + {uiVersion:"0.12.0"}')"
 fi
 case "${QUERY_STRING:-}:${REQUEST_METHOD:-}" in login:POST|setup:POST)
   [ "${CONTENT_TYPE:-}" = application/json ] || error '415 Unsupported Media Type' 'Ожидается JSON.'
@@ -231,10 +231,11 @@ case "${REQUEST_METHOD:-}" in
         OP_STATE=$(sh "$LIB/web-auth.sh" op-state) || error '500 Internal Server Error' 'Не удалось проверить операцию.'
         BUSY=$(printf '%s' "$OP_STATE" | jq -r .busy)
         OPERATION=''; [ ! -f "$LOCK/action" ] || OPERATION=$(cat "$LOCK/action")
+        IDENTITY=$(sh "$LIB/client-identity.sh" inspect 2>/dev/null) || IDENTITY='{}'
         RESULT='null'; [ ! -r "$RUN/result.json" ] || RESULT=$(cat "$RUN/result.json")
         respond '200 OK' "$(jq -n --arg status "$TEXT" --arg rss "${RSS:-0}" --arg operation "$OPERATION" \
-          --argjson operationState "$OP_STATE" --argjson autostart "$AUTOSTART" --argjson service "$SERVICE" --argjson report "$REPORT" --argjson meta "$META" --argjson busy "$BUSY" --argjson result "$RESULT" \
-          '{operationState:$operationState,autostart:$autostart,status:$status,service:$service,report:$report,uiVersion:"0.11.1",clientVersion:($meta.clientVersion // "неизвестна"),revision:($meta.revision // ""),operation:$operation,rssKiB:($rss|tonumber),busy:$busy,result:$result}')"
+          --argjson identity "$IDENTITY" --argjson operationState "$OP_STATE" --argjson autostart "$AUTOSTART" --argjson service "$SERVICE" --argjson report "$REPORT" --argjson meta "$META" --argjson busy "$BUSY" --argjson result "$RESULT" \
+          '{operationState:$operationState,autostart:$autostart,status:$status,service:$service,report:$report,uiVersion:"0.12.0",clientVersion:($identity.clientVersion // $meta.clientVersion // "неизвестна"),clientIdentityVerified:($identity.clientIdentityVerified//false),clientBuildRevision:$identity.clientBuildRevision,clientSha256:$identity.clientSha256,upstreamVersion:$identity.upstreamVersion,upstreamRevision:$identity.upstreamRevision,revision:($meta.revision // ""),operation:$operation,rssKiB:($rss|tonumber),busy:$busy,result:$result}')"
         ;;
       updates)
         UPDATE=$(sh "$LIB/web-update.sh" status) || error '500 Internal Server Error' 'Не удалось прочитать обновление.'
@@ -243,11 +244,12 @@ case "${REQUEST_METHOD:-}" in
         CAPABILITIES=$("$CTL" get-capabilities) || error '500 Internal Server Error' 'Не удалось прочитать возможности клиента.'
         CONNECTION=$("$CTL" get-settings) || error '500 Internal Server Error' 'Некорректные настройки подключения.'
         FALLBACK=$("$CTL" get-fallback) || error '500 Internal Server Error' 'Некорректные настройки резервных методов.'
+        INTERFACE_MTU=$("$CTL" get-interface-mtu 2>/dev/null) || INTERFACE_MTU=null
         POLICY=$("$CTL" get-server-policy) || error '500 Internal Server Error' 'Некорректные списки серверов.'
         SERVERS=$(decode_token < "$CONF/token") || error '500 Internal Server Error' 'Не удалось прочитать серверы из сохранённого токена.'
         SERVER=$(cat "$CONF/server")
-        respond '200 OK' "$(printf '%s' "$SERVERS" | jq --arg server "$SERVER" --argjson capabilities "$CAPABILITIES" --argjson fallback "$FALLBACK" --argjson connection "$CONNECTION" --argjson policy "$POLICY" \
-          '{capabilities:$capabilities,fallback:$fallback,server:$server,servers:[.servers[].name],connection:$connection,policy:$policy}')"
+        respond '200 OK' "$(printf '%s' "$SERVERS" | jq --arg server "$SERVER" --argjson interfaceMtu "$INTERFACE_MTU" --argjson capabilities "$CAPABILITIES" --argjson fallback "$FALLBACK" --argjson connection "$CONNECTION" --argjson policy "$POLICY" \
+          '{interfaceMtu:$interfaceMtu,capabilities:$capabilities,fallback:$fallback,server:$server,servers:[.servers[].name],connection:$connection,policy:$policy}')"
         ;;
       logs)
         { "$CTL" logs 2>&1 || true; [ ! -f "$RUN/action.log" ] || tail -c 8192 "$RUN/action.log"; } |

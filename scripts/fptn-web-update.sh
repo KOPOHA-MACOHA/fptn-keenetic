@@ -8,13 +8,17 @@ CONF=$ROOT/etc/fptn
 LIB=$ROOT/libexec/fptn
 fail() { echo "$*" >&2; exit 1; }
 validate() {
-  jq -ce 'select(.schema==1 and (.version|type=="string") and
+  jq -ce 'def hex($n): type=="string" and length==$n and all(explode[]; (.>=48 and .<=57) or (.>=97 and .<=102));
+    select(.schema==1 and (.version|type=="string") and
     (.version|split(".")|length==3 and all(.[]; length>0 and length<=4 and all(explode[]; .>=48 and .<=57))) and
     (.revision|type=="string" and length==40 and all(explode[]; (.>=48 and .<=57) or (.>=97 and .<=102))) and
     (.installerSha256|type=="string" and length==64 and all(explode[]; (.>=48 and .<=57) or (.>=97 and .<=102))) and
     (.clientRevision|type=="string" and length==40 and all(explode[]; (.>=48 and .<=57) or (.>=97 and .<=102))) and
-    (.clientVersion|type=="string" and length>0 and length<=32 and all(explode[]; (.>=48 and .<=57) or .==46))) |
-    {schema,version,revision,installerSha256,clientRevision,clientVersion}' "$1"
+    (.clientVersion|type=="string" and length>0 and length<=32 and all(explode[]; (.>=48 and .<=57) or .==46)) and
+    ((.clientSha256//null)==null or (.clientSha256|hex(64))) and
+    ((.upstreamRevision//null)==null or (.upstreamRevision|hex(40))) and
+    ((.upstreamVersion//null)==null or (.upstreamVersion|type=="string" and length>0 and length<=32 and all(explode[]; (.>=48 and .<=57) or .==46)))) |
+    {schema,version,revision,installerSha256,clientRevision,clientVersion,clientSha256,upstreamRevision,upstreamVersion}' "$1"
 }
 mkdir -p "$RUN"
 case "${1:-}" in
@@ -32,7 +36,13 @@ case "${1:-}" in
   if [ ! -f "$RUN/update-available.json" ]; then echo '{"checked":false,"available":false}'; exit 0; fi
   CATALOG=$(validate "$RUN/update-available.json") || fail 'Повторите проверку обновлений.'
   META='{}'; [ ! -f "$CONF/web-meta.json" ] || META=$(cat "$CONF/web-meta.json")
-  printf '%s' "$CATALOG" | jq --argjson meta "$META" '. + {checked:true,available:(.revision!=($meta.revision//"") and ((.version|split(".")|map(tonumber)) >= (($meta.uiVersion//"0.0.0")|split(".")|map(tonumber))))}'
+  IDENTITY='{}'
+  if [ -f "$LIB/client-identity.sh" ]; then IDENTITY=$(sh "$LIB/client-identity.sh" inspect) || IDENTITY='{}'; fi
+  printf '%s' "$CATALOG" | jq --argjson meta "$META" --argjson identity "$IDENTITY" '
+    (.clientSha256!=null and $identity.clientSha256!=null and .clientSha256!=$identity.clientSha256) as $clientUpdate |
+    (.clientSha256!=null and (.clientSha256!=$identity.clientSha256 or ($identity.clientIdentityVerified//false)!=true or .clientRevision!=$identity.clientBuildRevision or (.upstreamRevision!=null and .upstreamRevision!=$identity.upstreamRevision))) as $identityUpdate |
+    . + {checked:true,clientUpdate:$clientUpdate,identityUpdate:$identityUpdate,available:((.revision!=($meta.revision//"") or $identityUpdate) and ((.version|split(".")|map(tonumber)) >= (($meta.uiVersion//"0.0.0")|split(".")|map(tonumber))))}'
+
   ;;
  apply)
   # Caller must hold the journalled update operation. The installer verifies it too.
@@ -49,7 +59,10 @@ case "${1:-}" in
   SUM=$(printf '%s' "$CATALOG" | jq -r .installerSha256)
   CLIENT_REV=$(printf '%s' "$CATALOG" | jq -r .clientRevision)
   FPTN_TARGET_CLIENT_VERSION=$(printf '%s' "$CATALOG" | jq -r .clientVersion)
-  export FPTN_TARGET_CLIENT_VERSION
+  FPTN_TARGET_CLIENT_SHA256=$(printf '%s' "$CATALOG" | jq -r '.clientSha256 // ""')
+  FPTN_TARGET_UPSTREAM_VERSION=$(printf '%s' "$CATALOG" | jq -r '.upstreamVersion // ""')
+  FPTN_TARGET_UPSTREAM_REVISION=$(printf '%s' "$CATALOG" | jq -r '.upstreamRevision // ""')
+  export FPTN_TARGET_CLIENT_VERSION FPTN_TARGET_CLIENT_SHA256 FPTN_TARGET_UPSTREAM_VERSION FPTN_TARGET_UPSTREAM_REVISION
   curl --proto '=https' --proto-redir '=https' -fsSL --connect-timeout 15 --max-time 60 --max-filesize 262144 \
     "https://raw.githubusercontent.com/KOPOHA-MACOHA/fptn-keenetic/$REV/scripts/install-web-ui.sh" -o "$TEMP/install.sh"
   printf '%s  %s\n' "$SUM" "$TEMP/install.sh" | sha256sum -c - || fail 'Не совпала контрольная сумма установщика.'

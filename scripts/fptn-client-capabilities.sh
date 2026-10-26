@@ -4,6 +4,8 @@ set -eu
 umask 077
 export LC_ALL=C LANG=C
 ROOT=${FPTN_PREFIX:-/opt}
+CACHED_ONLY=no
+if [ "${1:-}" = --cached ]; then CACHED_ONLY=yes; shift; fi
 CLIENT=${1:-$ROOT/libexec/fptn/fptn-client-cli}
 CACHE=$ROOT/var/run/fptn-capabilities
 fail() { echo "FPTN capabilities: $*" >&2; exit 1; }
@@ -29,6 +31,7 @@ if [ -r "$CACHE/current.json" ] && [ "$(wc -c < "$CACHE/current.json")" -le 6553
   jq -e --arg key "$KEY" '.schema==1 and .fingerprint==$key and (.methods|type=="array" and length>0) and (.strategies|type=="array" and length>0)' "$CACHE/current.json" >/dev/null 2>&1; then
   jq 'del(.fingerprint)' "$CACHE/current.json"; exit 0
 fi
+[ "$CACHED_ONLY" = no ] || exit 1
 TMP=$(mktemp -d "$CACHE/read.XXXXXX")
 trap 'rm -rf "$TMP"' EXIT
 trap 'exit 1' INT TERM HUP

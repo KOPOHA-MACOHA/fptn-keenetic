@@ -1,5 +1,5 @@
 'use strict';
-const UI_VERSION = '0.11.1';
+const UI_VERSION = '0.12.0';
 const $ = id => document.getElementById(id);
 if (window.top !== window.self) { document.documentElement.replaceChildren(); throw new Error('Panel cannot be framed'); }
 let profiles={},clientCapabilities=null;
@@ -21,7 +21,7 @@ async function api(query,body){
   if(response.status===401){loggedOut();throw new Error(data.error||'Войдите по логину и паролю.');}
   if(!response.ok)throw new Error(data.error||'Ошибка запроса');return data;
 }
-function collectSettings(){return {server:$('server').value,token:$('token').value.trim(),connection:{mtu:Number($('mtu').value||0),outInterface:$('out-interface').value.trim(),strategy:$('strategy').value,bypass:$('mode').value==='obfuscation'?'obfuscation':$('profile').value,sni:$('sni').value.trim()||'google.com'},fallback:$('fallback-enabled').checked?{enabled:$('fallback-enabled').checked,profiles:[...new Set(fallbackProfiles.map(id=>$(id).value).filter(Boolean))],domains:$('fallback-domains').value.split(/\r?\n/).map(s=>s.trim()).filter(Boolean),budget:Number($('fallback-budget').value)}:{...savedFallback,enabled:false},policy:{mode:$('selection-mode').value,favorites:[...favorites].sort(),excluded:[...excluded].sort()}};}
+function collectSettings(){return {server:$('server').value,token:$('token').value.trim(),connection:{mtu:$('mtu-mode').value==='custom'?Number($('mtu').value):0,outInterface:$('out-interface').value.trim(),strategy:$('strategy').value,bypass:$('mode').value==='obfuscation'?'obfuscation':$('profile').value,sni:$('sni').value.trim()||'google.com'},fallback:$('fallback-enabled').checked?{enabled:$('fallback-enabled').checked,profiles:[...new Set(fallbackProfiles.map(id=>$(id).value).filter(Boolean))],domains:$('fallback-domains').value.split(/\r?\n/).map(s=>s.trim()).filter(Boolean),budget:Number($('fallback-budget').value)}:{...savedFallback,enabled:false},policy:{mode:$('selection-mode').value,favorites:[...favorites].sort(),excluded:[...excluded].sort()}};}
 function updateDirty(){
   dirty=loaded&&JSON.stringify(collectSettings())!==savedSnapshot;
   $('unsaved').hidden=!dirty;
@@ -45,7 +45,7 @@ function setControls(){
   $('preview').disabled=busy||versionMismatch;
   $('check-servers').disabled=busy||!known||!loaded||dirty;
   document.querySelectorAll('#dashboard input,#dashboard select,#dashboard textarea,.server-role').forEach(el=>{el.disabled=busy||versionMismatch;});
-  if(!busy&&!versionMismatch)showSelection();
+  if(!busy&&!versionMismatch){showSelection();showMtu();}
 }
 function fillServers(servers,selected){serverNames=servers;favorites=new Set([...favorites].filter(name=>servers.includes(name)));excluded=new Set([...excluded].filter(name=>servers.includes(name)));renderServers(selected);}
 function renderServers(selected=$('server').value){
@@ -98,16 +98,17 @@ function fillProfiles(selected){
 function setFallbackProfiles(selected){
   fallbackProfiles.forEach((id,index)=>{const value=selected[index]||'';if(value&&![...$(id).options].some(option=>option.value===value)){const unavailable=new Option('Недоступен в этой версии: '+profileLabel(value),value);unavailable.disabled=true;$(id).append(unavailable);}$(id).value=value;});
 }
+function showMtu(){const custom=$('mtu-mode').value==='custom';$('mtu-custom').hidden=!custom;$('mtu').disabled=!custom;}
 function showSni(){$('sni-fields').hidden=$('mode').value!=='sni';}
 async function loadSettings(){
   const data=await api('settings');renderCapabilities(data.capabilities);const policy=data.policy||{mode:'manual',favorites:[],excluded:[]};favorites=new Set(policy.favorites);excluded=new Set(policy.excluded);$('selection-mode').value=policy.mode;fillServers(data.servers,data.server);
-  $('mtu').value=String(data.connection.mtu??0);$('out-interface').value=data.connection.outInterface||'';
+  $('mtu-mode').value=data.connection.mtu>0?'custom':'auto';$('mtu').value=String(data.connection.mtu||data.interfaceMtu||1420);$('mtu-auto-option').textContent='Как в Keenetic'+(data.interfaceMtu?' ('+data.interfaceMtu+')':'');showMtu();$('out-interface').value=data.connection.outInterface||'';
   $('strategy').value=data.connection.strategy;const bypass=data.connection.bypass;$('mode').value=bypass==='obfuscation'?'obfuscation':'sni';if(bypass!=='obfuscation')$('browser').value=bypass.split('-')[2];fillProfiles(bypass);$('sni').value=data.connection.sni;showSni();const fallback=data.fallback||{enabled:false,profiles:[],domains:[],budget:60};savedFallback=JSON.parse(JSON.stringify(fallback));$('fallback-enabled').checked=fallback.enabled;setFallbackProfiles(fallback.profiles);$('fallback-domains').value=(fallback.domains.length?fallback.domains:[data.connection.sni]).join('\n');$('fallback-budget').value=String(fallback.budget);$('fallback-fields').hidden=!fallback.enabled;previewToken='';$('token').value='';loaded=true;savedSnapshot=JSON.stringify(collectSettings());updateDirty();
 }
 function applyStatus(data){
   if(!data.service||typeof data.service.state!=='string')throw new Error('Старая версия API. Обновите панель и управляющий скрипт.');
   lastData=data;versionMismatch=data.uiVersion!==UI_VERSION;
-  $('versions').textContent='Панель '+UI_VERSION+' · клиент '+data.clientVersion+(data.revision?' · '+data.revision.slice(0,7):'');
+  $('versions').textContent='Панель '+UI_VERSION+' · клиент Keenetic '+data.clientVersion+' · исходный FPTN '+(data.upstreamVersion||'не определён')+(data.clientBuildRevision?' · сборка '+data.clientBuildRevision.slice(0,7):'');
   $('version-mismatch').hidden=!versionMismatch;
   if(versionMismatch)$('version-mismatch-text').textContent='Версия страницы '+UI_VERSION+' отличается от API '+data.uiVersion+'. Обновите страницу.';
   $('autostart-state').textContent=data.autostart?'Автозапуск включён':'Автозапуск выключен';
@@ -197,6 +198,7 @@ $('login-form').addEventListener('submit',async event=>{event.preventDefault();
 $('logout').addEventListener('click',async()=>{try{await api('logout',{});}catch(error){notice(error.message,true);}finally{loggedOut();}});
 $('reload-ui').addEventListener('click',()=>{window.location.href='/?v='+Date.now();});
 $('browser').addEventListener('change',()=>{fillProfiles();updateDirty();});$('mode').addEventListener('change',()=>{showSni();updateDirty();});$('selection-mode').addEventListener('change',()=>{showSelection();updateDirty();});
+$('mtu-mode').addEventListener('change',()=>{showMtu();updateDirty();});
 for(const id of ['server','strategy','profile','sni','token','mtu','out-interface'])$(id).addEventListener('input',updateDirty);
 for(const id of ['server','strategy','profile','sni','mtu','out-interface'])$(id).addEventListener('change',updateDirty);
 $('fallback-enabled').addEventListener('change',()=>{$('fallback-fields').hidden=!$('fallback-enabled').checked;updateDirty();});
@@ -217,7 +219,7 @@ fillProfiles();setControls();loadAuthInfo().then(()=>{if(key)return openPanel();
 async function loadUpdates(){
   updateInfo=await api('updates');
   $('install-update').hidden=!updateInfo.available;
-  $('update-status').textContent=!updateInfo.checked?'Обновления ещё не проверены.':updateInfo.available?'Доступна панель '+updateInfo.version+' · клиент '+updateInfo.clientVersion+'. Настройки и автозапуск сохраняются.':'Опубликованных обновлений нет.';
+  $('update-status').textContent=!updateInfo.checked?'Обновления ещё не проверены.':updateInfo.available?'Доступна панель '+updateInfo.version+' · клиент Keenetic '+updateInfo.clientVersion+(updateInfo.upstreamVersion?' · исходный FPTN '+updateInfo.upstreamVersion:'')+(updateInfo.clientUpdate?' · новая сборка клиента':'')+'. Настройки и автозапуск сохраняются.':'Опубликованных обновлений нет.';
   setControls();
 }
 $('check-update').addEventListener('click',()=>command({action:'check-update'}));

@@ -31,6 +31,11 @@ jobs:
           php-cgi -n -v
       - name: Verify discovery and invalidation of client capabilities
         run: python3 -m unittest discover -s tests -p 'test_client_capabilities.py' -v
+      - name: Verify client identity and binary update rollback
+        run: |
+          python3 -m unittest discover -s tests -p 'test_client_identity.py' -v
+          python3 -m unittest discover -s tests -p 'test_web_installer.py' -v
+          python3 -m unittest discover -s tests -p 'test_web_update.py' -v
       - name: Verify real lighttpd entry and authentication endpoints
         run: python3 -m unittest discover -s tests -p 'test_lighttpd_entry.py' -v
       - name: Verify interrupted operations and credential changes

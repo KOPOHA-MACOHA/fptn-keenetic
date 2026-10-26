@@ -47,3 +47,20 @@ shutil.copyfile(root/('channel' if url.endswith('web/update.json') else 'install
             (self.conf/'web-meta.json').write_text(json.dumps(meta));self.assertFalse(json.loads(self.call('status').stdout)['available']);self.assertNotEqual(self.call('apply').returncode,0)
     def test_offline_check_does_not_change_installation(self):
         (self.root/'offline').touch();self.assertNotEqual(self.call('check').returncode,0);self.assertFalse((self.run/'update-available.json').exists());self.assertFalse((self.root/'applied').exists())
+
+    def test_same_ui_revision_detects_changed_binary_identity(self):
+        self.catalog.update(clientSha256='f'*64,upstreamVersion='0.4.6',upstreamRevision='e'*40)
+        self.channel.write_text(json.dumps(self.catalog));(self.conf/'web-meta.json').write_text(json.dumps({'uiVersion':'0.9.0','revision':'a'*40}))
+        lib=self.root/'libexec/fptn';lib.mkdir(parents=True)
+        state={'clientSha256':'d'*64,'clientIdentityVerified':True,'clientBuildRevision':'c'*40,'upstreamRevision':'e'*40}
+        (self.root/'identity.json').write_text(json.dumps(state))
+        helper=lib/'client-identity.sh';helper.write_text('#!/bin/sh\ncat "$FPTN_PREFIX/identity.json"\n')
+        self.check();data=json.loads(self.call('status').stdout);self.assertTrue(data['available']);self.assertTrue(data['clientUpdate'])
+        state['clientSha256']='f'*64;(self.root/'identity.json').write_text(json.dumps(state))
+        data=json.loads(self.call('status').stdout);self.assertFalse(data['available']);self.assertFalse(data['clientUpdate'])
+
+    def test_extra_identity_fields_are_validated_and_preserved(self):
+        self.catalog.update(clientSha256='f'*64,upstreamVersion='0.4.6',upstreamRevision='e'*40)
+        self.channel.write_text(json.dumps(self.catalog));self.check()
+        data=json.loads((self.run/'update-available.json').read_text());self.assertEqual(data['clientSha256'],'f'*64);self.assertEqual(data['upstreamVersion'],'0.4.6')
+        self.channel.write_text(json.dumps({**self.catalog,'clientSha256':'broken'}));self.assertNotEqual(self.call('check').returncode,0)

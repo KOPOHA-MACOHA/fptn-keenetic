@@ -50,6 +50,7 @@ class WebUiTest(unittest.TestCase):
         lib = self.root / 'libexec/fptn'
         lib.mkdir(parents=True)
         client_fixture.install(self.root)
+        shutil.copyfile(ROOT/'scripts/fptn-client-identity.sh',lib/'client-identity.sh')
         shutil.copyfile(ROOT/'scripts/fptn-web-auth.sh',lib/'web-auth.sh')
         shutil.copyfile(ROOT/'scripts/fptn-web-auth.php',lib/'web-auth.php')
         shutil.copyfile(ROOT/'scripts/fptn-web-operations.php',lib/'web-operations.php')
@@ -237,7 +238,7 @@ else: sys.exit(2)
     def test_status_exposes_explicit_state_and_versions(self):
         (self.conf/'web-meta.json').write_text(json.dumps({'clientVersion':'0.4.0','revision':'abc'}))
         status,data=self.request()
-        self.assertEqual(status,200);self.assertEqual(data['uiVersion'],'0.11.1')
+        self.assertEqual(status,200);self.assertEqual(data['uiVersion'],'0.12.0')
         self.assertEqual(data['clientVersion'],'0.4.0')
         self.assertTrue(data['service']['canStart']);self.assertFalse(data['service']['canStop'])
         self.client_run.mkdir()
@@ -258,8 +259,8 @@ else: sys.exit(2)
     def test_entry_page_is_not_cached_and_assets_are_versioned(self):
         page=subprocess.run(['sh',str(ROOT/'web/index.cgi')],capture_output=True,check=True).stdout.decode()
         self.assertIn('Cache-Control: no-store',page)
-        self.assertIn('data-ui-version="0.11.1"',page)
-        self.assertIn('app.js?v=0.11.1',page)
+        self.assertIn('data-ui-version="0.12.0"',page)
+        self.assertIn('app.js?v=0.12.0',page)
 
     def test_failed_save_restores_previous_actual_firmware_mtu(self):
         old=self.settings();(self.conf/'connection.json').write_text(json.dumps(old))
@@ -269,6 +270,16 @@ else: sys.exit(2)
         self.assertEqual((self.root/'interface-mtu').read_text(),'1440')
         self.assertEqual(json.loads((self.conf/'connection.json').read_text()),old)
         self.assertTrue(self.client_run.exists())
+
+
+    def test_status_shows_original_version_only_for_matching_verified_binary(self):
+        subprocess.run(['sh',str(ROOT/'scripts/fptn-client-capabilities.sh')],env=self.env,capture_output=True,check=True)
+        binary=self.root/'libexec/fptn/fptn-client-cli'
+        record={"schema":1,"platform":"mipsel-mips32r2-softfloat","buildRevision":"a"*40,"sha256":hashlib.sha256(binary.read_bytes()).hexdigest(),"clientVersion":"0.4.0","upstreamRevision":"b"*40,"upstreamVersion":"0.4.6","sourceLockSha256":"c"*64}
+        (self.conf/'client-release.json').write_text(json.dumps(record))
+        status,data=self.request();self.assertEqual(status,200);self.assertTrue(data['clientIdentityVerified']);self.assertEqual(data['upstreamVersion'],'0.4.6')
+        record['sha256']='f'*64;(self.conf/'client-release.json').write_text(json.dumps(record))
+        status,data=self.request();self.assertEqual(status,200);self.assertFalse(data['clientIdentityVerified']);self.assertIsNone(data['upstreamVersion'])
 
 
 if __name__ == '__main__':

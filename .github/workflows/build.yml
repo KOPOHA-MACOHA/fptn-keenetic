@@ -14,6 +14,10 @@ on:
       - 'scripts/fptn-transport-plan.php'
       - 'scripts/fptn-web-update.sh'
       - 'scripts/fptn-client-capabilities.sh'
+      - 'scripts/fptn-client-identity.sh'
+      - 'scripts/package-client-release.py'
+      - 'client-release.json'
+      - 'tests/test_client_identity.py'
       - 'tests/client_fixture.py'
       - 'tests/fixtures/client-help.txt'
       - 'tests/test_client_capabilities.py'
@@ -89,10 +93,16 @@ jobs:
     permissions:
       contents: write
     steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.source-ref || github.sha }}
+          persist-credentials: false
       - uses: actions/download-artifact@v4
         with:
           name: fptn-native-client
           path: client
+      - name: Describe verified client and original sources
+        run: python3 scripts/package-client-release.py . client "$GITHUB_SHA"
       - name: Publish pinned prototype assets for router updater
         env:
           GH_TOKEN: ${{ github.token }}
@@ -107,7 +117,7 @@ jobs:
               --notes 'Native prototype for Hopper KN-3810 / Entware mipsel. Includes favorite/excluded server policy, bounded automatic selection, live connection status and login checks without a TUN. Compilation and local tests passed; router validation of this update is still required. Routing, DNS and firewall remain managed by Keenetic.'
           fi
           gh release upload "$tag" client/fptn-client-cli client/SHA256SUMS \
-            client/HELP.txt client/LICENSE-FPTN client/sources.lock.json --clobber
+            client/HELP.txt client/LICENSE-FPTN client/sources.lock.json client/client-release.json --clobber
   client:
     needs: probe
     runs-on: ubuntu-24.04

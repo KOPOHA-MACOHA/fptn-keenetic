@@ -28,6 +28,7 @@ elif command=='netstat':print('Active Internet connections (only servers)')
 elif command=='lighttpd':
  if '-p' in args:print('server.modules = ( "mod_cgi" )')
 elif command=='curl':
+ with (root/'downloads').open('a') as f:f.write(' '.join(args)+'\n')
  url=next(a for a in args if a.startswith('http'))
  if url.startswith('http://192.168.1.1:1111'):
   with (root/'http-probes').open('a') as f:f.write(url+'\n')
@@ -47,7 +48,7 @@ elif command=='curl':
   if 'auth-info' in url:
    with (root.parent/'trace').open('a') as f:f.write('http-auth-info\n')
   if '-K' in args:sys.stdin.read()
-  info={'uiVersion':'old' if (root/'wrong-api').exists() else '0.11.1','service':{'state':'stopped'},'busy':False,'status':'stopped','configured':True,'rootAvailable':True}
+  info={'uiVersion':'old' if (root/'wrong-api').exists() else '0.12.0','service':{'state':'stopped'},'busy':False,'status':'stopped','configured':True,'rootAvailable':True}
   text=json.dumps(info)
   if out:out.write_text(text)
   else:print(text)
@@ -90,7 +91,7 @@ case "$1" in
  get-fallback) echo '{"enabled":false,"profiles":[],"domains":[],"budget":60}' ;;
  get-settings) echo '{"bypass":"obfuscation","strategy":"dual-rolling-tunnel","sni":"google.com"}' ;;
  stop) [ ! -f "$FPTN_PREFIX/fail-stop" ] || exit 1; rm -rf "$FPTN_PREFIX/var/run/fptn-keenetic" ;;
- start) python3 -c 'import signal,sys;sys.exit(signal.getsignal(signal.SIGTERM)==signal.SIG_IGN)' || exit 1; mkdir -p "$FPTN_PREFIX/var/run/fptn-keenetic" ;;
+ start) if [ LABEL = staged ] && [ -f "$FPTN_PREFIX/fail-new-start" ]; then exit 1; fi; python3 -c 'import signal,sys;sys.exit(signal.getsignal(signal.SIGTERM)==signal.SIG_IGN)' || exit 1; mkdir -p "$FPTN_PREFIX/var/run/fptn-keenetic" ;;
  *) exit 1 ;;
 esac
 '''.replace('LABEL',label)
@@ -101,7 +102,7 @@ esac
         (lib/'brotli').write_text('dummy')
         self.old_sums=''.join(hashlib.sha256((lib/p).read_bytes()).hexdigest()+'  '+p+'\n' for p in ['fptn-client-cli','brotli'])
         (lib/'SHA256SUMS').write_text(self.old_sums)
-        paths=['web/index.html','web/index.cgi','web/style.css','web/app.js','web/api.cgi','scripts/fptn-native-service.sh','scripts/fptn-web-auth.sh','scripts/fptn-web-auth.php','scripts/fptn-web-operations.php','scripts/fptn-transport-plan.php','scripts/fptn-web-update.sh','scripts/fptn-client-capabilities.sh']
+        paths=['client-release.json','web/index.html','web/index.cgi','web/style.css','web/app.js','web/api.cgi','scripts/fptn-native-service.sh','scripts/fptn-web-auth.sh','scripts/fptn-web-auth.php','scripts/fptn-web-operations.php','scripts/fptn-transport-plan.php','scripts/fptn-web-update.sh','scripts/fptn-client-capabilities.sh','scripts/fptn-client-identity.sh']
         for name in paths:
             target=self.payload/name;target.parent.mkdir(parents=True,exist_ok=True)
             target.write_text(controller('staged') if name=='scripts/fptn-native-service.sh' else (REPO/name).read_text())
@@ -109,9 +110,20 @@ esac
         (self.payload/'client').mkdir()
         new=self.payload/'client/fptn-client-cli';new.write_text('#!/bin/sh\ncase "$1" in --help) cat '+str(REPO/'tests/fixtures/client-help.txt')+';; --version) echo 0.4.0;; esac\n')
         (self.payload/'client/SHA256SUMS').write_text(hashlib.sha256(new.read_bytes()).hexdigest()+'  fptn-client-cli\n')
-        self.installer=self.base/'installer.sh'
+        import json
+        source_lock=json.dumps({'fptn':'c'*40,'boringssl':'d'*40,'camouflage_tls':'d'*40,'ntp_client':'d'*40,'yaff':'d'*40},indent=2)+'\n'
+        (self.payload/'client/sources.lock.json').write_text(source_lock)
+        self.target={'schema':1,'platform':'mipsel-mips32r2-softfloat','buildRevision':'b'*40,'sha256':hashlib.sha256(new.read_bytes()).hexdigest(),'clientVersion':'0.4.0','upstreamRevision':'c'*40,'upstreamVersion':'0.4.6','sourceLockSha256':hashlib.sha256(source_lock.encode()).hexdigest()}
+        (self.payload/'client-release.json').write_text(json.dumps(self.target))
+        self.refresh_manifest()
+        self.old_source='{"fptn":"'+('d'*40)+'"}\n';(lib/'sources.lock.json').write_text(self.old_source)
+        self.installer=self.base/'installer.sh' 
         # Only translate its absolute /opt filesystem paths; execute all transaction code.
         self.installer.write_text((REPO/'scripts/install-web-ui.sh').read_text().replace('/opt',str(self.root)))
+
+    def refresh_manifest(self):
+        names=[line.split('  ',1)[1] for line in (self.payload/'web/SHA256SUMS').read_text().splitlines()]
+        (self.payload/'web/SHA256SUMS').write_text(''.join(hashlib.sha256((self.payload/p).read_bytes()).hexdigest()+'  '+p+'\n' for p in names))
 
     def execute(self):
         return subprocess.run(['sh',str(self.installer),'install','a'*40,'192.168.1.1','b'*40],env=self.env,text=True,capture_output=True,timeout=20)
@@ -121,6 +133,7 @@ esac
         self.assertEqual((self.root/'libexec/fptn/fptn-client-cli').read_text(),self.old_binary)
         self.assertEqual((self.root/'libexec/fptn/SHA256SUMS').read_text(),self.old_sums)
         self.assertEqual((self.root/'share/fptn-web/index.html').read_text(),'original UI')
+        self.assertEqual((self.root/'libexec/fptn/sources.lock.json').read_text(),self.old_source)
 
     def test_stop_failure_restores_web_without_repeating_stop_or_replacing_binary(self):
         (self.root/'fail-stop').touch();result=self.execute()
@@ -229,3 +242,46 @@ sys.exit(result.returncode)
         result=self.execute();self.assertEqual(result.returncode,0,result.stdout+result.stderr)
         self.assertTrue((self.root/'libexec/fptn/client-capabilities.sh').exists())
         self.assertGreater(int((self.root/'stat-reads').read_text()),0)
+
+    def install_old_identity(self):
+        import json
+        record={**self.target,'buildRevision':'e'*40,'sha256':hashlib.sha256(self.old_binary.encode()).hexdigest(),'clientVersion':'0.4.0','upstreamRevision':'d'*40,'upstreamVersion':'0.4.5','sourceLockSha256':hashlib.sha256(self.old_source.encode()).hexdigest()}
+        path=self.root/'etc/fptn/client-release.json';path.write_text(json.dumps(record));return path.read_bytes()
+
+    def test_same_version_different_binary_is_replaced(self):
+        import json
+        self.old_binary=(self.payload/'client/fptn-client-cli').read_text()+'# previous build\n'
+        lib=self.root/'libexec/fptn';(lib/'fptn-client-cli').write_text(self.old_binary)
+        self.old_sums=''.join(hashlib.sha256((lib/p).read_bytes()).hexdigest()+'  '+p+'\n' for p in ['fptn-client-cli','brotli']);(lib/'SHA256SUMS').write_text(self.old_sums)
+        self.install_old_identity()
+        result=self.execute();self.assertEqual(result.returncode,0,result.stdout+result.stderr)
+        self.assertEqual((lib/'fptn-client-cli').read_bytes(),(self.payload/'client/fptn-client-cli').read_bytes())
+        record=json.loads((self.root/'etc/fptn/client-release.json').read_text());self.assertEqual(record,self.target)
+        self.assertIn('staged-stop',self.trace.read_text());self.assertIn('staged-start',self.trace.read_text())
+
+    def test_identical_binary_migrates_provenance_without_restarting_or_redownloading(self):
+        import json
+        lib=self.root/'libexec/fptn';(lib/'fptn-client-cli').write_bytes((self.payload/'client/fptn-client-cli').read_bytes())
+        (lib/'sources.lock.json').write_bytes((self.payload/'client/sources.lock.json').read_bytes())
+        result=self.execute();self.assertEqual(result.returncode,0,result.stdout+result.stderr)
+        self.assertNotIn('staged-stop',self.trace.read_text());self.assertNotIn('staged-start',self.trace.read_text())
+        self.assertNotIn('/releases/download/',(self.root/'downloads').read_text())
+        self.assertEqual(json.loads((self.root/'etc/fptn/client-release.json').read_text()),self.target)
+
+    def test_untrusted_binary_digest_is_rejected_before_stopping_service(self):
+        (self.payload/'client/fptn-client-cli').write_text('#!/bin/sh\nexit 0\n')
+        result=self.execute();self.assertNotEqual(result.returncode,0)
+        self.assert_original_files();self.assertFalse(self.trace.exists());self.assertTrue((self.root/'var/run/fptn-keenetic').exists())
+
+    def test_source_metadata_mismatch_is_rejected_before_stopping_service(self):
+        import json
+        self.target['upstreamRevision']='f'*40
+        (self.payload/'client-release.json').write_text(json.dumps(self.target));self.refresh_manifest()
+        result=self.execute();self.assertNotEqual(result.returncode,0)
+        self.assert_original_files();self.assertFalse(self.trace.exists())
+
+    def test_failed_new_start_restores_binary_sources_identity_and_running_service(self):
+        previous=self.install_old_identity();(self.root/'fail-new-start').touch()
+        result=self.execute();self.assertNotEqual(result.returncode,0,result.stdout+result.stderr)
+        self.assert_original_files();self.assertEqual((self.root/'etc/fptn/client-release.json').read_bytes(),previous)
+        self.assertIn('old-start',self.trace.read_text());self.assertTrue((self.root/'var/run/fptn-keenetic').exists())

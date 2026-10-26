@@ -1,5 +1,5 @@
 <!doctype html>
-<html lang="ru" data-ui-version="0.11.1">
+<html lang="ru" data-ui-version="0.12.0">
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
@@ -7,13 +7,13 @@
   <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self'; style-src 'self'; connect-src 'self'; img-src 'self'; object-src 'none'; base-uri 'none'; form-action 'self'; frame-src 'none'">
   <title>FPTN · Keenetic</title>
   <link rel="icon" href="data:,">
-  <link rel="stylesheet" href="style.css?v=0.11.1-8f209edfd09d">
-  <script src="app.js?v=0.11.1-834a446732d7" defer></script>
+  <link rel="stylesheet" href="style.css?v=0.12.0-8f209edfd09d">
+  <script src="app.js?v=0.12.0-d148f77f8f3d" defer></script>
 </head>
 <body>
   <div class="shell">
     <header><a class="brand" href="./"><span class="mark">F</span><span>FPTN <small>KEENETIC</small></span></a><button id="logout" class="quiet" hidden>Выйти</button></header>
-    <p id="versions" class="version-line">Панель 0.11.1 · версия клиента появится после входа</p>
+    <p id="versions" class="version-line">Панель 0.12.0 · версия клиента появится после входа</p>
     <div id="version-mismatch" class="banner error-banner" hidden><span id="version-mismatch-text"></span><button id="reload-ui" type="button">Обновить страницу</button></div>
     <section id="login" class="card login">
       <span class="eyebrow">ЛОКАЛЬНАЯ ПАНЕЛЬ</span>
@@ -79,8 +79,9 @@
               </div>
             </details>
             <details class="transport-options"><summary>Дополнительные параметры</summary>
-              <label for="mtu">MTU туннеля</label><input id="mtu" type="number" min="0" max="65535" step="1" value="0">
-              <p class="hint">0 — использовать MTU интерфейса Keenetic. Явное значение: 576–65535. При запуске служба применит его только к OpkgTun0; маршруты не меняются.</p>
+              <label for="mtu-mode">MTU туннеля</label><select id="mtu-mode"><option id="mtu-auto-option" value="auto">Как в Keenetic</option><option value="custom">Задать вручную</option></select>
+              <div id="mtu-custom" hidden><label for="mtu">Значение MTU</label><input id="mtu" type="number" min="576" max="65535" step="1" value="1420"></div>
+              <p class="hint">«Как в Keenetic» использует текущее значение OpkgTun0. Значение по умолчанию оригинального FPTN — 1420. Вручную можно задать 576–65535 только для интерфейса FPTN.</p>
               <label for="out-interface">Исходящий интерфейс</label><input id="out-interface" maxlength="15" autocomplete="off" spellcheck="false" placeholder="Автоматически">
               <p class="hint">Необязательно: системное имя, например eth2.2. Пусто — обычное подключение к интернету. Для выбранного интерфейса нужен IPv4-шлюз в основной таблице маршрутизации.</p>
             </details>

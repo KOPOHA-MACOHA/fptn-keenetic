@@ -11,9 +11,11 @@ fail() { echo "ОШИБКА: $*" >&2; exit 1; }
 REV=${2:-}
 case "$REV" in *[!a-f0-9]*|'') fail 'Нужен полный SHA коммита.' ;; esac
 [ "${#REV}" -eq 40 ] || fail 'Нужен полный SHA коммита.'
-CLIENT_REV=${4:-c0386cbb73bf9ddf35e551c08d094ac0debf2466}
+CLIENT_REV=${4:-}
+if [ -n "$CLIENT_REV" ]; then
 case "$CLIENT_REV" in *[!a-f0-9]*|'') fail 'Некорректный SHA бинарника.' ;; esac
 [ "${#CLIENT_REV}" -eq 40 ] || fail 'Нужен полный SHA бинарника.'
+fi
 LAN=${3:-192.168.1.1}
 printf '%s\n' "$LAN" | awk -F. 'NF!=4 {exit 1} {for(i=1;i<=4;i++) if($i!~/^[0-9]+$/ || $i>255 || length($i)>3) exit 1}' || fail 'Некорректный IPv4 LAN.'
 PORT=1111
@@ -60,6 +62,10 @@ OPS_EXISTED=no
 TRANSPORT_EXISTED=no
 UPDATE_EXISTED=no
 CAPS_EXISTED=no
+IDENTITY_HELPER_EXISTED=no
+IDENTITY_EXISTED=no
+SOURCE_LOCK_EXISTED=no
+SUMS_EXISTED=no
 ORIGIN_EXISTED=no
 META_EXISTED=no
 CLIENT_UPDATE=no
@@ -83,8 +89,15 @@ finish() {
     if [ "$CLIENT_SWAPPED" = yes ]; then
       cp -p "$BACKUP/fptn-client-cli" /opt/libexec/fptn/fptn-client-cli.restore
       mv /opt/libexec/fptn/fptn-client-cli.restore /opt/libexec/fptn/fptn-client-cli
-      cp -p "$BACKUP/SHA256SUMS" /opt/libexec/fptn/SHA256SUMS
     fi
+    if [ "$SUMS_EXISTED" = yes ]; then cp -p "$BACKUP/SHA256SUMS" /opt/libexec/fptn/SHA256SUMS
+    else rm -f /opt/libexec/fptn/SHA256SUMS; fi
+    if [ "$SOURCE_LOCK_EXISTED" = yes ]; then cp -p "$BACKUP/sources.lock.json" /opt/libexec/fptn/sources.lock.json
+    else rm -f /opt/libexec/fptn/sources.lock.json; fi
+    if [ "$IDENTITY_EXISTED" = yes ]; then cp -p "$BACKUP/client-release.json" "$CONF/client-release.json"
+    else rm -f "$CONF/client-release.json"; fi
+    if [ "$IDENTITY_HELPER_EXISTED" = yes ]; then cp -p "$BACKUP/client-identity.sh" /opt/libexec/fptn/client-identity.sh
+    else rm -f /opt/libexec/fptn/client-identity.sh; fi
     cp -p "$BACKUP/fptnctl" /opt/bin/fptnctl.restore
     mv /opt/bin/fptnctl.restore /opt/bin/fptnctl
     rm -rf "$WEB"
@@ -120,7 +133,7 @@ BASE=https://raw.githubusercontent.com/KOPOHA-MACOHA/fptn-keenetic/$REV
 echo 'Скачиваю панель и управляющий скрипт. Сборка зависимостей не требуется.'
 mkdir -p "$STAGE/web" "$STAGE/scripts"
 curl -fL --connect-timeout 15 --max-time 60 "$BASE/web/SHA256SUMS" -o "$STAGE/SHA256SUMS"
-for path in web/index.html web/index.cgi web/style.css web/app.js web/api.cgi scripts/fptn-native-service.sh scripts/fptn-web-auth.sh scripts/fptn-web-auth.php scripts/fptn-web-operations.php scripts/fptn-transport-plan.php scripts/fptn-web-update.sh scripts/fptn-client-capabilities.sh; do
+for path in web/index.html web/index.cgi web/style.css web/app.js web/api.cgi scripts/fptn-native-service.sh scripts/fptn-web-auth.sh scripts/fptn-web-auth.php scripts/fptn-web-operations.php scripts/fptn-transport-plan.php scripts/fptn-web-update.sh scripts/fptn-client-capabilities.sh scripts/fptn-client-identity.sh client-release.json; do
   curl -fL --connect-timeout 15 --max-time 60 "$BASE/$path" -o "$STAGE/$path"
 done
 (cd "$STAGE"; sha256sum -c SHA256SUMS) || fail 'Контрольные суммы не совпали.'
@@ -131,31 +144,41 @@ sh -n "$STAGE/web/api.cgi"
 sh -n "$STAGE/web/index.cgi"
 # Exercise the real entry file before any installed file or process is changed.
 sh "$STAGE/web/index.cgi" > "$STAGE/entry-check" || fail 'Стартовый CGI не смог прочитать страницу. Установленные файлы не менялись.'
-grep -Fq 'data-ui-version="0.11.1"' "$STAGE/entry-check" || fail 'Стартовый CGI не выдал HTML панели. Установленные файлы не менялись.' 
+grep -Fq 'data-ui-version="0.12.0"' "$STAGE/entry-check" || fail 'Стартовый CGI не выдал HTML панели. Установленные файлы не менялись.' 
 sh -n "$STAGE/scripts/fptn-native-service.sh"
-CLIENT_INTEGRITY=no
-if (cd /opt/libexec/fptn; awk '$2=="fptn-client-cli"' SHA256SUMS | sha256sum -c - >/dev/null 2>&1); then CLIENT_INTEGRITY=yes; fi
-if [ -n "${FPTN_TARGET_CLIENT_VERSION:-}" ] && [ "$(/opt/libexec/fptn/fptn-client-cli --version)" != "$FPTN_TARGET_CLIENT_VERSION" ]; then CLIENT_INTEGRITY=no; fi
-if [ "$CLIENT_INTEGRITY" != yes ] || ! /opt/libexec/fptn/fptn-client-cli --help | grep -q -- '--keenetic-probe-only'; then
+TARGET=$(sh "$STAGE/scripts/fptn-client-identity.sh" validate "$STAGE/client-release.json") || fail 'Некорректное описание сборки клиента.'
+TARGET_REV=$(printf '%s' "$TARGET" | jq -r .buildRevision)
+TARGET_SUM=$(printf '%s' "$TARGET" | jq -r .sha256)
+TARGET_VERSION=$(printf '%s' "$TARGET" | jq -r .clientVersion)
+SOURCE_SUM=$(printf '%s' "$TARGET" | jq -r .sourceLockSha256)
+[ -z "$CLIENT_REV" ] || [ "$CLIENT_REV" = "$TARGET_REV" ] || fail 'Каталог и описание сборки указывают разные коммиты клиента.'
+CLIENT_REV=$TARGET_REV
+[ -z "${FPTN_TARGET_CLIENT_VERSION:-}" ] || [ "$FPTN_TARGET_CLIENT_VERSION" = "$TARGET_VERSION" ] || fail 'В каталоге другая версия клиента.'
+[ -z "${FPTN_TARGET_CLIENT_SHA256:-}" ] || [ "$FPTN_TARGET_CLIENT_SHA256" = "$TARGET_SUM" ] || fail 'В каталоге другая контрольная сумма клиента.'
+[ -z "${FPTN_TARGET_UPSTREAM_VERSION:-}" ] || [ "$FPTN_TARGET_UPSTREAM_VERSION" = "$(printf '%s' "$TARGET" | jq -r .upstreamVersion)" ] || fail 'В каталоге другая версия исходного FPTN.'
+[ -z "${FPTN_TARGET_UPSTREAM_REVISION:-}" ] || [ "$FPTN_TARGET_UPSTREAM_REVISION" = "$(printf '%s' "$TARGET" | jq -r .upstreamRevision)" ] || fail 'В каталоге другой коммит исходного FPTN.'
+CURRENT_SUM=$(nice -n 10 sha256sum /opt/libexec/fptn/fptn-client-cli | awk '{print $1}')
+CLIENT_BASE=https://github.com/KOPOHA-MACOHA/fptn-keenetic/releases/download/native-$CLIENT_REV
+if [ "$CURRENT_SUM" != "$TARGET_SUM" ]; then
   CLIENT_UPDATE=yes
   mkdir -p "$STAGE/client"
-  CLIENT_BASE=https://github.com/KOPOHA-MACOHA/fptn-keenetic/releases/download/native-$CLIENT_REV
-  echo 'Для проверки серверов и состояния нужен клиент 0.4.0. Скачиваю готовый бинарник для Hopper.'
+  echo "Скачиваю клиент $TARGET_VERSION, сборка $CLIENT_REV."
   curl -fL --connect-timeout 15 --max-time 180 "$CLIENT_BASE/fptn-client-cli" -o "$STAGE/client/fptn-client-cli"
-  curl -fL --connect-timeout 15 --max-time 60 "$CLIENT_BASE/SHA256SUMS" -o "$STAGE/client/SHA256SUMS.all"
-  awk '$2=="fptn-client-cli"' "$STAGE/client/SHA256SUMS.all" > "$STAGE/client/SHA256SUMS"
-  [ -s "$STAGE/client/SHA256SUMS" ] || fail 'В выпуске нет контрольной суммы клиента.'
-  (cd "$STAGE/client"; sha256sum -c SHA256SUMS) || fail 'Бинарник повреждён.'
+  printf '%s  fptn-client-cli\n' "$TARGET_SUM" > "$STAGE/client/SHA256SUMS"
+  (cd "$STAGE/client"; sha256sum -c SHA256SUMS) || fail 'Бинарник не соответствует закреплённой сборке.'
   chmod 700 "$STAGE/client/fptn-client-cli"
-  "$STAGE/client/fptn-client-cli" --help | grep -q -- '--keenetic-probe-only' || fail 'Бинарник не поддерживает диагностику или не подходит платформе.'
-fi
-if [ -n "${FPTN_TARGET_CLIENT_VERSION:-}" ] && [ "$CLIENT_UPDATE" = yes ]; then
-  [ "$("$STAGE/client/fptn-client-cli" --version)" = "$FPTN_TARGET_CLIENT_VERSION" ] || fail 'В выпуске другая версия клиента.'
-fi
+else echo 'Бинарник клиента уже соответствует выпуску; замена не требуется.'; fi
+if [ -f /opt/libexec/fptn/sources.lock.json ] && [ "$(sha256sum /opt/libexec/fptn/sources.lock.json | awk '{print $1}')" = "$SOURCE_SUM" ]; then
+  cp /opt/libexec/fptn/sources.lock.json "$STAGE/sources.lock.json"
+else curl -fL --connect-timeout 15 --max-time 60 "$CLIENT_BASE/sources.lock.json" -o "$STAGE/sources.lock.json"; fi
+printf '%s  %s\n' "$SOURCE_SUM" "$STAGE/sources.lock.json" | sha256sum -c - || fail 'Не совпал список исходников сборки.'
+printf '%s' "$TARGET" | jq -r .upstreamRevision > "$STAGE/upstream-revision"
+jq -e --arg rev "$(cat "$STAGE/upstream-revision")" '.fptn==$rev' "$STAGE/sources.lock.json" >/dev/null || fail 'Список исходников указывает другой FPTN.'
 # Validate current settings against the exact client that will remain installed.
 CAP_CLIENT=/opt/libexec/fptn/fptn-client-cli
 [ "$CLIENT_UPDATE" = no ] || CAP_CLIENT=$STAGE/client/fptn-client-cli
 sh "$STAGE/scripts/fptn-client-capabilities.sh" "$CAP_CLIENT" > "$STAGE/capabilities.json" || fail 'Не удалось определить возможности клиента. Установленные файлы не менялись.'
+jq -e --arg sum "$TARGET_SUM" --arg version "$TARGET_VERSION" '.sha256==$sum and .clientVersion==$version' "$STAGE/capabilities.json" >/dev/null || fail 'Возможности клиента не совпали с описанием сборки.'
 FPTN_CAP_CLIENT=$CAP_CLIENT sh "$STAGE/scripts/fptn-native-service.sh" get-settings >/dev/null
 mkdir -p "$CONF" /opt/share /opt/var/run/fptn-web
 chmod 700 "$CONF" /opt/var/run/fptn-web
@@ -167,7 +190,6 @@ if [ -f /opt/libexec/fptn/web-operations.php ]; then OPS_EXISTED=yes; cp -p /opt
 if [ -f /opt/libexec/fptn/transport-plan.php ]; then TRANSPORT_EXISTED=yes; cp -p /opt/libexec/fptn/transport-plan.php "$BACKUP/transport-plan.php"; fi
 if [ "$CLIENT_UPDATE" = yes ]; then
   cp -p /opt/libexec/fptn/fptn-client-cli "$BACKUP/fptn-client-cli"
-  cp -p /opt/libexec/fptn/SHA256SUMS "$BACKUP/SHA256SUMS"
 fi
 [ ! -e "$FRAGMENT" ] || cp -p "$FRAGMENT" "$BACKUP/95-fptn.conf"
 [ ! -d "$WEB" ] || cp -pR "$WEB" "$BACKUP/web"
@@ -175,6 +197,10 @@ if [ -f "$CONF/web-origin" ]; then ORIGIN_EXISTED=yes; cp -p "$CONF/web-origin" 
 if [ -f "$CONF/web-meta.json" ]; then META_EXISTED=yes; cp -p "$CONF/web-meta.json" "$BACKUP/web-meta.json"; fi
 if [ -f /opt/libexec/fptn/web-update.sh ]; then UPDATE_EXISTED=yes; cp -p /opt/libexec/fptn/web-update.sh "$BACKUP/web-update.sh"; fi
 if [ -f /opt/libexec/fptn/client-capabilities.sh ]; then CAPS_EXISTED=yes; cp -p /opt/libexec/fptn/client-capabilities.sh "$BACKUP/client-capabilities.sh"; fi
+if [ -f /opt/libexec/fptn/SHA256SUMS ]; then SUMS_EXISTED=yes; cp -p /opt/libexec/fptn/SHA256SUMS "$BACKUP/SHA256SUMS"; fi
+if [ -f /opt/libexec/fptn/sources.lock.json ]; then SOURCE_LOCK_EXISTED=yes; cp -p /opt/libexec/fptn/sources.lock.json "$BACKUP/sources.lock.json"; fi
+if [ -f "$CONF/client-release.json" ]; then IDENTITY_EXISTED=yes; cp -p "$CONF/client-release.json" "$BACKUP/client-release.json"; fi
+if [ -f /opt/libexec/fptn/client-identity.sh ]; then IDENTITY_HELPER_EXISTED=yes; cp -p /opt/libexec/fptn/client-identity.sh "$BACKUP/client-identity.sh"; fi
 echo "Резервная копия: $BACKUP"
 if [ -n "${FPTN_OPERATION_ID:-}" ]; then
   CURRENT=$(sh "$STAGE/scripts/fptn-web-auth.sh" op-state)
@@ -216,9 +242,12 @@ mv /opt/libexec/fptn/web-update.sh.new /opt/libexec/fptn/web-update.sh
 cp "$STAGE/scripts/fptn-client-capabilities.sh" /opt/libexec/fptn/client-capabilities.sh.new
 chmod 700 /opt/libexec/fptn/client-capabilities.sh.new
 mv /opt/libexec/fptn/client-capabilities.sh.new /opt/libexec/fptn/client-capabilities.sh
+cp "$STAGE/scripts/fptn-client-identity.sh" /opt/libexec/fptn/client-identity.sh.new
+chmod 700 /opt/libexec/fptn/client-identity.sh.new
+mv /opt/libexec/fptn/client-identity.sh.new /opt/libexec/fptn/client-identity.sh
 printf '%s\n' "$ORIGIN" > "$CONF/web-origin"
-CLIENT_VERSION=$(/opt/libexec/fptn/fptn-client-cli --version)
-jq -n --arg version "$CLIENT_VERSION" --arg revision "$REV" '{uiVersion:"0.11.1",clientVersion:$version,revision:$revision}' > "$CONF/web-meta.json.new"
+CLIENT_VERSION=$(jq -r '.clientVersion // "неизвестна"' "$CONF/web-meta.json" 2>/dev/null || echo неизвестна)
+jq -n --arg version "$CLIENT_VERSION" --arg revision "$REV" '{uiVersion:"0.12.0",clientVersion:$version,revision:$revision}' > "$CONF/web-meta.json.new"
 mv "$CONF/web-meta.json.new" "$CONF/web-meta.json"
 cat > "$FRAGMENT" <<EOF
 # Managed by fptn-web-ui. Credentials live outside the document root.
@@ -244,7 +273,7 @@ check_panel() {
   PANEL_ERROR='Страница панели не отвечает.'
   curl --noproxy '*' -fsS -D "$STAGE/headers" --connect-timeout 1 --max-time 2 "$ORIGIN/" -o "$STAGE/page" 2>/dev/null || return 1
   PANEL_ERROR='На порту открылась другая версия панели.'
-  grep -Fq 'data-ui-version="0.11.1"' "$STAGE/page" || return 1
+  grep -Fq 'data-ui-version="0.12.0"' "$STAGE/page" || return 1
   PANEL_CACHE_WARNING=no
   grep -iq '^Cache-Control:.*no-store' "$STAGE/headers" || PANEL_CACHE_WARNING=yes
   PANEL_ERROR='Не прошла проверка ограничения доступа к API.'
@@ -252,7 +281,7 @@ check_panel() {
   [ "$CODE" = 401 ] || return 1
   PANEL_ERROR='API настройки входа не готово или отвечает другой версией.'
   curl --noproxy '*' -fsS --connect-timeout 1 --max-time 2 "$ORIGIN/api.cgi?auth-info" -o "$STAGE/auth-info.json" 2>/dev/null || return 1
-  jq -e '.uiVersion=="0.11.1" and (.configured|type=="boolean") and (.rootAvailable|type=="boolean")' "$STAGE/auth-info.json" >/dev/null 2>&1 || return 1
+  jq -e '.uiVersion=="0.12.0" and (.configured|type=="boolean") and (.rootAvailable|type=="boolean")' "$STAGE/auth-info.json" >/dev/null 2>&1 || return 1
   return 0
 }
 # rc.func may report failed before the daemon becomes visible. Decide from the
@@ -272,7 +301,7 @@ until check_panel; do
   fi
   sleep 1
 done
-echo 'lighttpd отвечает: страница и API панели 0.11.1 проверены.'
+echo 'lighttpd отвечает: страница и API панели 0.12.0 проверены.'
 if [ "$PANEL_CACHE_WARNING" = yes ]; then
   echo "Откройте свежую страницу по ссылке $ORIGIN/?v=$REV (заголовок кэша применится после перезагрузки lighttpd)."
 fi
@@ -289,23 +318,29 @@ if [ "$CLIENT_UPDATE" = yes ]; then
   # Arm restoration before rename so an interrupt after rename is also covered.
   CLIENT_SWAPPED=yes
   mv /opt/libexec/fptn/fptn-client-cli.new /opt/libexec/fptn/fptn-client-cli
-  (cd /opt/libexec/fptn; sha256sum fptn-client-cli brotli > SHA256SUMS.new; mv SHA256SUMS.new SHA256SUMS)
 fi
 # Recheck settings against the final installed ELF, including enabled fallbacks.
 /opt/bin/fptnctl get-settings >/dev/null || fail 'Установленный клиент не поддерживает сохранённые параметры.'
 /opt/bin/fptnctl get-fallback >/dev/null || fail 'Установленный клиент не поддерживает резервные профили.'
-# Record the final ELF version after replacing it; the web preflight used the old client.
-CLIENT_VERSION=$(/opt/libexec/fptn/fptn-client-cli --version)
-jq -n --arg version "$CLIENT_VERSION" --arg revision "$REV" '{uiVersion:"0.11.1",clientVersion:$version,revision:$revision}' > "$CONF/web-meta.json.new"
-mv "$CONF/web-meta.json.new" "$CONF/web-meta.json"
-
+# Bind source metadata and observed version to the final verified binary.
+FINAL_CAPS=$(sh /opt/libexec/fptn/client-capabilities.sh)
+printf '%s' "$FINAL_CAPS" | jq -e --arg sum "$TARGET_SUM" --arg version "$TARGET_VERSION" '.sha256==$sum and .clientVersion==$version' >/dev/null || fail 'Установлен другой бинарник клиента.'
+cp "$STAGE/sources.lock.json" /opt/libexec/fptn/sources.lock.json.new
+chmod 600 /opt/libexec/fptn/sources.lock.json.new
+mv /opt/libexec/fptn/sources.lock.json.new /opt/libexec/fptn/sources.lock.json
+(cd /opt/libexec/fptn; sha256sum fptn-client-cli brotli > SHA256SUMS.new; mv SHA256SUMS.new SHA256SUMS)
 if [ "$CLIENT_UPDATE" = yes ] && [ "$WAS_RUNNING" = yes ]; then
   RESTART_ATTEMPTED=yes
   /opt/bin/fptnctl start || fail 'Обновлённый клиент не запустился.'
 fi
+printf '%s\n' "$TARGET" > "$CONF/client-release.json.new"
+chmod 600 "$CONF/client-release.json.new"
+mv "$CONF/client-release.json.new" "$CONF/client-release.json"
+printf '%s' "$TARGET" | jq --arg revision "$REV" '. + {uiVersion:"0.12.0",revision:$revision,clientRevision:.buildRevision,clientSha256:.sha256}' > "$CONF/web-meta.json.new"
+mv "$CONF/web-meta.json.new" "$CONF/web-meta.json"
 DONE=yes
 echo
-echo "Панель 0.11.1: $ORIGIN/?v=$REV"
+echo "Панель 0.12.0: $ORIGIN/?v=$REV"
 rm -f "$CONF/web-key"
 echo 'Откройте панель: создайте логин и пароль или войдите через root Entware.'
 echo 'Пароль в терминале не нужен. Существующие настройки входа сохраняются.'
