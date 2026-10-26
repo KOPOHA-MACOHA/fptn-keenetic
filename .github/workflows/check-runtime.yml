@@ -1,0 +1,22 @@
+name: Check runtime and panel
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+permissions:
+  contents: read
+concurrency:
+  group: runtime-${{ github.ref }}
+  cancel-in-progress: true
+jobs:
+  test:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - name: Verify scripts, UI, credentials and upgrade rollback
+        run: |
+          python3 scripts/package-web.py --check
+          python3 -m compileall -q scripts
+          python3 -m unittest discover -s tests -v

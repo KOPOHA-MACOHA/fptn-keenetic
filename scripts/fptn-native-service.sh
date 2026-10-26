@@ -302,7 +302,9 @@ run_service() {
       sleep 1
       continue
     fi
-    [ "$EVER_READY" = yes ] || fail 'Первое подключение не удалось: fptnctl logs.'
+    if [ "$EVER_READY" != yes ] && [ "${FPTN_BOOT_RETRY:-}" != boot ]; then
+      fail 'Первое подключение не удалось: fptnctl logs.'
+    fi
     # A whole selection pass failed. Start a fresh pass after bounded backoff.
     printf '[]\n' > "$RUN/failed-servers.json"
     FORCE_AUTO=yes
@@ -381,14 +383,16 @@ start_service() {
     START_TIMEOUT=600
   fi
   [ -f "$CONF/native-setup-complete" ] || fail 'Сначала fptnctl setup-interface.'
-  ip link show dev opkgtun0 >/dev/null 2>&1 || fail 'Keenetic не создал opkgtun0.'
+  if [ "${1:-}" != boot ]; then ip link show dev opkgtun0 >/dev/null 2>&1 || fail 'Keenetic не создал opkgtun0.'; fi
   mkdir -p "$ROOT/var/run"
+  if [ "${1:-}" = boot ] && alive "$RUN/supervisor.pid"; then return 0; fi
   mkdir "$RUN" 2>/dev/null || fail 'Уже запущено или осталось состояние: status / recover.'
   trap 'rm -rf "$RUN"' EXIT
   (cd "$LIB"; sha256sum -c SHA256SUMS) || fail 'Повреждены установленные файлы.'
   : > "$RUN/client.log"
-  nohup sh "$SELF" _run > "$RUN/supervisor.log" 2>&1 < /dev/null &
+  FPTN_BOOT_RETRY=${1:-manual} nohup sh "$SELF" _run > "$RUN/supervisor.log" 2>&1 < /dev/null &
   trap - EXIT
+  [ "${1:-}" != boot ] || return 0
   N=0
   while [ "$N" -lt "$START_TIMEOUT" ]; do
     if [ -f "$RUN/ready" ]; then status_service; return 0; fi
@@ -407,7 +411,8 @@ status_service() {
     elif [ -f "$RUN/state" ]; then cat "$RUN/state"
     else echo 'FPTN: запуск или остановка.'; fi
   elif [ -d "$RUN" ]; then echo 'FPTN: остаточное состояние, требуется recover.'; return 1
-  else echo 'FPTN: остановлен. Автозапуск выключен.'; fi
+  else echo 'FPTN: остановлен.'; fi
+  if [ -f "$CONF/autostart" ]; then echo 'Автозапуск включён.'; else echo 'Автозапуск выключен.'; fi
 }
 status_json() {
   STATE=stopped; SUPERVISOR=false; CLIENT=false; CONNECTED=false; ACTIVE=
@@ -522,8 +527,37 @@ show_logs() {
     [ ! -f "$CONF/last.log" ] || tail -n 60 "$CONF/last.log"
   fi
 }
+set_autostart() {
+  INIT=$ROOT/etc/init.d/S90fptn
+  if [ -e "$INIT" ]; then grep -Fq '# Managed by fptn-native' "$INIT" || fail 'S90fptn занят чужим скриптом.'; fi
+  mkdir -p "$ROOT/etc/init.d" "$CONF"
+  if [ "$1" = enable ]; then
+    [ -f "$CONF/native-setup-complete" ] || fail 'Сначала настройте и сохраните интерфейс Keenetic.'
+    cat > "$INIT.new" <<'INITEOF'
+#!/bin/sh
+# Managed by fptn-native
+PATH=/opt/sbin:/opt/bin:/usr/sbin:/usr/bin:/sbin:/bin
+export PATH
+case "${1:-}" in
+ start) [ ! -f /opt/etc/fptn/autostart ] || /opt/bin/fptnctl _boot ;;
+ stop|kill) /opt/bin/fptnctl stop ;;
+ restart) /opt/bin/fptnctl stop && { [ ! -f /opt/etc/fptn/autostart ] || /opt/bin/fptnctl _boot; } ;;
+ *) exit 1 ;;
+esac
+INITEOF
+    chmod 700 "$INIT.new"; mv "$INIT.new" "$INIT"
+    : > "$CONF/autostart"
+    echo 'Автозапуск включён. Текущее подключение не менялось.'
+  else
+    rm -f "$CONF/autostart"
+    echo 'Автозапуск выключен. Текущее подключение не менялось.'
+  fi
+}
 need_root
 case "${1:-}" in
+  enable|disable) set_autostart "$1" ;;
+  _boot) [ ! -f "$CONF/autostart" ] || start_service boot ;;
+  web-password) sh "$LIB/web-auth.sh" passwd ;;
   get-settings) connection_json ;;
   validate-settings) validate_connection ;;
   get-server-policy) server_policy_json ;;

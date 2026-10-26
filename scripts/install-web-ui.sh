@@ -11,7 +11,7 @@ fail() { echo "ОШИБКА: $*" >&2; exit 1; }
 REV=${2:-}
 case "$REV" in *[!a-f0-9]*|'') fail 'Нужен полный SHA коммита.' ;; esac
 [ "${#REV}" -eq 40 ] || fail 'Нужен полный SHA коммита.'
-CLIENT_REV=${4:-$REV}
+CLIENT_REV=${4:-c0386cbb73bf9ddf35e551c08d094ac0debf2466}
 case "$CLIENT_REV" in *[!a-f0-9]*|'') fail 'Некорректный SHA бинарника.' ;; esac
 [ "${#CLIENT_REV}" -eq 40 ] || fail 'Нужен полный SHA бинарника.'
 LAN=${3:-192.168.1.1}
@@ -50,7 +50,8 @@ STAGE=$(mktemp -d /opt/tmp/fptn-web.XXXXXX)
 BACKUP=
 CHANGED=no
 DONE=no
-KEY_CREATED=no
+AUTH_CREATED=no
+AUTH_HELPER_EXISTED=no
 ORIGIN_EXISTED=no
 META_EXISTED=no
 CLIENT_UPDATE=no
@@ -86,12 +87,15 @@ finish() {
     else rm -f "$CONF/web-origin"; fi
     if [ "$META_EXISTED" = yes ]; then cp -p "$BACKUP/web-meta.json" "$CONF/web-meta.json"
     else rm -f "$CONF/web-meta.json"; fi
-    [ "$KEY_CREATED" = no ] || rm -f "$CONF/web-key"
+    [ "$AUTH_CREATED" = no ] || rm -f "$CONF/web-auth.json"
+    if [ "$AUTH_HELPER_EXISTED" = yes ]; then cp -p "$BACKUP/web-auth.sh" /opt/libexec/fptn/web-auth.sh
+    else rm -f /opt/libexec/fptn/web-auth.sh; fi
     "$INIT" restart || echo 'Не удалось перезапустить lighttpd при откате; резервная копия сохранена.' >&2
     if [ "$SERVICE_STOPPED" = yes ] && [ "$WAS_RUNNING" = yes ]; then /opt/bin/fptnctl start || true; fi
     fi
   fi
   [ "$INSTALL_LOCK" = no ] || rm -rf /opt/var/run/fptn-web/action
+  [ -z "${INSTALL_SESSION:-}" ] || rm -f "$INSTALL_SESSION"
   rm -rf "$STAGE"
 }
 trap finish EXIT
@@ -100,10 +104,15 @@ BASE=https://raw.githubusercontent.com/KOPOHA-MACOHA/fptn-keenetic/$REV
 echo 'Скачиваю панель и управляющий скрипт. Сборка зависимостей не требуется.'
 mkdir -p "$STAGE/web" "$STAGE/scripts"
 curl -fL --connect-timeout 15 --max-time 60 "$BASE/web/SHA256SUMS" -o "$STAGE/SHA256SUMS"
-for path in web/index.html web/index.cgi web/style.css web/app.js web/api.cgi scripts/fptn-native-service.sh; do
+for path in web/index.html web/index.cgi web/style.css web/app.js web/api.cgi scripts/fptn-native-service.sh scripts/fptn-web-auth.sh; do
   curl -fL --connect-timeout 15 --max-time 60 "$BASE/$path" -o "$STAGE/$path"
 done
 (cd "$STAGE"; sha256sum -c SHA256SUMS) || fail 'Контрольные суммы не совпали.'
+sh -n "$STAGE/scripts/fptn-web-auth.sh"
+command -v openssl >/dev/null || fail 'Нужен OpenSSL: выполните opkg install openssl-util и повторите установку.'
+if [ ! -s "$CONF/web-auth.json" ]; then
+  FPTN_AUTH_FILE="$STAGE/web-auth.json" sh "$STAGE/scripts/fptn-web-auth.sh" passwd || fail 'Логин и пароль не заданы. Установленные файлы не менялись.'
+fi
 sh -n "$STAGE/web/api.cgi"
 sh -n "$STAGE/web/index.cgi"
 sh -n "$STAGE/scripts/fptn-native-service.sh"
@@ -126,6 +135,7 @@ mkdir -p "$CONF" /opt/share /opt/var/run/fptn-web
 chmod 700 "$CONF" /opt/var/run/fptn-web
 BACKUP=$(mktemp -d "$CONF/web-install-backup.XXXXXX")
 cp -p /opt/bin/fptnctl "$BACKUP/fptnctl"
+if [ -f /opt/libexec/fptn/web-auth.sh ]; then AUTH_HELPER_EXISTED=yes; cp -p /opt/libexec/fptn/web-auth.sh "$BACKUP/web-auth.sh"; fi
 if [ "$CLIENT_UPDATE" = yes ]; then
   cp -p /opt/libexec/fptn/fptn-client-cli "$BACKUP/fptn-client-cli"
   cp -p /opt/libexec/fptn/SHA256SUMS "$BACKUP/SHA256SUMS"
@@ -163,15 +173,18 @@ chmod 700 "$WEB/api.cgi" "$WEB/index.cgi"
 cp "$STAGE/scripts/fptn-native-service.sh" /opt/bin/fptnctl.new
 chmod 700 /opt/bin/fptnctl.new
 mv /opt/bin/fptnctl.new /opt/bin/fptnctl
-if [ ! -s "$CONF/web-key" ]; then
-  KEY_CREATED=yes
-  # UUID from the kernel CSPRNG; no dependency on openssl or Python.
-  tr -d '\n-' < /proc/sys/kernel/random/uuid > "$CONF/web-key"
+cp "$STAGE/scripts/fptn-web-auth.sh" /opt/libexec/fptn/web-auth.sh.new
+chmod 700 /opt/libexec/fptn/web-auth.sh.new
+mv /opt/libexec/fptn/web-auth.sh.new /opt/libexec/fptn/web-auth.sh
+if [ -s "$STAGE/web-auth.json" ]; then
+  AUTH_CREATED=yes
+  cp "$STAGE/web-auth.json" "$CONF/web-auth.json.new"
+  chmod 600 "$CONF/web-auth.json.new"
+  mv "$CONF/web-auth.json.new" "$CONF/web-auth.json"
 fi
-chmod 600 "$CONF/web-key"
 printf '%s\n' "$ORIGIN" > "$CONF/web-origin"
 CLIENT_VERSION=$(/opt/libexec/fptn/fptn-client-cli --version)
-jq -n --arg version "$CLIENT_VERSION" --arg revision "$REV" '{uiVersion:"0.4.0",clientVersion:$version,revision:$revision}' > "$CONF/web-meta.json.new"
+jq -n --arg version "$CLIENT_VERSION" --arg revision "$REV" '{uiVersion:"0.5.0",clientVersion:$version,revision:$revision}' > "$CONF/web-meta.json.new"
 mv "$CONF/web-meta.json.new" "$CONF/web-meta.json"
 cat > "$FRAGMENT" <<EOF
 # Managed by fptn-web-ui. Credentials live outside the document root.
@@ -187,24 +200,31 @@ lighttpd -tt -f "$MAIN" || fail 'lighttpd отверг настройки пан
 "$INIT" restart || fail 'Не удалось перезапустить lighttpd.'
 sleep 1
 curl --noproxy '*' -fsS -D "$STAGE/headers" --connect-timeout 5 --max-time 10 "$ORIGIN/" -o "$STAGE/page" || fail 'Страница панели не отвечает.'
-grep -Fq 'data-ui-version="0.4.0"' "$STAGE/page" || fail 'На порту открылась другая версия панели.'
+grep -Fq 'data-ui-version="0.5.0"' "$STAGE/page" || fail 'На порту открылась другая версия панели.'
 grep -iq '^Cache-Control:.*no-store' "$STAGE/headers" || fail 'Страница панели кэшируется.'
 CODE=$(curl --noproxy '*' -sS -o /dev/null -w '%{http_code}' --max-time 10 "$ORIGIN/api.cgi?status")
 [ "$CODE" = 401 ] || fail 'Проверка ограничения доступа к API не прошла.'
-KEY=$(cat "$CONF/web-key")
-# Keep the panel key out of curl argv/process listings.
+# A short-lived installer session checks the real authenticated API without asking
+# for or retaining the panel password. Revoke it on both success and failure.
+KEY=$(tr -d '\n-' < /proc/sys/kernel/random/uuid)$(tr -d '\n-' < /proc/sys/kernel/random/uuid)
+SESSION_DIGEST=$(printf '%s' "$KEY" | sha256sum | awk '{print $1}')
+mkdir -p /opt/var/run/fptn-web/sessions
+chmod 700 /opt/var/run/fptn-web/sessions
+INSTALL_SESSION=/opt/var/run/fptn-web/sessions/$SESSION_DIGEST
+printf '%s %s\n' "$(( $(date +%s) + 60 ))" "$(sha256sum "$CONF/web-auth.json" | awk '{print $1}')" > "$INSTALL_SESSION"
 printf 'header = "Authorization: Bearer %s"\n' "$KEY" |
   curl --noproxy '*' -K - -fsS --max-time 15 "$ORIGIN/api.cgi?status" |
-  jq -e '.uiVersion=="0.4.0" and (.service.state|type=="string") and (.busy|type=="boolean")' >/dev/null || fail 'Версия или состояние API не соответствуют панели.'
+  jq -e '.uiVersion=="0.5.0" and (.service.state|type=="string") and (.busy|type=="boolean")' >/dev/null || fail 'Версия или состояние API не соответствуют панели.'
+rm -f "$INSTALL_SESSION"
 if [ "$CLIENT_UPDATE" = yes ] && [ "$WAS_RUNNING" = yes ]; then
   RESTART_ATTEMPTED=yes
   /opt/bin/fptnctl start || fail 'Обновлённый клиент не запустился.'
 fi
 DONE=yes
 echo
-echo "Панель 0.4.0: $ORIGIN/?v=$REV"
-echo "Код доступа: $KEY"
-echo 'Это код панели, не токен VPN. Сохраните его.'
+echo "Панель 0.5.0: $ORIGIN/?v=$REV"
+rm -f "$CONF/web-key"
+echo 'Вход — по заданным логину и паролю. Смена пароля: fptnctl web-password.' 
 echo 'Токен, выбранный сервер, маршруты и DNS сохранены. Автозапуск FPTN не включался.'
 if [ "$CLIENT_UPDATE" = yes ]; then echo 'Бинарник обновлён; прежнее состояние службы восстановлено.'
 else echo 'Для применения параметров используйте панель; supervisor обновится при следующем запуске.'; fi

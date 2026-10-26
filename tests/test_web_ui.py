@@ -3,6 +3,7 @@
 No HTTP listener, VPN connection, or router network mutation is used here.
 """
 import base64
+import hashlib
 import json
 import os
 from pathlib import Path
@@ -32,8 +33,10 @@ class WebUiTest(unittest.TestCase):
             folder.mkdir(parents=True)
         (self.bin/'id').write_text('#!/bin/sh\necho 0\n')
         (self.bin/'id').chmod(0o700)
-        self.key = '0123456789abcdef0123456789abcdef'
-        (self.conf / 'web-key').write_text(self.key)
+        self.key = '0123456789abcdef0123456789abcdef'*2
+        (self.conf/'web-auth.json').write_text('{"username":"admin","hash":"dummy"}')
+        (self.run/'sessions').mkdir()
+        (self.run/'sessions'/hashlib.sha256(self.key.encode()).hexdigest()).write_text(str(int(time.time())+3600)+' '+hashlib.sha256((self.conf/'web-auth.json').read_bytes()).hexdigest()+'\n')
         (self.conf / 'web-origin').write_text('http://192.168.1.1:1111\n')
         self.names = ['Czechia-Premium', 'Сервер №2']
         config = {'servers': [{'name': name} for name in self.names]}
@@ -43,6 +46,7 @@ class WebUiTest(unittest.TestCase):
         # Pass-through decoder: prefix/decode plumbing tested, not Brotli itself.
         lib = self.root / 'libexec/fptn'
         lib.mkdir(parents=True)
+        shutil.copyfile(ROOT/'scripts/fptn-web-auth.sh',lib/'web-auth.sh')
         (lib / 'brotli').write_text('#!/bin/sh\ncat\n')
         (lib / 'brotli').chmod(0o700)
         controller = self.bin / 'fptnctl'
@@ -209,7 +213,7 @@ else: sys.exit(2)
     def test_status_exposes_explicit_state_and_versions(self):
         (self.conf/'web-meta.json').write_text(json.dumps({'clientVersion':'0.4.0','revision':'abc'}))
         status,data=self.request()
-        self.assertEqual(status,200);self.assertEqual(data['uiVersion'],'0.4.0')
+        self.assertEqual(status,200);self.assertEqual(data['uiVersion'],'0.5.0')
         self.assertEqual(data['clientVersion'],'0.4.0')
         self.assertTrue(data['service']['canStart']);self.assertFalse(data['service']['canStop'])
         self.client_run.mkdir()
@@ -230,8 +234,8 @@ else: sys.exit(2)
     def test_entry_page_is_not_cached_and_assets_are_versioned(self):
         page=subprocess.run(['sh',str(ROOT/'web/index.cgi')],capture_output=True,check=True).stdout.decode()
         self.assertIn('Cache-Control: no-store',page)
-        self.assertIn('data-ui-version="0.4.0"',page)
-        self.assertIn('app.js?v=0.4.0',page)
+        self.assertIn('data-ui-version="0.5.0"',page)
+        self.assertIn('app.js?v=0.5.0',page)
 
 
 if __name__ == '__main__':

@@ -18,6 +18,32 @@ class NativeServiceTest(unittest.TestCase):
     def cmd(self,*args):
         return subprocess.run(['sh',str(SCRIPT),*args],env=self.env,text=True,capture_output=True,timeout=25)
 
+    def test_autostart_owned_init_persists_without_starting_or_network_changes(self):
+        root=self.prepare_native_client()
+        result=self.cmd('enable');self.assertEqual(result.returncode,0,result.stderr)
+        init=root/'etc/init.d/S90fptn'
+        self.assertTrue(init.exists()); self.assertTrue((root/'etc/fptn/autostart').exists())
+        subprocess.run(['sh','-n',str(init)],check=True)
+        self.assertFalse((root/'var/run/fptn-keenetic').exists())
+        self.assertEqual(self.state()['mutations'],0)
+        self.assertEqual(self.cmd('disable').returncode,0)
+        self.assertFalse((root/'etc/fptn/autostart').exists())
+        init.write_text('# foreign init\n')
+        self.assertNotEqual(self.cmd('enable').returncode,0)
+        self.assertEqual(init.read_text(),'# foreign init\n')
+
+    def test_boot_start_returns_promptly_and_waits_for_initial_connection(self):
+        root=self.prepare_native_client()
+        (root/'etc/fptn/autostart').touch()
+        marker=self.root/'fail-first';marker.touch();self.env['FPTN_MOCK_FAIL_ONCE']=str(marker)
+        started=time.monotonic()
+        try:
+            result=self.cmd('_boot');self.assertEqual(result.returncode,0,result.stdout+result.stderr)
+            self.assertLess(time.monotonic()-started,3)
+            self.wait_for(lambda:(root/'var/run/fptn-keenetic/ready').exists(),timeout=20)
+            self.assertEqual(self.state()['mutations'],0)
+        finally:self.cmd('stop')
+
     def test_no_custom_routing_dns_or_firewall_commands(self):
         source=SCRIPT.read_text()
         for forbidden in ['iptables ', 'ip -4 rule ', 'ip -4 route add', 'normalize_cidrs', 'nslookup ', 'ip route default']:

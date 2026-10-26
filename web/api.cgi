@@ -83,6 +83,7 @@ worker() {
     start) "$CTL" start >> "$LOCK/output" 2>&1; SUCCESS_MESSAGE='Служба запущена.' ;;
     stop) "$CTL" stop >> "$LOCK/output" 2>&1; SUCCESS_MESSAGE='Служба остановлена.' ;;
     restart) "$CTL" stop >> "$LOCK/output" 2>&1; "$CTL" start >> "$LOCK/output" 2>&1; SUCCESS_MESSAGE='Клиент переподключён.' ;;
+    enable|disable) "$CTL" "$ACTION" >> "$LOCK/output" 2>&1; SUCCESS_MESSAGE='Настройка автозапуска сохранена.' ;;
     check) "$CTL" check-servers >> "$LOCK/output" 2>&1; SUCCESS_MESSAGE='Проверка входа на серверы завершена.' ;;
     save)
       # All validation precedes stopping or writing the current configuration.
@@ -139,16 +140,24 @@ respond() {
 }
 error() { respond "$1" "$(jq -n --arg error "$2" '{error:$error}')"; }
 
-# A random 122-bit key, not the VPN token. No cookie or ambient credentials.
-[ -r "$CONF/web-key" ] && [ -r "$CONF/web-origin" ] || error '503 Service Unavailable' 'Панель не настроена.'
+# Validate the target before accepting credentials, including login requests.
+[ -r "$CONF/web-origin" ] || error '503 Service Unavailable' 'Панель не настроена.'
 ORIGIN=$(cat "$CONF/web-origin")
 [ "${HTTP_HOST:-}" = "${ORIGIN#http://}" ] || error '403 Forbidden' 'Неверный адрес панели.'
 [ -z "${HTTP_ORIGIN:-}" ] || [ "$HTTP_ORIGIN" = "$ORIGIN" ] || error '403 Forbidden' 'Запрос с другого сайта запрещён.'
-case "${HTTP_AUTHORIZATION:-}" in 'Bearer '*) AUTH=${HTTP_AUTHORIZATION#Bearer } ;; *) error '401 Unauthorized' 'Введите код доступа к панели.' ;; esac
-[ "${#AUTH}" -le 128 ] || error '401 Unauthorized' 'Неверный код доступа.'
-EXPECTED=$(sha256sum "$CONF/web-key" | awk '{print $1}')
-ACTUAL=$(printf '%s' "$AUTH" | sha256sum | awk '{print $1}')
-[ "$ACTUAL" = "$EXPECTED" ] || error '401 Unauthorized' 'Неверный код доступа.'
+if [ "${QUERY_STRING:-}" = login ] && [ "${REQUEST_METHOD:-}" = POST ]; then
+  [ "${CONTENT_TYPE:-}" = application/json ] || error '415 Unsupported Media Type' 'Ожидается JSON.'
+  case "${CONTENT_LENGTH:-}" in ''|*[!0-9]*) error '400 Bad Request' 'Некорректная длина.' ;; esac
+  [ "${#CONTENT_LENGTH}" -le 4 ] && [ "$CONTENT_LENGTH" -le 4096 ] || error '413 Content Too Large' 'Слишком большой запрос.'
+  LOGIN=$(head -c "$CONTENT_LENGTH" | sh "$LIB/web-auth.sh" login 2>/dev/null) || error '401 Unauthorized' 'Вход не выполнен. Проверьте логин и пароль; после пяти ошибок подождите 30 секунд.'
+  respond '200 OK' "$LOGIN"
+fi
+case "${HTTP_AUTHORIZATION:-}" in 'Bearer '*) AUTH=${HTTP_AUTHORIZATION#Bearer } ;; *) error '401 Unauthorized' 'Войдите по логину и паролю.' ;; esac
+printf '%s\n' "$AUTH" | sh "$LIB/web-auth.sh" verify || error '401 Unauthorized' 'Сессия завершена. Войдите снова.'
+if [ "${QUERY_STRING:-}" = logout ] && [ "${REQUEST_METHOD:-}" = POST ]; then
+  printf '%s\n' "$AUTH" | sh "$LIB/web-auth.sh" logout
+  respond '200 OK' '{"ok":true}'
+fi
 unset AUTH HTTP_AUTHORIZATION
 mkdir -p "$RUN"
 
@@ -173,12 +182,13 @@ case "${REQUEST_METHOD:-}" in
             RSS=$(awk '$1=="VmRSS:" {print $2}' "/proc/$CLIENT_PID/status" 2>/dev/null || true) ;;
           esac
         fi
+        AUTOSTART=false; [ ! -f "$CONF/autostart" ] || AUTOSTART=true
         BUSY=false; [ ! -d "$LOCK" ] || BUSY=true
         OPERATION=''; [ ! -f "$LOCK/action" ] || OPERATION=$(cat "$LOCK/action")
         RESULT='null'; [ ! -r "$RUN/result.json" ] || RESULT=$(cat "$RUN/result.json")
         respond '200 OK' "$(jq -n --arg status "$TEXT" --arg rss "${RSS:-0}" --arg operation "$OPERATION" \
-          --argjson service "$SERVICE" --argjson report "$REPORT" --argjson meta "$META" --argjson busy "$BUSY" --argjson result "$RESULT" \
-          '{status:$status,service:$service,report:$report,uiVersion:"0.4.0",clientVersion:($meta.clientVersion // "неизвестна"),revision:($meta.revision // ""),operation:$operation,rssKiB:($rss|tonumber),busy:$busy,result:$result}')"
+          --argjson autostart "$AUTOSTART" --argjson service "$SERVICE" --argjson report "$REPORT" --argjson meta "$META" --argjson busy "$BUSY" --argjson result "$RESULT" \
+          '{autostart:$autostart,status:$status,service:$service,report:$report,uiVersion:"0.5.0",clientVersion:($meta.clientVersion // "неизвестна"),revision:($meta.revision // ""),operation:$operation,rssKiB:($rss|tonumber),busy:$busy,result:$result}')"
         ;;
       settings)
         CONNECTION=$("$CTL" get-settings) || error '500 Internal Server Error' 'Некорректные настройки подключения.'
@@ -217,7 +227,7 @@ case "${REQUEST_METHOD:-}" in
       unset TOKEN
       respond '200 OK' "$(printf '%s' "$SERVERS" | jq '{servers:[.servers[].name]}')"
     fi
-    case "$ACTION" in start|stop|restart|check) ;; save)
+    case "$ACTION" in start|stop|restart|check|enable|disable) ;; save)
       printf '%s' "$BODY" | jq -e '(.server|type=="string" and length>0 and length<=128) and
         (.token // ""|type=="string" and length<=262144)' >/dev/null 2>&1 || error '400 Bad Request' 'Некорректный сервер или токен.'
       printf '%s' "$BODY" | jq '.connection' | "$CTL" validate-settings >/dev/null 2>&1 || error '400 Bad Request' 'Проверьте стратегию, метод обхода и домен SNI.'

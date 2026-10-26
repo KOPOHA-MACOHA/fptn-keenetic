@@ -1,5 +1,5 @@
 <!doctype html>
-<html lang="ru" data-ui-version="0.4.0">
+<html lang="ru" data-ui-version="0.5.0">
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
@@ -7,19 +7,19 @@
   <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self'; style-src 'self'; connect-src 'self'; img-src 'self'; object-src 'none'; base-uri 'none'; form-action 'self'; frame-src 'none'">
   <title>FPTN · Keenetic</title>
   <link rel="icon" href="data:,">
-  <link rel="stylesheet" href="style.css?v=0.4.0-f17351f5775c">
-  <script src="app.js?v=0.4.0-d5b8c2557c50" defer></script>
+  <link rel="stylesheet" href="style.css?v=0.5.0-f17351f5775c">
+  <script src="app.js?v=0.5.0-a1c87b993518" defer></script>
 </head>
 <body>
   <div class="shell">
     <header><a class="brand" href="./"><span class="mark">F</span><span>FPTN <small>KEENETIC</small></span></a><button id="logout" class="quiet" hidden>Выйти</button></header>
-    <p id="versions" class="version-line">Панель 0.4.0 · версия клиента появится после входа</p>
+    <p id="versions" class="version-line">Панель 0.5.0 · версия клиента появится после входа</p>
     <div id="version-mismatch" class="banner error-banner" hidden><span id="version-mismatch-text"></span><button id="reload-ui" type="button">Обновить страницу</button></div>
     <section id="login" class="card login">
       <span class="eyebrow">ЛОКАЛЬНАЯ ПАНЕЛЬ</span>
       <h1>Управление подключением</h1>
-      <p>Введите код доступа, показанный при установке панели. Это отдельный код, не токен VPN.</p>
-      <form id="login-form"><label for="key">Код доступа</label><input id="key" type="password" autocomplete="current-password" required maxlength="128"><button class="primary" type="submit">Открыть панель</button></form>
+      <p>Войдите с учётной записью панели. Логин и пароль задаются при установке; это не токен VPN.</p>
+      <form id="login-form"><label for="username">Логин</label><input id="username" type="text" autocomplete="username" required maxlength="64"><label for="password">Пароль</label><input id="password" type="password" autocomplete="current-password" required maxlength="256"><button id="login-submit" class="primary" type="submit">Войти</button></form>
     </section>
     <main id="dashboard" hidden>
       <div class="heading"><div><span class="eyebrow">KEENETIC · OPKGTUN0</span><h1>Ваше подключение</h1></div><span class="tag">FPTN для Keenetic</span></div>
@@ -30,6 +30,7 @@
         <p id="operation" class="operation" hidden></p>
         <div class="actions"><button id="start" class="primary" data-command="start">Запустить</button><button id="stop" data-command="stop">Остановить</button><button id="restart" data-command="restart">Переподключить</button></div>
         <p class="hint">Состояние туннеля FPTN обновляется автоматически. Доступность отдельных сайтов зависит также от маршрутов Keenetic.</p>
+        <p id="autostart-state" class="hint"></p><button id="autostart-toggle" type="button">Включить автозапуск</button>
         <details><summary>Техническое состояние</summary><pre id="status-text"></pre></details>
       </section>
       <div id="unsaved" class="banner" role="status" hidden><strong>Есть несохранённые изменения</strong><span id="unsaved-text"></span></div>
@@ -66,7 +67,7 @@
       </div>
       <section class="card routing"><span class="routing-icon">↗</span><div><h2>Маршрутизация — в Keenetic</h2><p>Домены, подсети и выбор интерфейса задаются в штатной панели роутера. Интерфейс FPTN: <strong>OpkgTun0</strong>.</p></div></section>
       <section class="card"><div class="section-heading log-heading"><h2>Журнал службы</h2><button id="refresh-logs" class="quiet">Обновить</button></div><pre id="logs">Нажмите «Обновить», чтобы прочитать журнал.</pre></section>
-      <footer>Локальная панель · Обновление состояния каждые 5 секунд · Автозапуск пока выключен</footer>
+      <footer>Локальная панель · Обновление состояния каждые 5 секунд</footer>
     </main>
     <div id="notice" role="status" aria-live="polite" hidden></div>
   </div>

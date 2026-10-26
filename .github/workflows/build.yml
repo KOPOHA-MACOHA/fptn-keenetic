@@ -4,6 +4,14 @@ on:
     branches: [main]
     paths-ignore:
       - '**/*.md'
+      - 'web/**'
+      - 'scripts/install-web-ui.sh'
+      - 'scripts/package-web.py'
+      - 'scripts/fptn-native-service.sh'
+      - 'scripts/fptn-web-auth.sh'
+      - 'tests/test_web*.py'
+      - 'tests/test_native_service.py'
+      - '.github/workflows/check-runtime.yml'
       - '.github/workflows/publish-probe.yml'
   pull_request:
   workflow_dispatch:
@@ -17,6 +25,8 @@ concurrency:
 
 jobs:
   probe:
+    # Runtime/UI releases reuse the already verified pinned ELF.
+    if: github.event_name != 'push' || !contains(github.event.head_commit.message, '[runtime-only]')
     runs-on: ubuntu-24.04
     timeout-minutes: 30
     steps:

@@ -26,7 +26,7 @@ elif command=='curl':
  elif '-w' in args:print('401',end='')
  elif 'api.cgi?' in url:
   if '-K' in args:sys.stdin.read()
-  print(json.dumps({'uiVersion':'0.4.0','service':{'state':'stopped'},'busy':False,'status':'stopped'}))
+  print(json.dumps({'uiVersion':'0.5.0','service':{'state':'stopped'},'busy':False,'status':'stopped'}))
  else:
   result=subprocess.run(['sh',str(root/'share/fptn-web/index.cgi')],capture_output=True,check=True)
   header,body=result.stdout.split(b'\r\n\r\n',1)
@@ -47,6 +47,7 @@ class WebInstallerTest(unittest.TestCase):
         self.env={**os.environ,'FPTN_PREFIX':str(self.root),'FPTN_TEST_TRACE':str(self.trace)}
         for name in ['id','ip','netstat','lighttpd','curl']:
             path=self.root/'bin'/name;path.write_text(MOCK);path.chmod(0o700)
+        (self.root/'etc/fptn/web-auth.json').write_text('{"username":"admin","hash":"test"}')
         for key in ['token','server']:(self.root/'etc/fptn'/key).write_text('dummy\n')
         (self.root/'etc/lighttpd/lighttpd.conf').write_text('original main')
         (self.root/'etc/lighttpd/conf.d/95-fptn.conf').write_text('# Managed by fptn-web-ui\noriginal fragment\n')
@@ -72,10 +73,10 @@ esac
         (lib/'brotli').write_text('dummy')
         self.old_sums=''.join(hashlib.sha256((lib/p).read_bytes()).hexdigest()+'  '+p+'\n' for p in ['fptn-client-cli','brotli'])
         (lib/'SHA256SUMS').write_text(self.old_sums)
-        paths=['web/index.html','web/index.cgi','web/style.css','web/app.js','web/api.cgi','scripts/fptn-native-service.sh']
+        paths=['web/index.html','web/index.cgi','web/style.css','web/app.js','web/api.cgi','scripts/fptn-native-service.sh','scripts/fptn-web-auth.sh']
         for name in paths:
             target=self.payload/name;target.parent.mkdir(parents=True,exist_ok=True)
-            target.write_text(controller('staged') if name.startswith('scripts/') else (REPO/name).read_text())
+            target.write_text(controller('staged') if name=='scripts/fptn-native-service.sh' else (REPO/name).read_text())
         (self.payload/'web/SHA256SUMS').write_text(''.join(hashlib.sha256((self.payload/p).read_bytes()).hexdigest()+'  '+p+'\n' for p in paths))
         (self.payload/'client').mkdir()
         new=self.payload/'client/fptn-client-cli';new.write_text('#!/bin/sh\ncase "$1" in --help) echo --keenetic-probe-only;; --version) echo 0.4.0;; esac\n')
