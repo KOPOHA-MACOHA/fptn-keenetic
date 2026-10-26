@@ -22,6 +22,10 @@ jobs:
           php-cgi -n -v
       - name: Verify real lighttpd entry and authentication endpoints
         run: python3 -m unittest discover -s tests -p 'test_lighttpd_entry.py' -v
+      - name: Verify interrupted operations and credential changes
+        run: |
+          python3 -m unittest discover -s tests -p 'test_web_operations.py' -v
+          python3 -m unittest discover -s tests -p 'test_web_auth.py' -v
       - name: Verify scripts, UI, credentials and upgrade rollback
         run: |
           python3 scripts/package-web.py --check

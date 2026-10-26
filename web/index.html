@@ -1,5 +1,5 @@
 <!doctype html>
-<html lang="ru" data-ui-version="0.6.0">
+<html lang="ru" data-ui-version="0.7.0">
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
@@ -7,13 +7,13 @@
   <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self'; style-src 'self'; connect-src 'self'; img-src 'self'; object-src 'none'; base-uri 'none'; form-action 'self'; frame-src 'none'">
   <title>FPTN · Keenetic</title>
   <link rel="icon" href="data:,">
-  <link rel="stylesheet" href="style.css?v=0.6.0-f17351f5775c">
-  <script src="app.js?v=0.6.0-b6333b9024cf" defer></script>
+  <link rel="stylesheet" href="style.css?v=0.7.0-f17351f5775c">
+  <script src="app.js?v=0.7.0-829af05d1258" defer></script>
 </head>
 <body>
   <div class="shell">
     <header><a class="brand" href="./"><span class="mark">F</span><span>FPTN <small>KEENETIC</small></span></a><button id="logout" class="quiet" hidden>Выйти</button></header>
-    <p id="versions" class="version-line">Панель 0.6.0 · версия клиента появится после входа</p>
+    <p id="versions" class="version-line">Панель 0.7.0 · версия клиента появится после входа</p>
     <div id="version-mismatch" class="banner error-banner" hidden><span id="version-mismatch-text"></span><button id="reload-ui" type="button">Обновить страницу</button></div>
     <section id="login" class="card login">
       <span class="eyebrow">ЛОКАЛЬНАЯ ПАНЕЛЬ</span>
@@ -33,7 +33,7 @@
         <div class="status-heading"><span id="indicator" class="dot"></span><h2 id="status-title">Проверяем состояние…</h2><span id="memory" class="memory"></span></div>
         <p id="status-message" class="status-text"></p>
         <p class="current-server">Текущий сервер: <strong id="active-server">Нет активного сервера</strong></p>
-        <p id="operation" class="operation" hidden></p>
+        <p id="operation" class="operation" hidden></p><button id="recover-operation" type="button" hidden>Восстановить управление</button>
         <div class="actions"><button id="start" class="primary" data-command="start">Запустить</button><button id="stop" data-command="stop">Остановить</button><button id="restart" data-command="restart">Переподключить</button></div>
         <p class="hint">Состояние туннеля FPTN обновляется автоматически. Доступность отдельных сайтов зависит также от маршрутов Keenetic.</p>
         <p id="autostart-state" class="hint"></p><button id="autostart-toggle" type="button">Включить автозапуск</button>
@@ -72,6 +72,18 @@
         </section>
       </div>
       <section class="card routing"><span class="routing-icon">↗</span><div><h2>Маршрутизация — в Keenetic</h2><p>Домены, подсети и выбор интерфейса задаются в штатной панели роутера. Интерфейс FPTN: <strong>OpkgTun0</strong>.</p></div></section>
+      <section class="card"><h2>Вход в панель</h2><p id="account-current" class="hint"></p>
+        <details><summary>Изменить способ входа или пароль</summary>
+          <form id="account-form">
+            <label for="account-current-password">Текущий пароль входа</label><input id="account-current-password" type="password" autocomplete="current-password" required maxlength="256">
+            <label for="account-mode">Способ входа</label><select id="account-mode"><option value="panel">Отдельный логин и пароль</option><option id="account-root-option" value="entware">root Entware</option></select>
+            <div id="account-panel-fields"><label for="account-username">Новый логин</label><input id="account-username" autocomplete="username" maxlength="64"><label for="account-password">Новый пароль панели</label><input id="account-password" type="password" autocomplete="new-password" maxlength="72"><label for="account-confirm">Повторите новый пароль</label><input id="account-confirm" type="password" autocomplete="new-password" maxlength="72"></div>
+            <div id="account-root-fields" hidden><label for="account-root-password">Существующий пароль root Entware</label><input id="account-root-password" type="password" autocomplete="off" maxlength="256"></div>
+            <p class="hint">После сохранения все сессии завершатся. VPN продолжит работать. Пароль самого root Entware здесь не меняется.</p>
+            <button id="account-save" type="submit">Сохранить вход и выйти</button>
+          </form>
+        </details>
+      </section>
       <section class="card"><div class="section-heading log-heading"><h2>Журнал службы</h2><button id="refresh-logs" class="quiet">Обновить</button></div><pre id="logs">Нажмите «Обновить», чтобы прочитать журнал.</pre></section>
       <footer>Локальная панель · Обновление состояния каждые 5 секунд</footer>
     </main>

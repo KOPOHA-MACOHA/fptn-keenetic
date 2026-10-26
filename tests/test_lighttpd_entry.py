@@ -26,6 +26,7 @@ class LighttpdEntryTest(unittest.TestCase):
             conf=root/'etc/fptn';conf.mkdir(parents=True)
             lib=root/'libexec/fptn';lib.mkdir(parents=True)
             for ext in ['sh','php']:shutil.copyfile(ROOT/f'scripts/fptn-web-auth.{ext}',lib/f'web-auth.{ext}')
+            shutil.copyfile(ROOT/'scripts/fptn-web-operations.php',lib/'web-operations.php')
             for entry in ['api.cgi','index.cgi']:(web/entry).chmod(0o700)
             port=free_port();main_port=free_port()
             while main_port==port:main_port=free_port()
@@ -56,11 +57,11 @@ setenv.add-environment = ( "FPTN_PREFIX" => "{root}" )
                     self.assertIsNotNone(response,(root/'console.log').read_text())
                     with response:
                         body=response.read().decode();self.assertEqual(response.status,200)
-                        self.assertIn('data-ui-version="0.6.0"',body)
+                        self.assertIn('data-ui-version="0.7.0"',body)
                         self.assertIn('no-store',response.headers.get('Cache-Control',''))
                     import json
                     with opener.open(origin+'/api.cgi?auth-info',timeout=5) as response:
-                        info=json.load(response);self.assertFalse(info['configured']);self.assertEqual(info['uiVersion'],'0.6.0')
+                        info=json.load(response);self.assertFalse(info['configured']);self.assertEqual(info['uiVersion'],'0.7.0')
                     with self.assertRaises(urllib.error.HTTPError) as error:opener.open(origin+'/api.cgi?status',timeout=5)
                     self.assertEqual(error.exception.code,401)
                 finally:

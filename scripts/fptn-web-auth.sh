@@ -5,7 +5,7 @@ ROOT=${FPTN_PREFIX:-/opt}
 ACTION=${1:-info}
 case "$ACTION" in reset)
   [ "$(id -u)" = 0 ] || { echo 'Требуется root.' >&2; exit 1; } ;;
- info|setup|login|verify|logout) ;;
+ info|setup|login|verify|logout|account|change|op-state|op-reserve|op-own|op-recover) ;;
  *) echo 'Использование: web-auth.sh info|setup|login|verify|logout|reset' >&2; exit 1 ;;
 esac
 PHP=${FPTN_PHP:-}

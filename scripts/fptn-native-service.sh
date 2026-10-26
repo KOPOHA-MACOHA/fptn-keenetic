@@ -390,7 +390,7 @@ start_service() {
   trap 'rm -rf "$RUN"' EXIT
   (cd "$LIB"; sha256sum -c SHA256SUMS) || fail 'Повреждены установленные файлы.'
   : > "$RUN/client.log"
-  FPTN_BOOT_RETRY=${1:-manual} nohup sh "$SELF" _run > "$RUN/supervisor.log" 2>&1 < /dev/null &
+  FPTN_OPERATION_ID= FPTN_BOOT_RETRY=${1:-manual} nohup sh "$SELF" _run > "$RUN/supervisor.log" 2>&1 < /dev/null &
   trap - EXIT
   [ "${1:-}" != boot ] || return 0
   N=0

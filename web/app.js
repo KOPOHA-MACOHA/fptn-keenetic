@@ -1,15 +1,15 @@
 'use strict';
-const UI_VERSION = '0.6.0';
+const UI_VERSION = '0.7.0';
 const $ = id => document.getElementById(id);
 if (window.top !== window.self) { document.documentElement.replaceChildren(); throw new Error('Panel cannot be framed'); }
 const profiles = {yandex:['26-4','26-3','25','24'],chrome:['149','148','147','146','145'],firefox:['151','150','149'],safari:['26-5','26-4']};
-let authConfigured=true,authMode='panel';
+let authConfigured=true,authMode='panel',accountData=null,accountPending=false;
 let key=sessionStorage.getItem('fptn-ui-session')||'';
 let pending=false,lastBusy=false,loaded=false,polling=false,timer,dirty=false,savedSnapshot='',versionMismatch=false;
 let previewToken='',serverNames=[],favorites=new Set(),excluded=new Set(),lastData=null;
 const healthNodes=new Map();
 function notice(message,error=false){$('notice').textContent=message;$('notice').classList.toggle('error',error);$('notice').hidden=false;clearTimeout(timer);timer=setTimeout(()=>{$('notice').hidden=true;},error?14000:6500);}
-function loggedOut(){key='';previewToken='';sessionStorage.removeItem('fptn-ui-session');$('token').value='';$('logs').textContent='';$('dashboard').hidden=true;$('logout').hidden=true;$('login').hidden=false;loaded=false;lastData=null;loadAuthInfo().catch(error=>notice(error.message,true));}
+function loggedOut(){key='';previewToken='';sessionStorage.removeItem('fptn-ui-session');accountData=null;for(const id of ['account-current-password','account-password','account-confirm','account-root-password'])$(id).value='';$('token').value='';$('logs').textContent='';$('dashboard').hidden=true;$('logout').hidden=true;$('login').hidden=false;loaded=false;lastData=null;loadAuthInfo().catch(error=>notice(error.message,true));}
 async function api(query,body){
   const response=await fetch('api.cgi'+(query?'?'+query:''),{method:body?'POST':'GET',cache:'no-store',credentials:'omit',headers:{Authorization:'Bearer '+key,...(body?{'Content-Type':'application/json'}:{})},...(body?{body:JSON.stringify(body)}:{})});
   let data;try{data=await response.json();}catch{throw new Error('Не удалось прочитать ответ панели. Обновите страницу.');}
@@ -27,7 +27,9 @@ function updateDirty(){
   setControls();
 }
 function setControls(){
-  const busy=pending||lastBusy;const service=lastData?.service;const known=Boolean(service)&&!versionMismatch;
+  const busy=pending||lastBusy||accountPending;const service=lastData?.service;const known=Boolean(service)&&!versionMismatch;
+  $('recover-operation').disabled=pending||versionMismatch||!lastData?.operationState?.canRecover;
+  $('account-save').disabled=busy||!known||!accountData;
   $('autostart-toggle').disabled=busy||!known;
   $('start').disabled=busy||!known||!service.canStart;
   $('stop').disabled=busy||!known||!service.canStop;
@@ -91,8 +93,10 @@ function applyStatus(data){
   $('status-message').textContent=service.message;$('status-text').textContent=data.status;
   $('active-server').textContent=service.selectedServer||'Нет активного сервера';
   $('memory').textContent=data.rssKiB?'ОЗУ '+(data.rssKiB/1024).toFixed(1)+' МиБ':'';
-  const operations={start:'Запуск клиента',stop:'Остановка клиента',restart:'Переподключение',save:'Применение настроек',check:'Проверка входа на серверы'};
+  $('recover-operation').hidden=!data.operationState?.stale;
+  const operations={recover:'Восстановление управления',start:'Запуск клиента',stop:'Остановка клиента',restart:'Переподключение',save:'Применение настроек',check:'Проверка входа на серверы'};
   $('operation').hidden=!data.busy;$('operation').textContent=(operations[data.operation]||'Выполнение операции')+'…';
+  if(data.operationState?.stale)$('operation').textContent=data.operationState.message;
   updateHealth();updateDirty();
 }
 function showOffline(error){lastData=null;$('status-title').textContent='Нет связи с панелью';$('status-message').textContent=error.message;$('indicator').className='dot';setControls();}
@@ -106,8 +110,31 @@ async function poll(){
 async function openPanel(){
   const data=await api('status');sessionStorage.setItem('fptn-ui-session',key);$('password').value='';$('login').hidden=true;$('dashboard').hidden=false;$('logout').hidden=false;lastBusy=data.busy;applyStatus(data);
   try{await loadSettings();}catch(error){notice(error.message,true);$('settings-error').hidden=false;$('settings-error').textContent='Список серверов не загружен: '+error.message;}
+  try{await loadAccount();}catch(error){notice(error.message,true);}
   setControls();
 }
+function showAccountMode(){
+  const panel=$('account-mode').value==='panel';$('account-panel-fields').hidden=!panel;
+  const rootPassword=!panel&&accountData?.mode!=='entware';$('account-root-fields').hidden=!rootPassword;
+  for(const id of ['account-username','account-password','account-confirm'])$(id).required=panel;
+  $('account-root-password').required=rootPassword;
+}
+async function loadAccount(){
+  accountData=await api('account');$('account-current').textContent=accountData.mode==='entware'?'Используется root Entware':'Учётная запись панели: '+accountData.username;
+  $('account-mode').value=accountData.mode;$('account-username').value=accountData.mode==='panel'?accountData.username:'admin';
+  $('account-root-option').disabled=!accountData.rootAvailable;showAccountMode();
+}
+$('account-mode').addEventListener('change',showAccountMode);
+$('account-form').addEventListener('submit',async event=>{
+  event.preventDefault();if(pending||accountPending||lastBusy||versionMismatch||!accountData)return;
+  accountPending=true;setControls();
+  const body={mode:$('account-mode').value,currentPassword:$('account-current-password').value};
+  if(body.mode==='panel'){body.username=$('account-username').value;body.password=$('account-password').value;body.confirm=$('account-confirm').value;}
+  else if(accountData.mode!=='entware')body.rootPassword=$('account-root-password').value;
+  try{await api('account',body);if(body.mode==='panel')$('username').value=body.username;loggedOut();notice('Вход изменён. Войдите с новыми данными.');}
+  catch(error){notice(error.message,true);}
+  finally{for(const id of ['account-current-password','account-password','account-confirm','account-root-password'])$(id).value='';accountPending=false;setControls();}
+});
 function updateLoginForm(){
   const root=(authConfigured?authMode:$('auth-choice').value)==='entware';
   $('auth-choice-wrap').hidden=authConfigured;
@@ -145,8 +172,9 @@ $('browser').addEventListener('change',()=>{fillProfiles();updateDirty();});$('m
 for(const id of ['server','strategy','profile','sni','token'])$(id).addEventListener('input',updateDirty);
 for(const id of ['server','strategy','profile','sni'])$(id).addEventListener('change',updateDirty);
 $('preview').addEventListener('click',async()=>{const token=$('token').value.trim();if(!token){notice('Вставьте новый токен.',true);return;}$('preview').disabled=true;try{const data=await api('',{action:'preview',token});fillServers(data.servers,$('server').value);previewToken=token;loaded=true;updateDirty();$('settings-error').hidden=true;notice('Серверы прочитаны. Примените настройки.');}catch(error){notice(error.message,true);}finally{setControls();}});
-async function command(body){if(pending||lastBusy||versionMismatch)return;pending=true;setControls();try{await api('',body);notice('Операция запущена. Состояние обновляется автоматически.');await poll();}catch(error){pending=false;setControls();notice(error.message,true);}}
+async function command(body){if(pending||versionMismatch||(lastBusy&&!(body.action==='recover'&&lastData?.operationState?.canRecover)))return;pending=true;setControls();try{await api('',body);notice('Операция запущена. Состояние обновляется автоматически.');await poll();}catch(error){pending=false;setControls();notice(error.message,true);}}
 document.querySelectorAll('[data-command]').forEach(button=>button.addEventListener('click',()=>command({action:button.dataset.command})));
+$('recover-operation').addEventListener('click',()=>command({action:'recover'}));
 $('autostart-toggle').addEventListener('click',()=>command({action:lastData?.autostart?'disable':'enable'}));
 $('check-servers').addEventListener('click',()=>{if(dirty){notice('Сначала примените изменения настроек.',true);return;}command({action:'check'});});
 $('settings-form').addEventListener('submit',event=>{event.preventDefault();const settings=collectSettings();if(settings.token&&settings.token!==previewToken){notice('Сначала нажмите «Прочитать серверы» для нового токена.',true);return;}const allowed=serverNames.filter(name=>!excluded.has(name));if(!allowed.length||allowed.length>64){notice('Оставьте от 1 до 64 разрешённых серверов.',true);return;}command({action:'save',...settings});});

@@ -10,6 +10,7 @@ on:
       - 'scripts/fptn-native-service.sh'
       - 'scripts/fptn-web-auth.sh'
       - 'scripts/fptn-web-auth.php'
+      - 'scripts/fptn-web-operations.php'
       - 'tests/test_web*.py'
       - 'tests/test_native_service.py'
       - 'tests/test_lighttpd_entry.py'

@@ -29,7 +29,7 @@ const document={hidden:false,documentElement:new Element('root'),getElementById:
  throw new Error('Unexpected selector '+selector);
 }};
 const settings={server:'CZ',servers:['CZ','DE'],connection:{bypass:'obfuscation',strategy:'dual-rolling-tunnel',sni:'google.com'},policy:{mode:'manual',favorites:[],excluded:[]}};
-const stopped={status:'FPTN остановлен',uiVersion:'0.6.0',clientVersion:'0.4.0',revision:'1234567890',busy:false,report:null,service:{state:'stopped',message:'Служба остановлена',selectedServer:'',connected:false,supervisorAlive:false,canStart:true,canStop:false,canRestart:false}};
+const stopped={status:'FPTN остановлен',uiVersion:'0.7.0',clientVersion:'0.4.0',revision:'1234567890',busy:false,report:null,service:{state:'stopped',message:'Служба остановлена',selectedServer:'',connected:false,supervisorAlive:false,canStart:true,canStop:false,canRestart:false}};
 const win={location:{href:''}};win.top=win;win.self=win;
 let authState={configured:false,mode:null,rootAvailable:true};const requests=[];
 const context={console,document,window:win,Option:class{constructor(text,value){this.text=text;this.value=value;}},sessionStorage:{getItem(){return '';},setItem(){},removeItem(){}},setInterval(){},setTimeout(){return 1;},clearTimeout(){},fetch:async(url,options={})=>{
@@ -37,6 +37,10 @@ const context={console,document,window:win,Option:class{constructor(text,value){
  if(url.includes('?auth-info'))data=structuredClone(authState);
  else if(url.includes('?setup')){const body=JSON.parse(options.body);requests.push({url,body});authState={configured:true,mode:body.mode,rootAvailable:true};data=body.mode==='entware'?{key:'f'.repeat(64)}:{ok:true};}
  else if(url.includes('?login')){requests.push({url,body:JSON.parse(options.body)});data={key:'f'.repeat(64)};}
+ else if(url.includes('?account')){
+   if(options.body){const body=JSON.parse(options.body);requests.push({url,body});authState={configured:true,mode:body.mode,rootAvailable:true};data={ok:true};}
+   else data={mode:'panel',username:'mine',rootAvailable:true};
+ }
  else if(url.includes('?status'))data=stopped;
  else if(url.includes('?logout'))data={ok:true};
  return {ok:true,status:200,json:async()=>structuredClone(data)};
@@ -89,7 +93,17 @@ const run=code=>vm.runInContext(code,context);
  assert(elements['password-label'].textContent==='Пароль root Entware');
  elements.password.value='existing-root-pass';await elements['login-form'].listeners.submit[0]({preventDefault(){}});
  assert(requests.at(-1).body.mode==='entware');assert(!elements.dashboard.hidden);
- console.log('Browser setup/create/login, Entware root choice, UI states and versions: PASS');
+ // Credential changes use the synchronous private endpoint and clear secrets on exit.
+ await run('loadAccount()');elements['account-mode'].value='panel';elements['account-mode'].dispatch('change');
+ elements['account-current-password'].value='oldpass';elements['account-username'].value='next';elements['account-password'].value='newpass';elements['account-confirm'].value='newpass';
+ await elements['account-form'].listeners.submit[0]({preventDefault(){}});
+ assert(requests.at(-1).url==='api.cgi?account');assert(requests.at(-1).body.currentPassword==='oldpass');
+ assert(elements.dashboard.hidden&&elements['account-password'].value===''&&elements['account-current-password'].value==='');
+ // A dead web operation exposes recovery while keeping normal commands disabled.
+ context.data={...stopped,busy:true,operationState:{stale:true,canRecover:true,message:'Сохранение прервано'}};
+ run('lastBusy=true;applyStatus(data)');assert(!elements['recover-operation'].hidden&&!elements['recover-operation'].disabled);
+ assert(elements.start.disabled&&elements.stop.disabled);assert(elements.operation.textContent==='Сохранение прервано');
+ console.log('Browser account changes, recovery controls, setup, root login and status: PASS');
 })().catch(error=>{console.error(error);process.exit(1);});
 '''
 
@@ -103,7 +117,7 @@ class FrontendTest(unittest.TestCase):
         sh=shutil.which('sh')
         result=subprocess.run([sh,str(ROOT/'web/index.cgi')],env={**os.environ,'PATH':'','SCRIPT_FILENAME':'/wrong/inherited/path'},capture_output=True,text=True)
         self.assertEqual(result.returncode,0,result.stderr)
-        self.assertIn('data-ui-version="0.6.0"',result.stdout)
+        self.assertIn('data-ui-version="0.7.0"',result.stdout)
         self.assertIn('Cache-Control: no-store',result.stdout)
 
     def test_real_ui_status_buttons_roles_drafts_and_versions(self):

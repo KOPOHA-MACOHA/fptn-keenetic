@@ -79,6 +79,15 @@ function makeSession(array $data): array {
     if (file_put_contents($folder . '/' . hash('sha256', $token), $record, LOCK_EX) === false) failAuth('Не удалось сохранить сессию.');
     return ['key' => $token, 'expiresIn' => 43200];
 }
+if (strpos($action, 'op-') === 0) {
+    $operations=__DIR__.'/web-operations.php';
+    if (!is_file($operations)) $operations=__DIR__.'/fptn-web-operations.php';
+    require $operations; exit;
+}
+if ($action === 'account') {
+    $data=config();if ($data===null) failAuth('Вход не настроен.');
+    reply(['mode'=>$data['mode'],'username'=>$data['username'],'rootAvailable'=>rootHash()!==null]);exit;
+}
 if ($action === 'info') {
     if (!function_exists('password_hash') || !function_exists('crypt') || !function_exists('random_bytes')) failAuth('PHP не поддерживает проверку паролей.');
     $data = config();
@@ -107,13 +116,25 @@ if ($action === 'reset') {
     @unlink($run . '/auth-delay'); @unlink($run . '/auth-failures');
     reply(['ok' => true, 'message' => 'Откройте панель: создание логина и пароля снова доступно.']); exit;
 }
-if (!in_array($action, ['login', 'setup'], true)) failAuth('Неизвестное действие.');
+if (!in_array($action, ['login', 'setup', 'change'], true)) failAuth('Неизвестное действие.');
 $now = time();
 $until = (int)@file_get_contents($run . '/auth-delay');
 if ($now < $until) failAuth('Слишком много попыток. Подождите 30 секунд.');
 $body = input(); $data = config();
-if ($action === 'setup') {
-    if ($data !== null) failAuth('Учётная запись уже настроена. Войдите по логину и паролю.');
+if ($action === 'change') {
+    if ($data === null) failAuth('Вход не настроен.');
+    $current=password(['password'=>$body['currentPassword']??null]);
+    $valid=$data['mode']==='entware' ? rootPassword($current) : password_verify($current,$data['hash']);
+    if (!$valid) {
+        $count=(int)@file_get_contents($run.'/auth-failures')+1;
+        file_put_contents($run.'/auth-failures',(string)$count);
+        if($count>=5){file_put_contents($run.'/auth-delay',(string)($now+30));@unlink($run.'/auth-failures');}
+        failAuth('Неверный текущий пароль.');
+    }
+    if (($body['mode']??'panel')==='entware') $body['password']=$body['rootPassword']??($data['mode']==='entware'?$current:'');
+}
+if ($action === 'setup' || $action === 'change') {
+    if ($action === 'setup' && $data !== null) failAuth('Учётная запись уже настроена. Войдите по логину и паролю.');
     $mode = $body['mode'] ?? 'panel';
     $pass = password($body);
     if ($mode === 'entware') {
@@ -138,6 +159,10 @@ if ($action === 'setup') {
     @unlink($run . '/auth-delay'); @unlink($run . '/auth-failures');
     // A newly created panel account is followed by the normal login screen.
     // Existing Entware root credentials can enter immediately after verification.
+    if ($action === 'change') {
+        foreach(glob($run.'/sessions/*')?:[] as $file) unlink($file);
+        reply(['ok'=>true,'message'=>'Настройки входа сохранены. Войдите снова.']);exit;
+    }
     reply($mode === 'entware' ? makeSession($data) : ['ok' => true, 'configured' => true, 'mode' => 'panel']); exit;
 }
 if ($data === null) failAuth('Сначала настройте вход в панели.');

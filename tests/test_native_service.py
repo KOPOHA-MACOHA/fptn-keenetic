@@ -44,6 +44,15 @@ class NativeServiceTest(unittest.TestCase):
             self.assertEqual(self.state()['mutations'],0)
         finally:self.cmd('stop')
 
+    def test_persistent_supervisor_does_not_keep_web_operation_marker(self):
+        root=self.prepare_native_client();marker='9'*32;self.env['FPTN_OPERATION_ID']=marker
+        try:
+            self.assertEqual(self.cmd('start').returncode,0)
+            for name in ['supervisor.pid','client.pid']:
+                pid=(root/'var/run/fptn-keenetic'/name).read_text().split()[0]
+                self.assertNotIn(('FPTN_OPERATION_ID='+marker).encode(),Path('/proc/'+pid+'/environ').read_bytes())
+        finally:self.cmd('stop')
+
     def test_no_custom_routing_dns_or_firewall_commands(self):
         source=SCRIPT.read_text()
         for forbidden in ['iptables ', 'ip -4 rule ', 'ip -4 route add', 'normalize_cidrs', 'nslookup ', 'ip route default']:

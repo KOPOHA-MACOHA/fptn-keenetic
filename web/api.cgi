@@ -39,24 +39,28 @@ decode_token() {
       all(explode[]; .>=32 and .!=127 and .!=44)))' 2>/dev/null
 }
 
+restore_saved_settings() {
+  "$CTL" stop >> "$LOCK/output" 2>&1 || return 1
+  for key in token server connection.json server-policy.json; do
+    if [ -f "$LOCK/old-$key" ]; then cp -p "$LOCK/old-$key" "$CONF/$key" || return 1
+    else rm -f "$CONF/$key" || return 1; fi
+  done
+  rm -f "$LOCK/rollback-needed"
+  if [ "$(cat "$LOCK/was-running" 2>/dev/null)" = yes ]; then
+    "$CTL" start >> "$LOCK/output" 2>&1 || { echo 'Прежние настройки восстановлены, но подключение не подтвердилось.' >> "$LOCK/output"; return 1; }
+  fi
+}
 worker() {
+  FPTN_OWNER_PID=$$ sh "$LIB/web-auth.sh" op-own >/dev/null
   ACTION=$(cat "$LOCK/action")
   rollback=no
   was_running=no
   success=no
   SUCCESS_MESSAGE='Готово.'
   finish_worker() {
-    trap '' INT TERM HUP
-    if [ "$rollback" = yes ]; then
-      if "$CTL" stop >> "$LOCK/output" 2>&1; then
-        for key in token server connection.json server-policy.json; do
-          if [ -f "$LOCK/old-$key" ]; then cp -p "$LOCK/old-$key" "$CONF/$key"
-          else rm -f "$CONF/$key"; fi
-        done
-        if [ "$was_running" = yes ]; then "$CTL" start >> "$LOCK/output" 2>&1 || true; fi
-      else
-        echo 'Не удалось остановить клиент для отката.' >> "$LOCK/output"
-      fi
+    trap ':' INT TERM HUP
+    if [ "$rollback" = yes ] && [ -f "$LOCK/rollback-needed" ]; then
+      if ! restore_saved_settings; then echo 'Не удалось завершить откат. Используйте восстановление в панели.' >> "$LOCK/output"; fi
     fi
     if [ "$success" = yes ]; then
       jq -n --arg action "$ACTION" --arg message "$SUCCESS_MESSAGE" '{ok:true,action:$action,message:$message}' > "$RUN/result.new"
@@ -68,18 +72,22 @@ worker() {
     [ ! -f "$LOCK/worker.log" ] || tail -c 8192 "$LOCK/worker.log" >> "$LOCK/output"
     tail -c 16384 "$LOCK/output" > "$RUN/action.log"
     rm -f "$RUN/failed-request.json"
-    if [ "$rollback" = yes ]; then
+    if [ -f "$LOCK/rollback-needed" ]; then
       mkdir -p "$CONF/web-recovery"
       for key in token server connection.json server-policy.json; do
         [ ! -f "$LOCK/old-$key" ] || cp -p "$LOCK/old-$key" "$CONF/web-recovery/$key"
       done
     fi
-    rm -rf "$LOCK"
+    if [ ! -f "$LOCK/rollback-needed" ]; then rm -rf "$LOCK"; fi
   }
   trap finish_worker EXIT
   trap 'exit 1' INT TERM HUP
   : > "$LOCK/output"
   case "$ACTION" in
+    recover)
+      if [ -f "$LOCK/rollback-needed" ]; then restore_saved_settings || exit 1; fi
+      SUCCESS_MESSAGE='Управление восстановлено. Состояние службы проверено заново.'
+      [ ! -f "$LOCK/install-backup" ] || SUCCESS_MESSAGE='Управление восстановлено. Обновление было прервано — повторите установку.' ;; 
     start) "$CTL" start >> "$LOCK/output" 2>&1; SUCCESS_MESSAGE='Служба запущена.' ;;
     stop) "$CTL" stop >> "$LOCK/output" 2>&1; SUCCESS_MESSAGE='Служба остановлена.' ;;
     restart) "$CTL" stop >> "$LOCK/output" 2>&1; "$CTL" start >> "$LOCK/output" 2>&1; SUCCESS_MESSAGE='Клиент переподключён.' ;;
@@ -112,8 +120,10 @@ worker() {
       rm -f "$RUN/server-checks.json"
       # Existing CLI status is informational; inspect its owned runtime record too.
       if [ -d "$ROOT/var/run/fptn-keenetic" ]; then was_running=yes; fi
-      "$CTL" stop >> "$LOCK/output" 2>&1
+      printf '%s\n' "$was_running" > "$LOCK/was-running"
+      : > "$LOCK/rollback-needed"
       rollback=yes
+      "$CTL" stop >> "$LOCK/output" 2>&1
       printf '%s\n' "$TOKEN" > "$CONF/token.new"
       printf '%s\n' "$SERVER" > "$CONF/server.new"
       cp "$LOCK/new-connection.json" "$CONF/connection.json.new"
@@ -125,6 +135,7 @@ worker() {
       if [ "$was_running" = yes ]; then "$CTL" start >> "$LOCK/output" 2>&1; fi
       if [ "$was_running" = yes ]; then SUCCESS_MESSAGE='Настройки применены. Клиент переподключён.'
       else SUCCESS_MESSAGE='Настройки сохранены. Служба остановлена — нажмите «Запустить» для подключения.'; fi
+      rm -f "$LOCK/rollback-needed"
       rollback=no
       ;;
     *) exit 1 ;;
@@ -147,7 +158,7 @@ ORIGIN=$(cat "$CONF/web-origin")
 [ -z "${HTTP_ORIGIN:-}" ] || [ "$HTTP_ORIGIN" = "$ORIGIN" ] || error '403 Forbidden' 'Запрос с другого сайта запрещён.'
 if [ "${QUERY_STRING:-}" = auth-info ] && [ "${REQUEST_METHOD:-}" = GET ]; then
   INFO=$(sh "$LIB/web-auth.sh" info) || error '503 Service Unavailable' 'Не удалось проверить настройки входа.'
-  respond '200 OK' "$(printf '%s' "$INFO" | jq '. + {uiVersion:"0.6.0"}')"
+  respond '200 OK' "$(printf '%s' "$INFO" | jq '. + {uiVersion:"0.7.0"}')"
 fi
 case "${QUERY_STRING:-}:${REQUEST_METHOD:-}" in login:POST|setup:POST)
   [ "${CONTENT_TYPE:-}" = application/json ] || error '415 Unsupported Media Type' 'Ожидается JSON.'
@@ -166,6 +177,21 @@ printf '%s\n' "$AUTH" | sh "$LIB/web-auth.sh" verify || error '401 Unauthorized'
 if [ "${QUERY_STRING:-}" = logout ] && [ "${REQUEST_METHOD:-}" = POST ]; then
   printf '%s\n' "$AUTH" | sh "$LIB/web-auth.sh" logout
   respond '200 OK' '{"ok":true}'
+fi
+if [ "${QUERY_STRING:-}" = account ]; then
+  case "${REQUEST_METHOD:-}" in
+    GET)
+      ACCOUNT=$(sh "$LIB/web-auth.sh" account) || error '500 Internal Server Error' 'Не удалось прочитать настройки входа.'
+      respond '200 OK' "$ACCOUNT" ;;
+    POST)
+      [ "${CONTENT_TYPE:-}" = application/json ] || error '415 Unsupported Media Type' 'Ожидается JSON.'
+      case "${CONTENT_LENGTH:-}" in ''|*[!0-9]*) error '400 Bad Request' 'Некорректная длина.' ;; esac
+      [ "${#CONTENT_LENGTH}" -le 4 ] && [ "$CONTENT_LENGTH" -le 4096 ] || error '413 Content Too Large' 'Слишком большой запрос.'
+      if ACCOUNT=$(head -c "$CONTENT_LENGTH" | sh "$LIB/web-auth.sh" change); then respond '200 OK' "$ACCOUNT"; fi
+      printf '%s' "$ACCOUNT" | jq -e '(.error|type=="string")' >/dev/null 2>&1 || error '500 Internal Server Error' 'Не удалось сменить вход.'
+      respond '400 Bad Request' "$ACCOUNT" ;;
+    *) error '405 Method Not Allowed' 'Метод не поддерживается.' ;;
+  esac
 fi
 unset AUTH HTTP_AUTHORIZATION
 mkdir -p "$RUN"
@@ -192,12 +218,13 @@ case "${REQUEST_METHOD:-}" in
           esac
         fi
         AUTOSTART=false; [ ! -f "$CONF/autostart" ] || AUTOSTART=true
-        BUSY=false; [ ! -d "$LOCK" ] || BUSY=true
+        OP_STATE=$(sh "$LIB/web-auth.sh" op-state) || error '500 Internal Server Error' 'Не удалось проверить операцию.'
+        BUSY=$(printf '%s' "$OP_STATE" | jq -r .busy)
         OPERATION=''; [ ! -f "$LOCK/action" ] || OPERATION=$(cat "$LOCK/action")
         RESULT='null'; [ ! -r "$RUN/result.json" ] || RESULT=$(cat "$RUN/result.json")
         respond '200 OK' "$(jq -n --arg status "$TEXT" --arg rss "${RSS:-0}" --arg operation "$OPERATION" \
-          --argjson autostart "$AUTOSTART" --argjson service "$SERVICE" --argjson report "$REPORT" --argjson meta "$META" --argjson busy "$BUSY" --argjson result "$RESULT" \
-          '{autostart:$autostart,status:$status,service:$service,report:$report,uiVersion:"0.6.0",clientVersion:($meta.clientVersion // "неизвестна"),revision:($meta.revision // ""),operation:$operation,rssKiB:($rss|tonumber),busy:$busy,result:$result}')"
+          --argjson operationState "$OP_STATE" --argjson autostart "$AUTOSTART" --argjson service "$SERVICE" --argjson report "$REPORT" --argjson meta "$META" --argjson busy "$BUSY" --argjson result "$RESULT" \
+          '{operationState:$operationState,autostart:$autostart,status:$status,service:$service,report:$report,uiVersion:"0.7.0",clientVersion:($meta.clientVersion // "неизвестна"),revision:($meta.revision // ""),operation:$operation,rssKiB:($rss|tonumber),busy:$busy,result:$result}')"
         ;;
       settings)
         CONNECTION=$("$CTL" get-settings) || error '500 Internal Server Error' 'Некорректные настройки подключения.'
@@ -236,7 +263,7 @@ case "${REQUEST_METHOD:-}" in
       unset TOKEN
       respond '200 OK' "$(printf '%s' "$SERVERS" | jq '{servers:[.servers[].name]}')"
     fi
-    case "$ACTION" in start|stop|restart|check|enable|disable) ;; save)
+    case "$ACTION" in start|stop|restart|check|enable|disable|recover) ;; save)
       printf '%s' "$BODY" | jq -e '(.server|type=="string" and length>0 and length<=128) and
         (.token // ""|type=="string" and length<=262144)' >/dev/null 2>&1 || error '400 Bad Request' 'Некорректный сервер или токен.'
       printf '%s' "$BODY" | jq '.connection' | "$CTL" validate-settings >/dev/null 2>&1 || error '400 Bad Request' 'Проверьте стратегию, метод обхода и домен SNI.'
@@ -244,13 +271,13 @@ case "${REQUEST_METHOD:-}" in
         printf '%s' "$BODY" | jq '.policy' | "$CTL" validate-server-policy >/dev/null 2>&1 || error '400 Bad Request' 'Проверьте списки серверов.'
       fi
       ;; *) error '400 Bad Request' 'Неизвестное действие.' ;; esac
-    mkdir "$LOCK" 2>/dev/null || error '409 Conflict' 'Дождитесь завершения предыдущей операции.'
-    trap 'rm -rf "$LOCK"' EXIT
-    printf '%s' "$BODY" > "$LOCK/request.json"
-    printf '%s\n' "$ACTION" > "$LOCK/action"
-    rm -f "$RUN/result.json"
-    REQUEST_METHOD= nohup sh "$SELF" --worker > "$LOCK/worker.log" 2>&1 < /dev/null &
-    trap - EXIT
+    if [ "$ACTION" = recover ]; then
+      RESERVED=$(FPTN_OWNER_PID=$$ sh "$LIB/web-auth.sh" op-recover) || error '409 Conflict' 'Операция ещё работает или восстановление недоступно.'
+    else
+      RESERVED=$(printf '%s' "$BODY" | FPTN_OWNER_PID=$$ sh "$LIB/web-auth.sh" op-reserve) || error '409 Conflict' 'Дождитесь операции или восстановите управление в панели.'
+    fi
+    OP_ID=$(printf '%s' "$RESERVED" | jq -er .id)
+    FPTN_OPERATION_ID=$OP_ID REQUEST_METHOD= nohup sh "$SELF" --worker > "$LOCK/worker.log" 2>&1 < /dev/null &
     respond '202 Accepted' '{"accepted":true}'
     ;;
   *) error '405 Method Not Allowed' 'Метод не поддерживается.' ;;

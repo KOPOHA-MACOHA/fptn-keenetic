@@ -19,6 +19,7 @@ class WebAuthTest(unittest.TestCase):
         self.root=Path(self.tmp.name);self.conf=self.root/'etc/fptn';self.conf.mkdir(parents=True)
         self.run=self.root/'var/run/fptn-web';lib=self.root/'libexec/fptn';lib.mkdir(parents=True)
         for ext in ['sh','php']:shutil.copyfile(ROOT/f'scripts/fptn-web-auth.{ext}',lib/f'web-auth.{ext}')
+        shutil.copyfile(ROOT/'scripts/fptn-web-operations.php',lib/'web-operations.php')
         self.password='test password!123'
         bin=self.root/'bin';bin.mkdir();(bin/'id').write_text('#!/bin/sh\necho 0\n');(bin/'id').chmod(0o700)
         self.env={**os.environ,'FPTN_PREFIX':str(self.root),'PATH':str(bin)+':'+os.environ['PATH'],'FPTN_TEST_PATH':str(bin)+':'+os.environ['PATH']}
@@ -131,6 +132,30 @@ class WebAuthTest(unittest.TestCase):
             codes.append(child.wait(timeout=15));child.stdout.close();child.stderr.close()
         self.assertEqual(codes.count(0),1,codes)
         self.assertEqual(json.loads((self.conf/'web-auth.json').read_text())['username'],'one')
+
+    def test_change_panel_credentials_requires_current_password_and_revokes_sessions(self):
+        token=json.loads(self.login().stdout)['key'];headers={'HTTP_AUTHORIZATION':'Bearer '+token}
+        status,account=self.cgi('account',**headers);self.assertEqual(status,200);self.assertEqual(account['username'],'admin');self.assertNotIn('hash',account)
+        body={'currentPassword':'wrong','mode':'panel','username':'newuser','password':'newpass','confirm':'newpass'}
+        saved=(self.conf/'web-auth.json').read_bytes()
+        self.assertEqual(self.cgi('account',body,**headers)[0],400)
+        self.assertEqual((self.conf/'web-auth.json').read_bytes(),saved)
+        body['currentPassword']=self.password
+        status,data=self.cgi('account',body,**headers);self.assertEqual(status,200,data)
+        self.assertNotEqual(self.auth('verify',token+'\n').returncode,0)
+        self.assertEqual(self.cgi('login',{'username':'newuser','password':'newpass'})[0],200)
+        self.assertEqual(self.login().returncode,1)
+        self.assertFalse((self.run/'action').exists())
+
+    def test_switching_to_entware_requires_its_password_and_never_changes_shadow(self):
+        hashed=json.loads((self.conf/'web-auth.json').read_text())['hash'];shadow=self.root/'etc/shadow';shadow.write_text('root:'+hashed+':0:0:99999:7:::\n')
+        token=json.loads(self.login().stdout)['key'];headers={'HTTP_AUTHORIZATION':'Bearer '+token}
+        body={'mode':'entware','currentPassword':self.password,'rootPassword':'wrong'}
+        self.assertEqual(self.cgi('account',body,**headers)[0],400)
+        body['rootPassword']=self.password;self.assertEqual(self.cgi('account',body,**headers)[0],200)
+        self.assertEqual(shadow.read_text(),'root:'+hashed+':0:0:99999:7:::\n')
+        self.assertEqual(json.loads((self.conf/'web-auth.json').read_text()),{'mode':'entware','username':'root'})
+        self.assertEqual(self.cgi('login',{'username':'root','password':self.password})[0],200)
 
     def test_legacy_sha512_credentials_continue_to_work_without_openssl(self):
         data={'username':'admin','hash':'$6$abcdefghijklmnop$Lcb0CtDeG8B7IawT1d3JyzZtU/ipjaxhQn6287FkM9XKViTiU.e44LkUVOKMD9bT3uqodzwqb5.rv3Mkxh5xw/'}
