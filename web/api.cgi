@@ -93,6 +93,8 @@ worker() {
     restart) "$CTL" stop >> "$LOCK/output" 2>&1; "$CTL" start >> "$LOCK/output" 2>&1; SUCCESS_MESSAGE='Клиент переподключён.' ;;
     enable|disable) "$CTL" "$ACTION" >> "$LOCK/output" 2>&1; SUCCESS_MESSAGE='Настройка автозапуска сохранена.' ;;
     check) "$CTL" check-servers >> "$LOCK/output" 2>&1; SUCCESS_MESSAGE='Проверка входа на серверы завершена.' ;;
+    check-update) sh "$LIB/web-update.sh" check >> "$LOCK/output" 2>&1; SUCCESS_MESSAGE='Проверка обновлений завершена.' ;;
+    update) sh "$LIB/web-update.sh" apply >> "$LOCK/output" 2>&1; SUCCESS_MESSAGE='Обновление установлено. Обновите страницу панели.' ;;
     save)
       # All validation precedes stopping or writing the current configuration.
       TOKEN=$(jq -r '.token // ""' "$LOCK/request.json")
@@ -162,7 +164,7 @@ ORIGIN=$(cat "$CONF/web-origin")
 [ -z "${HTTP_ORIGIN:-}" ] || [ "$HTTP_ORIGIN" = "$ORIGIN" ] || error '403 Forbidden' 'Запрос с другого сайта запрещён.'
 if [ "${QUERY_STRING:-}" = auth-info ] && [ "${REQUEST_METHOD:-}" = GET ]; then
   INFO=$(sh "$LIB/web-auth.sh" info) || error '503 Service Unavailable' 'Не удалось проверить настройки входа.'
-  respond '200 OK' "$(printf '%s' "$INFO" | jq '. + {uiVersion:"0.8.0"}')"
+  respond '200 OK' "$(printf '%s' "$INFO" | jq '. + {uiVersion:"0.9.0"}')"
 fi
 case "${QUERY_STRING:-}:${REQUEST_METHOD:-}" in login:POST|setup:POST)
   [ "${CONTENT_TYPE:-}" = application/json ] || error '415 Unsupported Media Type' 'Ожидается JSON.'
@@ -228,8 +230,11 @@ case "${REQUEST_METHOD:-}" in
         RESULT='null'; [ ! -r "$RUN/result.json" ] || RESULT=$(cat "$RUN/result.json")
         respond '200 OK' "$(jq -n --arg status "$TEXT" --arg rss "${RSS:-0}" --arg operation "$OPERATION" \
           --argjson operationState "$OP_STATE" --argjson autostart "$AUTOSTART" --argjson service "$SERVICE" --argjson report "$REPORT" --argjson meta "$META" --argjson busy "$BUSY" --argjson result "$RESULT" \
-          '{operationState:$operationState,autostart:$autostart,status:$status,service:$service,report:$report,uiVersion:"0.8.0",clientVersion:($meta.clientVersion // "неизвестна"),revision:($meta.revision // ""),operation:$operation,rssKiB:($rss|tonumber),busy:$busy,result:$result}')"
+          '{operationState:$operationState,autostart:$autostart,status:$status,service:$service,report:$report,uiVersion:"0.9.0",clientVersion:($meta.clientVersion // "неизвестна"),revision:($meta.revision // ""),operation:$operation,rssKiB:($rss|tonumber),busy:$busy,result:$result}')"
         ;;
+      updates)
+        UPDATE=$(sh "$LIB/web-update.sh" status) || error '500 Internal Server Error' 'Не удалось прочитать обновление.'
+        respond '200 OK' "$UPDATE" ;;
       settings)
         CONNECTION=$("$CTL" get-settings) || error '500 Internal Server Error' 'Некорректные настройки подключения.'
         FALLBACK=$("$CTL" get-fallback) || error '500 Internal Server Error' 'Некорректные настройки резервных методов.'
@@ -268,7 +273,7 @@ case "${REQUEST_METHOD:-}" in
       unset TOKEN
       respond '200 OK' "$(printf '%s' "$SERVERS" | jq '{servers:[.servers[].name]}')"
     fi
-    case "$ACTION" in start|stop|restart|check|enable|disable|recover) ;; save)
+    case "$ACTION" in start|stop|restart|check|enable|disable|recover|check-update|update) ;; save)
       printf '%s' "$BODY" | jq -e '(.server|type=="string" and length>0 and length<=128) and
         (.token // ""|type=="string" and length<=262144)' >/dev/null 2>&1 || error '400 Bad Request' 'Некорректный сервер или токен.'
       printf '%s' "$BODY" | jq '.connection' | "$CTL" validate-settings >/dev/null 2>&1 || error '400 Bad Request' 'Проверьте стратегию, метод обхода и домен SNI.'

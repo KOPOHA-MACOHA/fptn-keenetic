@@ -1,8 +1,9 @@
 'use strict';
-const UI_VERSION = '0.8.0';
+const UI_VERSION = '0.9.0';
 const $ = id => document.getElementById(id);
 if (window.top !== window.self) { document.documentElement.replaceChildren(); throw new Error('Panel cannot be framed'); }
 const profiles = {yandex:['26-4','26-3','25','24'],chrome:['149','148','147','146','145'],firefox:['151','150','149'],safari:['26-5','26-4']};
+let updateInfo=null;
 let authConfigured=true,authMode='panel',accountData=null,accountPending=false;
 let key=sessionStorage.getItem('fptn-ui-session')||'';
 let pending=false,lastBusy=false,loaded=false,polling=false,timer,dirty=false,savedSnapshot='',versionMismatch=false;
@@ -31,6 +32,8 @@ function updateDirty(){
 function setControls(){
   const busy=pending||lastBusy||accountPending;const service=lastData?.service;const known=Boolean(service)&&!versionMismatch;
   $('recover-operation').disabled=pending||versionMismatch||!lastData?.operationState?.canRecover;
+  $('check-update').disabled=busy||!known;
+  $('install-update').disabled=busy||!known||dirty||!updateInfo?.available;
   $('account-save').disabled=busy||!known||!accountData;
   $('autostart-toggle').disabled=busy||!known;
   $('start').disabled=busy||!known||!service.canStart;
@@ -97,7 +100,7 @@ function applyStatus(data){
   $('active-server').textContent=service.selectedServer||'Нет активного сервера';
   $('memory').textContent=data.rssKiB?'ОЗУ '+(data.rssKiB/1024).toFixed(1)+' МиБ':'';
   $('recover-operation').hidden=!data.operationState?.stale;
-  const operations={recover:'Восстановление управления',start:'Запуск клиента',stop:'Остановка клиента',restart:'Переподключение',save:'Применение настроек',check:'Проверка входа на серверы'};
+  const operations={recover:'Восстановление управления',start:'Запуск клиента',stop:'Остановка клиента',restart:'Переподключение',save:'Применение настроек',check:'Проверка входа на серверы','check-update':'Проверка обновлений',update:'Установка обновления'};
   $('operation').hidden=!data.busy;$('operation').textContent=(operations[data.operation]||'Выполнение операции')+'…';
   if(data.operationState?.stale)$('operation').textContent=data.operationState.message;
   updateHealth();updateDirty();
@@ -106,13 +109,14 @@ function showOffline(error){lastData=null;$('status-title').textContent='Нет 
 async function poll(){
   if(!key||polling)return;polling=true;
   try{const data=await api('status');const finished=(lastBusy||pending)&&!data.busy&&data.result;lastBusy=data.busy;applyStatus(data);
-    if(finished){pending=false;notice(data.result.message,!data.result.ok);if(data.result.ok&&data.result.action==='save')await loadSettings();}
+    if(finished){pending=false;notice(data.result.message,!data.result.ok);if(data.result.ok&&data.result.action==='save')await loadSettings();if(['check-update','update'].includes(data.result.action))await loadUpdates();}
     setControls();
   }catch(error){if(key)showOffline(error);}finally{polling=false;}
 }
 async function openPanel(){
   const data=await api('status');sessionStorage.setItem('fptn-ui-session',key);$('password').value='';$('login').hidden=true;$('dashboard').hidden=false;$('logout').hidden=false;lastBusy=data.busy;applyStatus(data);
   try{await loadSettings();}catch(error){notice(error.message,true);$('settings-error').hidden=false;$('settings-error').textContent='Список серверов не загружен: '+error.message;}
+  try{await loadUpdates();}catch(error){notice(error.message,true);}
   try{await loadAccount();}catch(error){notice(error.message,true);}
   setControls();
 }
@@ -188,3 +192,12 @@ $('settings-form').addEventListener('submit',event=>{event.preventDefault();cons
 $('refresh-logs').addEventListener('click',async()=>{try{$('logs').textContent=(await api('logs')).log||'Журнал пока пуст.';}catch(error){notice(error.message,true);}});
 document.addEventListener('visibilitychange',()=>{if(!document.hidden)poll();});setInterval(()=>{if(!document.hidden)poll();},5000);
 fillProfiles();setControls();loadAuthInfo().then(()=>{if(key)return openPanel();}).catch(error=>notice(error.message,true));
+
+async function loadUpdates(){
+  updateInfo=await api('updates');
+  $('install-update').hidden=!updateInfo.available;
+  $('update-status').textContent=!updateInfo.checked?'Обновления ещё не проверены.':updateInfo.available?'Доступна панель '+updateInfo.version+' · клиент '+updateInfo.clientVersion+'. Настройки и автозапуск сохраняются.':'Опубликованных обновлений нет.';
+  setControls();
+}
+$('check-update').addEventListener('click',()=>command({action:'check-update'}));
+$('install-update').addEventListener('click',()=>{if(dirty){notice('Сначала сохраните изменения настроек.',true);return;}if(updateInfo?.available)command({action:'update'});});

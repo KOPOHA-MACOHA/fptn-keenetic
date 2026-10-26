@@ -18,7 +18,8 @@ elif command=='date':
  clock.write_text(str(now+1));print(now)
 elif command=='php-cgi':
  if (root/'fail-php').exists():sys.exit(1)
- if os.environ.get('FPTN_AUTH_ACTION')=='op-reserve':
+ if os.environ.get('FPTN_AUTH_ACTION')=='op-state':print(json.dumps({'busy':True}))
+ elif os.environ.get('FPTN_AUTH_ACTION')=='op-reserve':
   lock=root/'var/run/fptn-web/action';lock.mkdir();(lock/'action').write_text('update\n');print(json.dumps({'id':'a'*32}))
  else:print(json.dumps({'configured':True,'mode':'panel','rootAvailable':True}))
 elif command=='ip':print('    inet 192.168.1.1/24 scope global br0')
@@ -45,7 +46,7 @@ elif command=='curl':
   if 'auth-info' in url:
    with (root.parent/'trace').open('a') as f:f.write('http-auth-info\n')
   if '-K' in args:sys.stdin.read()
-  info={'uiVersion':'old' if (root/'wrong-api').exists() else '0.8.0','service':{'state':'stopped'},'busy':False,'status':'stopped','configured':True,'rootAvailable':True}
+  info={'uiVersion':'old' if (root/'wrong-api').exists() else '0.9.0','service':{'state':'stopped'},'busy':False,'status':'stopped','configured':True,'rootAvailable':True}
   text=json.dumps(info)
   if out:out.write_text(text)
   else:print(text)
@@ -98,7 +99,7 @@ esac
         (lib/'brotli').write_text('dummy')
         self.old_sums=''.join(hashlib.sha256((lib/p).read_bytes()).hexdigest()+'  '+p+'\n' for p in ['fptn-client-cli','brotli'])
         (lib/'SHA256SUMS').write_text(self.old_sums)
-        paths=['web/index.html','web/index.cgi','web/style.css','web/app.js','web/api.cgi','scripts/fptn-native-service.sh','scripts/fptn-web-auth.sh','scripts/fptn-web-auth.php','scripts/fptn-web-operations.php','scripts/fptn-transport-plan.php']
+        paths=['web/index.html','web/index.cgi','web/style.css','web/app.js','web/api.cgi','scripts/fptn-native-service.sh','scripts/fptn-web-auth.sh','scripts/fptn-web-auth.php','scripts/fptn-web-operations.php','scripts/fptn-transport-plan.php','scripts/fptn-web-update.sh']
         for name in paths:
             target=self.payload/name;target.parent.mkdir(parents=True,exist_ok=True)
             target.write_text(controller('staged') if name=='scripts/fptn-native-service.sh' else (REPO/name).read_text())
@@ -202,3 +203,19 @@ sys.exit(result.returncode)
         self.assertNotEqual(result.returncode,0,result.stdout+result.stderr)
         self.assert_original_files()
         self.assertTrue((self.root/'var/run/fptn-keenetic').exists())
+
+    def test_web_worker_lock_is_reused_and_not_removed_by_installer(self):
+        import json
+        lock=self.root/'var/run/fptn-web/action';lock.mkdir(parents=True)
+        (lock/'action').write_text('update\n');(lock/'owner.json').write_text(json.dumps({'id':'d'*32}))
+        self.env['FPTN_OPERATION_ID']='d'*32
+        result=self.execute();self.assertEqual(result.returncode,0,result.stdout+result.stderr)
+        self.assertTrue(lock.exists());self.assertTrue((lock/'install-backup').exists())
+
+    def test_web_worker_cannot_borrow_another_operation(self):
+        import json
+        lock=self.root/'var/run/fptn-web/action';lock.mkdir(parents=True)
+        (lock/'action').write_text('save\n');(lock/'owner.json').write_text(json.dumps({'id':'e'*32}))
+        self.env['FPTN_OPERATION_ID']='d'*32
+        result=self.execute();self.assertNotEqual(result.returncode,0)
+        self.assert_original_files();self.assertTrue(lock.exists())

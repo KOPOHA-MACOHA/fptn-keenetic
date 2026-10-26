@@ -1,5 +1,5 @@
 <!doctype html>
-<html lang="ru" data-ui-version="0.8.0">
+<html lang="ru" data-ui-version="0.9.0">
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
@@ -7,13 +7,13 @@
   <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self'; style-src 'self'; connect-src 'self'; img-src 'self'; object-src 'none'; base-uri 'none'; form-action 'self'; frame-src 'none'">
   <title>FPTN · Keenetic</title>
   <link rel="icon" href="data:,">
-  <link rel="stylesheet" href="style.css?v=0.8.0-8f209edfd09d">
-  <script src="app.js?v=0.8.0-9cf79adb25ef" defer></script>
+  <link rel="stylesheet" href="style.css?v=0.9.0-8f209edfd09d">
+  <script src="app.js?v=0.9.0-84febb540d72" defer></script>
 </head>
 <body>
   <div class="shell">
     <header><a class="brand" href="./"><span class="mark">F</span><span>FPTN <small>KEENETIC</small></span></a><button id="logout" class="quiet" hidden>Выйти</button></header>
-    <p id="versions" class="version-line">Панель 0.8.0 · версия клиента появится после входа</p>
+    <p id="versions" class="version-line">Панель 0.9.0 · версия клиента появится после входа</p>
     <div id="version-mismatch" class="banner error-banner" hidden><span id="version-mismatch-text"></span><button id="reload-ui" type="button">Обновить страницу</button></div>
     <section id="login" class="card login">
       <span class="eyebrow">ЛОКАЛЬНАЯ ПАНЕЛЬ</span>
@@ -86,6 +86,12 @@
         </section>
       </div>
       <section class="card routing"><span class="routing-icon">↗</span><div><h2>Маршрутизация — в Keenetic</h2><p>Домены, подсети и выбор интерфейса задаются в штатной панели роутера. Интерфейс FPTN: <strong>OpkgTun0</strong>.</p></div></section>
+      <section class="card"><h2>Обновления</h2>
+        <p id="update-status" class="hint">Нажмите «Проверить обновления», чтобы узнать о новом выпуске.</p>
+        <button id="check-update" type="button">Проверить обновления</button>
+        <button id="install-update" type="button" hidden>Установить обновление</button>
+        <p class="hint">Перед установкой создаётся резервная копия. При ошибке установщик возвращает прежние файлы. Во время обновления панель может ненадолго потерять связь; дождитесь результата.</p>
+      </section>
       <section class="card"><h2>Вход в панель</h2><p id="account-current" class="hint"></p>
         <details><summary>Изменить способ входа или пароль</summary>
           <form id="account-form">

@@ -29,7 +29,7 @@ const document={hidden:false,documentElement:new Element('root'),getElementById:
  throw new Error('Unexpected selector '+selector);
 }};
 const settings={server:'CZ',servers:['CZ','DE'],connection:{bypass:'obfuscation',strategy:'dual-rolling-tunnel',sni:'google.com'},policy:{mode:'manual',favorites:[],excluded:[]}};
-const stopped={status:'FPTN остановлен',uiVersion:'0.8.0',clientVersion:'0.4.0',revision:'1234567890',busy:false,report:null,service:{state:'stopped',message:'Служба остановлена',selectedServer:'',connected:false,supervisorAlive:false,canStart:true,canStop:false,canRestart:false}};
+const stopped={status:'FPTN остановлен',uiVersion:'0.9.0',clientVersion:'0.4.0',revision:'1234567890',busy:false,report:null,service:{state:'stopped',message:'Служба остановлена',selectedServer:'',connected:false,supervisorAlive:false,canStart:true,canStop:false,canRestart:false}};
 const win={location:{href:''}};win.top=win;win.self=win;
 let authState={configured:false,mode:null,rootAvailable:true};const requests=[];
 const context={console,document,window:win,Option:class{constructor(text,value){this.text=text;this.value=value;}},sessionStorage:{getItem(){return '';},setItem(){},removeItem(){}},setInterval(){},setTimeout(){return 1;},clearTimeout(){},fetch:async(url,options={})=>{
@@ -41,6 +41,7 @@ const context={console,document,window:win,Option:class{constructor(text,value){
    if(options.body){const body=JSON.parse(options.body);requests.push({url,body});authState={configured:true,mode:body.mode,rootAvailable:true};data={ok:true};}
    else data={mode:'panel',username:'mine',rootAvailable:true};
  }
+ else if(url.includes('?updates'))data={checked:true,available:true,version:'0.9.1',clientVersion:'0.4.0'};
  else if(url.includes('?status'))data=stopped;
  else if(url.includes('?logout'))data={ok:true};
  return {ok:true,status:200,json:async()=>structuredClone(data)};
@@ -51,6 +52,7 @@ const run=code=>vm.runInContext(code,context);
  assert(elements.start.disabled&&elements.stop.disabled,'unknown status must disable controls');
  context.data=stopped;run('applyStatus(data)');await run('loadSettings()');
  assert(!elements.start.disabled&&elements.stop.disabled,'stopped: start only');
+ await run('loadUpdates()');assert(!elements['install-update'].hidden&&!elements['install-update'].disabled);assert(elements['update-status'].textContent.includes('0.9.1'));
  assert(elements.versions.textContent.includes('0.4.0'));
  assert(elements['server-list'].children.length===2,'roles must be rendered');
  assert(elements['server-list'].children[0].children[1].textContent==='☆');
@@ -64,6 +66,7 @@ const run=code=>vm.runInContext(code,context);
  assert(elements.save.textContent==='Применить и переподключить');
  assert(elements['active-server'].textContent==='CZ','selection must not pretend to switch the active connection');
  assert(elements['check-servers'].disabled,'check must not use unsaved connection parameters');
+ assert(elements['install-update'].disabled,'update must not discard unsaved settings');
  elements['server-list'].children[0].children[1].dispatch('click');
  assert(run('favorites.has("CZ")'));
  elements['server-list'].children[0].children[2].dispatch('click');
@@ -118,7 +121,7 @@ class FrontendTest(unittest.TestCase):
         sh=shutil.which('sh')
         result=subprocess.run([sh,str(ROOT/'web/index.cgi')],env={**os.environ,'PATH':'','SCRIPT_FILENAME':'/wrong/inherited/path'},capture_output=True,text=True)
         self.assertEqual(result.returncode,0,result.stderr)
-        self.assertIn('data-ui-version="0.8.0"',result.stdout)
+        self.assertIn('data-ui-version="0.9.0"',result.stdout)
         self.assertIn('Cache-Control: no-store',result.stdout)
 
     def test_real_ui_status_buttons_roles_drafts_and_versions(self):
