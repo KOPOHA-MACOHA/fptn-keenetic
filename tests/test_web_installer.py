@@ -12,6 +12,9 @@ MOCK=r'''#!/usr/bin/env python3
 import json,os,pathlib,shutil,subprocess,sys
 root=pathlib.Path(os.environ['FPTN_PREFIX']);args=sys.argv[1:];command=pathlib.Path(sys.argv[0]).name
 if command=='id': print(0)
+elif command=='php-cgi':
+ if (root/'fail-php').exists():sys.exit(1)
+ print(json.dumps({'configured':True,'mode':'panel','rootAvailable':True}))
 elif command=='ip':print('    inet 192.168.1.1/24 scope global br0')
 elif command=='netstat':print('Active Internet connections (only servers)')
 elif command=='lighttpd':
@@ -26,7 +29,7 @@ elif command=='curl':
  elif '-w' in args:print('401',end='')
  elif 'api.cgi?' in url:
   if '-K' in args:sys.stdin.read()
-  print(json.dumps({'uiVersion':'0.5.0','service':{'state':'stopped'},'busy':False,'status':'stopped'}))
+  print(json.dumps({'uiVersion':'0.6.0','service':{'state':'stopped'},'busy':False,'status':'stopped','configured':True,'rootAvailable':True}))
  else:
   result=subprocess.run(['sh',str(root/'share/fptn-web/index.cgi')],capture_output=True,check=True)
   header,body=result.stdout.split(b'\r\n\r\n',1)
@@ -45,7 +48,7 @@ class WebInstallerTest(unittest.TestCase):
             (self.root/name).mkdir(parents=True,exist_ok=True)
         self.trace=self.base/'trace'
         self.env={**os.environ,'FPTN_PREFIX':str(self.root),'FPTN_TEST_TRACE':str(self.trace)}
-        for name in ['id','ip','netstat','lighttpd','curl']:
+        for name in ['id','ip','netstat','lighttpd','curl','php-cgi']:
             path=self.root/'bin'/name;path.write_text(MOCK);path.chmod(0o700)
         (self.root/'etc/fptn/web-auth.json').write_text('{"username":"admin","hash":"test"}')
         for key in ['token','server']:(self.root/'etc/fptn'/key).write_text('dummy\n')
@@ -73,7 +76,7 @@ esac
         (lib/'brotli').write_text('dummy')
         self.old_sums=''.join(hashlib.sha256((lib/p).read_bytes()).hexdigest()+'  '+p+'\n' for p in ['fptn-client-cli','brotli'])
         (lib/'SHA256SUMS').write_text(self.old_sums)
-        paths=['web/index.html','web/index.cgi','web/style.css','web/app.js','web/api.cgi','scripts/fptn-native-service.sh','scripts/fptn-web-auth.sh']
+        paths=['web/index.html','web/index.cgi','web/style.css','web/app.js','web/api.cgi','scripts/fptn-native-service.sh','scripts/fptn-web-auth.sh','scripts/fptn-web-auth.php']
         for name in paths:
             target=self.payload/name;target.parent.mkdir(parents=True,exist_ok=True)
             target.write_text(controller('staged') if name=='scripts/fptn-native-service.sh' else (REPO/name).read_text())
@@ -103,6 +106,13 @@ esac
         self.assertNotIn('old-stop',trace);self.assertNotIn('lighttpd-restart',trace)
         self.assertNotIn('Восстанавливаю файлы',result.stderr)
         self.assertFalse((self.root/'var/run/fptn-web/action').exists())
+
+    def test_missing_php_stops_before_replacing_or_stopping_anything(self):
+        (self.root/'fail-php').touch();result=self.execute()
+        self.assertNotEqual(result.returncode,0)
+        self.assert_original_files()
+        self.assertFalse(self.trace.exists())
+        self.assertNotIn('Новый пароль',result.stdout+result.stderr)
 
     def test_successful_upgrade_uses_staged_stop_and_restores_running_state(self):
         result=self.execute();self.assertEqual(result.returncode,0,result.stdout+result.stderr)

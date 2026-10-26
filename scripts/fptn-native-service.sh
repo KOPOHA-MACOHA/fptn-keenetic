@@ -557,7 +557,8 @@ need_root
 case "${1:-}" in
   enable|disable) set_autostart "$1" ;;
   _boot) [ ! -f "$CONF/autostart" ] || start_service boot ;;
-  web-password) sh "$LIB/web-auth.sh" passwd ;;
+  web-reset-login) sh "$LIB/web-auth.sh" reset ;;
+  web-password) echo 'Логин и пароль задаются в браузере. Для сброса: fptnctl web-reset-login.' ;;
   get-settings) connection_json ;;
   validate-settings) validate_connection ;;
   get-server-policy) server_policy_json ;;

@@ -15,6 +15,11 @@ jobs:
     timeout-minutes: 10
     steps:
       - uses: actions/checkout@v4
+      - name: Prepare existing-router PHP runtime for auth tests
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq php-cgi
+          php-cgi -n -v
       - name: Verify scripts, UI, credentials and upgrade rollback
         run: |
           python3 scripts/package-web.py --check

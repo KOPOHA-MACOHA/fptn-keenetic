@@ -8,7 +8,7 @@ ROOT=Path(__file__).resolve().parents[1]
 NODE=r'''
 const fs=require('fs'),vm=require('vm'),assert=require('assert');
 const html=fs.readFileSync(process.argv[2],'utf8');
-const initial={browser:'yandex',mode:'obfuscation','selection-mode':'manual',strategy:'dual-rolling-tunnel',sni:'google.com'};
+const initial={'auth-choice':'panel',browser:'yandex',mode:'obfuscation','selection-mode':'manual',strategy:'dual-rolling-tunnel',sni:'google.com'};
 class Element{
  constructor(id){this.id=id;this.value=initial[id]||'';this.children=[];this.listeners={};this.dataset={};this.disabled=false;this.hidden=false;this.textContent='';this.className='';this.classList={add:()=>{},toggle:()=>{}};}
  replaceChildren(...nodes){this.children=nodes;if(['server','profile'].includes(this.id))this.value=nodes[0]?.value||'';}
@@ -16,6 +16,7 @@ class Element{
  setAttribute(name,value){this[name]=value;}
  addEventListener(name,fn){(this.listeners[name]||=[]).push(fn);}
  dispatch(name){for(const fn of this.listeners[name]||[])fn({preventDefault(){}});}
+ focus(){this.focused=true;}
  get options(){return this.children;}
 }
 const ids=[...html.matchAll(/id="([^"]+)"/g)].map(m=>m[1]);
@@ -27,9 +28,18 @@ const document={hidden:false,documentElement:new Element('root'),getElementById:
  throw new Error('Unexpected selector '+selector);
 }};
 const settings={server:'CZ',servers:['CZ','DE'],connection:{bypass:'obfuscation',strategy:'dual-rolling-tunnel',sni:'google.com'},policy:{mode:'manual',favorites:[],excluded:[]}};
-const stopped={status:'FPTN остановлен',uiVersion:'0.5.0',clientVersion:'0.4.0',revision:'1234567890',busy:false,report:null,service:{state:'stopped',message:'Служба остановлена',selectedServer:'',connected:false,supervisorAlive:false,canStart:true,canStop:false,canRestart:false}};
+const stopped={status:'FPTN остановлен',uiVersion:'0.6.0',clientVersion:'0.4.0',revision:'1234567890',busy:false,report:null,service:{state:'stopped',message:'Служба остановлена',selectedServer:'',connected:false,supervisorAlive:false,canStart:true,canStop:false,canRestart:false}};
 const win={location:{href:''}};win.top=win;win.self=win;
-const context={console,document,window:win,Option:class{constructor(text,value){this.text=text;this.value=value;}},sessionStorage:{getItem(){return '';},setItem(){},removeItem(){}},setInterval(){},setTimeout(){return 1;},clearTimeout(){},fetch:async()=>({ok:true,status:200,json:async()=>structuredClone(settings)})};
+let authState={configured:false,mode:null,rootAvailable:true};const requests=[];
+const context={console,document,window:win,Option:class{constructor(text,value){this.text=text;this.value=value;}},sessionStorage:{getItem(){return '';},setItem(){},removeItem(){}},setInterval(){},setTimeout(){return 1;},clearTimeout(){},fetch:async(url,options={})=>{
+ let data=settings;
+ if(url.includes('?auth-info'))data=structuredClone(authState);
+ else if(url.includes('?setup')){const body=JSON.parse(options.body);requests.push({url,body});authState={configured:true,mode:body.mode,rootAvailable:true};data=body.mode==='entware'?{key:'f'.repeat(64)}:{ok:true};}
+ else if(url.includes('?login')){requests.push({url,body:JSON.parse(options.body)});data={key:'f'.repeat(64)};}
+ else if(url.includes('?status'))data=stopped;
+ else if(url.includes('?logout'))data={ok:true};
+ return {ok:true,status:200,json:async()=>structuredClone(data)};
+}};
 vm.createContext(context);vm.runInContext(fs.readFileSync(process.argv[3],'utf8'),context);
 const run=code=>vm.runInContext(code,context);
 (async()=>{
@@ -60,7 +70,25 @@ const run=code=>vm.runInContext(code,context);
  context.data={...running,uiVersion:'old'};run('applyStatus(data)');
  assert(!elements['version-mismatch'].hidden&&elements.start.disabled&&elements.stop.disabled);
  run('showOffline(new Error("offline"))');assert(elements['status-title'].textContent==='Нет связи с панелью');assert(elements.start.disabled&&elements.stop.disabled);
- console.log('UI states, visible roles, drafts, health and version mismatch: PASS');
+ // Real browser first-run events, followed by the normal login form.
+ authState={configured:false,mode:null,rootAvailable:true};await run('loadAuthInfo()');
+ assert(elements['login-title'].textContent==='Первый запуск');assert(!elements['confirm-wrap'].hidden);
+ assert(elements['login-submit'].textContent==='Создать учётную запись');
+ elements.username.value='mine';elements.password.value='abcd';elements['confirm-password'].value='abcd';
+ await elements['login-form'].listeners.submit[0]({preventDefault(){}});
+ assert(requests.at(-1).url==='api.cgi?setup');assert(requests.at(-1).body.confirm==='abcd');
+ assert(elements['login-title'].textContent==='Вход в панель');assert(elements['confirm-wrap'].hidden);
+ assert(elements.password.value===''&&elements['confirm-password'].value==='');
+ elements.password.value='abcd';await elements['login-form'].listeners.submit[0]({preventDefault(){}});
+ assert(requests.at(-1).url==='api.cgi?login');assert(!elements.dashboard.hidden);
+ // Existing root credentials use the same first-run screen without a password creation prompt.
+ authState={configured:false,mode:null,rootAvailable:true};await run('loadAuthInfo()');
+ elements['auth-choice'].value='entware';elements['auth-choice'].dispatch('change');
+ assert(elements.username.value==='root'&&elements.username.readOnly);assert(elements['confirm-wrap'].hidden);
+ assert(elements['password-label'].textContent==='Пароль root Entware');
+ elements.password.value='existing-root-pass';await elements['login-form'].listeners.submit[0]({preventDefault(){}});
+ assert(requests.at(-1).body.mode==='entware');assert(!elements.dashboard.hidden);
+ console.log('Browser setup/create/login, Entware root choice, UI states and versions: PASS');
 })().catch(error=>{console.error(error);process.exit(1);});
 '''
 

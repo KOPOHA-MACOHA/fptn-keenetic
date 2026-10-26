@@ -1,5 +1,5 @@
 <!doctype html>
-<html lang="ru" data-ui-version="0.5.0">
+<html lang="ru" data-ui-version="0.6.0">
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
@@ -7,19 +7,25 @@
   <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self'; style-src 'self'; connect-src 'self'; img-src 'self'; object-src 'none'; base-uri 'none'; form-action 'self'; frame-src 'none'">
   <title>FPTN · Keenetic</title>
   <link rel="icon" href="data:,">
-  <link rel="stylesheet" href="style.css?v=0.5.0-f17351f5775c">
-  <script src="app.js?v=0.5.0-a1c87b993518" defer></script>
+  <link rel="stylesheet" href="style.css?v=0.6.0-f17351f5775c">
+  <script src="app.js?v=0.6.0-b6333b9024cf" defer></script>
 </head>
 <body>
   <div class="shell">
     <header><a class="brand" href="./"><span class="mark">F</span><span>FPTN <small>KEENETIC</small></span></a><button id="logout" class="quiet" hidden>Выйти</button></header>
-    <p id="versions" class="version-line">Панель 0.5.0 · версия клиента появится после входа</p>
+    <p id="versions" class="version-line">Панель 0.6.0 · версия клиента появится после входа</p>
     <div id="version-mismatch" class="banner error-banner" hidden><span id="version-mismatch-text"></span><button id="reload-ui" type="button">Обновить страницу</button></div>
     <section id="login" class="card login">
       <span class="eyebrow">ЛОКАЛЬНАЯ ПАНЕЛЬ</span>
-      <h1>Управление подключением</h1>
-      <p>Войдите с учётной записью панели. Логин и пароль задаются при установке; это не токен VPN.</p>
-      <form id="login-form"><label for="username">Логин</label><input id="username" type="text" autocomplete="username" required maxlength="64"><label for="password">Пароль</label><input id="password" type="password" autocomplete="current-password" required maxlength="256"><button id="login-submit" class="primary" type="submit">Войти</button></form>
+      <h1 id="login-title">Управление подключением</h1>
+      <p id="login-description">Проверяем настройки входа…</p>
+      <form id="login-form">
+        <div id="auth-choice-wrap" hidden><label for="auth-choice">Способ входа</label><select id="auth-choice"><option value="panel">Создать логин и пароль панели</option><option id="auth-root-option" value="entware">Использовать root Entware</option></select><p id="root-unavailable" class="hint" hidden>У root Entware нет доступного пароля. Создайте отдельную учётную запись панели.</p></div>
+        <label for="username">Логин</label><input id="username" type="text" autocomplete="username" required maxlength="64">
+        <label id="password-label" for="password">Пароль</label><input id="password" type="password" autocomplete="current-password" required maxlength="256">
+        <div id="confirm-wrap" hidden><label for="confirm-password">Повторите пароль</label><input id="confirm-password" type="password" autocomplete="new-password" maxlength="72"></div>
+        <button id="login-submit" class="primary" type="submit" disabled>Продолжить</button>
+      </form>
     </section>
     <main id="dashboard" hidden>
       <div class="heading"><div><span class="eyebrow">KEENETIC · OPKGTUN0</span><h1>Ваше подключение</h1></div><span class="tag">FPTN для Keenetic</span></div>

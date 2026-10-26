@@ -1,14 +1,15 @@
 'use strict';
-const UI_VERSION = '0.5.0';
+const UI_VERSION = '0.6.0';
 const $ = id => document.getElementById(id);
 if (window.top !== window.self) { document.documentElement.replaceChildren(); throw new Error('Panel cannot be framed'); }
 const profiles = {yandex:['26-4','26-3','25','24'],chrome:['149','148','147','146','145'],firefox:['151','150','149'],safari:['26-5','26-4']};
+let authConfigured=true,authMode='panel';
 let key=sessionStorage.getItem('fptn-ui-session')||'';
 let pending=false,lastBusy=false,loaded=false,polling=false,timer,dirty=false,savedSnapshot='',versionMismatch=false;
 let previewToken='',serverNames=[],favorites=new Set(),excluded=new Set(),lastData=null;
 const healthNodes=new Map();
 function notice(message,error=false){$('notice').textContent=message;$('notice').classList.toggle('error',error);$('notice').hidden=false;clearTimeout(timer);timer=setTimeout(()=>{$('notice').hidden=true;},error?14000:6500);}
-function loggedOut(){key='';previewToken='';sessionStorage.removeItem('fptn-ui-session');$('token').value='';$('logs').textContent='';$('dashboard').hidden=true;$('logout').hidden=true;$('login').hidden=false;loaded=false;lastData=null;}
+function loggedOut(){key='';previewToken='';sessionStorage.removeItem('fptn-ui-session');$('token').value='';$('logs').textContent='';$('dashboard').hidden=true;$('logout').hidden=true;$('login').hidden=false;loaded=false;lastData=null;loadAuthInfo().catch(error=>notice(error.message,true));}
 async function api(query,body){
   const response=await fetch('api.cgi'+(query?'?'+query:''),{method:body?'POST':'GET',cache:'no-store',credentials:'omit',headers:{Authorization:'Bearer '+key,...(body?{'Content-Type':'application/json'}:{})},...(body?{body:JSON.stringify(body)}:{})});
   let data;try{data=await response.json();}catch{throw new Error('Не удалось прочитать ответ панели. Обновите страницу.');}
@@ -107,10 +108,35 @@ async function openPanel(){
   try{await loadSettings();}catch(error){notice(error.message,true);$('settings-error').hidden=false;$('settings-error').textContent='Список серверов не загружен: '+error.message;}
   setControls();
 }
+function updateLoginForm(){
+  const root=(authConfigured?authMode:$('auth-choice').value)==='entware';
+  $('auth-choice-wrap').hidden=authConfigured;
+  $('login-title').textContent=authConfigured?'Вход в панель':'Первый запуск';
+  $('login-description').textContent=authConfigured?(root?'Введите существующий пароль root Entware.':'Войдите с логином и паролем панели.'):'Создайте учётную запись панели или используйте существующий пароль root Entware.';
+  $('username').readOnly=root;if(root)$('username').value='root';else if(!authConfigured&&(!$('username').value||$('username').value==='root'))$('username').value='admin';
+  $('password-label').textContent=root?'Пароль root Entware':'Пароль';
+  $('password').autocomplete=authConfigured||root?'current-password':'new-password';
+  $('password').maxLength=authConfigured||root?256:72;
+  $('confirm-wrap').hidden=authConfigured||root;$('confirm-password').required=!authConfigured&&!root;
+  $('login-submit').textContent=authConfigured?'Войти':root?'Войти как root Entware':'Создать учётную запись';
+}
+async function loadAuthInfo(){
+  const response=await fetch('api.cgi?auth-info',{cache:'no-store',credentials:'omit'});const data=await response.json();
+  if(!response.ok)throw new Error(data.error||'Не удалось проверить настройки входа.');
+  authConfigured=data.configured;authMode=data.mode||'panel';
+  $('auth-root-option').disabled=!data.rootAvailable;$('root-unavailable').hidden=data.rootAvailable;
+  updateLoginForm();$('login-submit').disabled=false;
+}
+$('auth-choice').addEventListener('change',()=>{$('password').value='';$('confirm-password').value='';updateLoginForm();});
 $('login-form').addEventListener('submit',async event=>{event.preventDefault();
   const button=$('login-submit');button.disabled=true;
-  try{const response=await fetch('api.cgi?login',{method:'POST',cache:'no-store',credentials:'omit',headers:{'Content-Type':'application/json'},body:JSON.stringify({username:$('username').value,password:$('password').value})});
-    $('password').value='';const data=await response.json();if(!response.ok)throw new Error(data.error||'Вход не выполнен.');key=data.key;await openPanel();
+  try{
+    const body={username:$('username').value,password:$('password').value};
+    if(!authConfigured){body.mode=$('auth-choice').value;body.confirm=$('confirm-password').value;}
+    const response=await fetch('api.cgi?'+(authConfigured?'login':'setup'),{method:'POST',cache:'no-store',credentials:'omit',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});
+    $('password').value='';$('confirm-password').value='';const data=await response.json();if(!response.ok)throw new Error(data.error||'Вход не выполнен.');
+    if(data.key){key=data.key;await openPanel();}
+    else{await loadAuthInfo();notice('Учётная запись создана. Войдите с заданным логином и паролем.');$('password').focus();}
   }catch(error){notice(error.message,true);}finally{button.disabled=false;}
 });
 $('logout').addEventListener('click',async()=>{try{await api('logout',{});}catch(error){notice(error.message,true);}finally{loggedOut();}});
@@ -126,4 +152,4 @@ $('check-servers').addEventListener('click',()=>{if(dirty){notice('Сначал�
 $('settings-form').addEventListener('submit',event=>{event.preventDefault();const settings=collectSettings();if(settings.token&&settings.token!==previewToken){notice('Сначала нажмите «Прочитать серверы» для нового токена.',true);return;}const allowed=serverNames.filter(name=>!excluded.has(name));if(!allowed.length||allowed.length>64){notice('Оставьте от 1 до 64 разрешённых серверов.',true);return;}command({action:'save',...settings});});
 $('refresh-logs').addEventListener('click',async()=>{try{$('logs').textContent=(await api('logs')).log||'Журнал пока пуст.';}catch(error){notice(error.message,true);}});
 document.addEventListener('visibilitychange',()=>{if(!document.hidden)poll();});setInterval(()=>{if(!document.hidden)poll();},5000);
-fillProfiles();setControls();if(key)openPanel().catch(error=>notice(error.message,true));
+fillProfiles();setControls();loadAuthInfo().then(()=>{if(key)return openPanel();}).catch(error=>notice(error.message,true));

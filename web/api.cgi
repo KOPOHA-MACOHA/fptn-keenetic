@@ -145,13 +145,22 @@ error() { respond "$1" "$(jq -n --arg error "$2" '{error:$error}')"; }
 ORIGIN=$(cat "$CONF/web-origin")
 [ "${HTTP_HOST:-}" = "${ORIGIN#http://}" ] || error '403 Forbidden' 'Неверный адрес панели.'
 [ -z "${HTTP_ORIGIN:-}" ] || [ "$HTTP_ORIGIN" = "$ORIGIN" ] || error '403 Forbidden' 'Запрос с другого сайта запрещён.'
-if [ "${QUERY_STRING:-}" = login ] && [ "${REQUEST_METHOD:-}" = POST ]; then
+if [ "${QUERY_STRING:-}" = auth-info ] && [ "${REQUEST_METHOD:-}" = GET ]; then
+  INFO=$(sh "$LIB/web-auth.sh" info) || error '503 Service Unavailable' 'Не удалось проверить настройки входа.'
+  respond '200 OK' "$(printf '%s' "$INFO" | jq '. + {uiVersion:"0.6.0"}')"
+fi
+case "${QUERY_STRING:-}:${REQUEST_METHOD:-}" in login:POST|setup:POST)
   [ "${CONTENT_TYPE:-}" = application/json ] || error '415 Unsupported Media Type' 'Ожидается JSON.'
   case "${CONTENT_LENGTH:-}" in ''|*[!0-9]*) error '400 Bad Request' 'Некорректная длина.' ;; esac
   [ "${#CONTENT_LENGTH}" -le 4 ] && [ "$CONTENT_LENGTH" -le 4096 ] || error '413 Content Too Large' 'Слишком большой запрос.'
-  LOGIN=$(head -c "$CONTENT_LENGTH" | sh "$LIB/web-auth.sh" login 2>/dev/null) || error '401 Unauthorized' 'Вход не выполнен. Проверьте логин и пароль; после пяти ошибок подождите 30 секунд.'
-  respond '200 OK' "$LOGIN"
-fi
+  if LOGIN=$(head -c "$CONTENT_LENGTH" | sh "$LIB/web-auth.sh" "$QUERY_STRING" 2>/dev/null); then
+    respond '200 OK' "$LOGIN"
+  fi
+  if ! printf '%s' "$LOGIN" | jq -e '(.error|type=="string")' >/dev/null 2>&1; then error '503 Service Unavailable' 'Не удалось проверить вход.'; fi
+  if [ "$QUERY_STRING" = setup ]; then respond '400 Bad Request' "$LOGIN"; fi
+  respond '401 Unauthorized' "$LOGIN"
+  ;;
+esac
 case "${HTTP_AUTHORIZATION:-}" in 'Bearer '*) AUTH=${HTTP_AUTHORIZATION#Bearer } ;; *) error '401 Unauthorized' 'Войдите по логину и паролю.' ;; esac
 printf '%s\n' "$AUTH" | sh "$LIB/web-auth.sh" verify || error '401 Unauthorized' 'Сессия завершена. Войдите снова.'
 if [ "${QUERY_STRING:-}" = logout ] && [ "${REQUEST_METHOD:-}" = POST ]; then
@@ -188,7 +197,7 @@ case "${REQUEST_METHOD:-}" in
         RESULT='null'; [ ! -r "$RUN/result.json" ] || RESULT=$(cat "$RUN/result.json")
         respond '200 OK' "$(jq -n --arg status "$TEXT" --arg rss "${RSS:-0}" --arg operation "$OPERATION" \
           --argjson autostart "$AUTOSTART" --argjson service "$SERVICE" --argjson report "$REPORT" --argjson meta "$META" --argjson busy "$BUSY" --argjson result "$RESULT" \
-          '{autostart:$autostart,status:$status,service:$service,report:$report,uiVersion:"0.5.0",clientVersion:($meta.clientVersion // "неизвестна"),revision:($meta.revision // ""),operation:$operation,rssKiB:($rss|tonumber),busy:$busy,result:$result}')"
+          '{autostart:$autostart,status:$status,service:$service,report:$report,uiVersion:"0.6.0",clientVersion:($meta.clientVersion // "неизвестна"),revision:($meta.revision // ""),operation:$operation,rssKiB:($rss|tonumber),busy:$busy,result:$result}')"
         ;;
       settings)
         CONNECTION=$("$CTL" get-settings) || error '500 Internal Server Error' 'Некорректные настройки подключения.'
