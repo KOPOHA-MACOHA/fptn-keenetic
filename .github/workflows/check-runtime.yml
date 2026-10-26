@@ -4,10 +4,16 @@ on:
     branches: [main]
   pull_request:
   workflow_dispatch:
+  workflow_call:
+    inputs:
+      source-ref:
+        description: Exact candidate commit created by the upstream checker
+        required: true
+        type: string
 permissions:
   contents: read
 concurrency:
-  group: runtime-${{ github.ref }}
+  group: runtime-${{ inputs.source-ref || github.ref }}
   cancel-in-progress: true
 jobs:
   test:
@@ -15,6 +21,9 @@ jobs:
     timeout-minutes: 10
     steps:
       - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.source-ref || github.sha }}
+          persist-credentials: false
       - name: Prepare PHP and lighttpd integration tests
         run: |
           sudo apt-get update -qq

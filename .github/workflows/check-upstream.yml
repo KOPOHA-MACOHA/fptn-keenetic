@@ -1,0 +1,86 @@
+name: Check original FPTN releases
+on:
+  schedule:
+    - cron: '23 7 * * *'
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/check-upstream.yml'
+      - 'scripts/check-upstream.py'
+      - 'tests/test_upstream.py'
+permissions:
+  contents: read
+concurrency:
+  group: fptn-upstream-release-check
+  cancel-in-progress: false
+jobs:
+  discover:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    permissions:
+      contents: write
+      pull-requests: write
+    outputs:
+      changed: ${{ steps.upstream.outputs.changed }}
+      source-sha: ${{ steps.upstream.outputs.source_sha }}
+      pr-url: ${{ steps.upstream.outputs.pr_url }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: main
+          persist-credentials: false
+      - name: Test release selection and PR creation logic
+        run: python3 -m unittest discover -s tests -p test_upstream.py -v
+      - name: Propose the latest stable original release
+        id: upstream
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: python3 scripts/check-upstream.py
+  compatibility:
+    needs: discover
+    if: needs.discover.outputs.changed == 'true'
+    # The reusable workflow declares a publisher, but source-ref disables it.
+    # Compilation jobs retain contents:read inside the called workflow.
+    permissions:
+      contents: write
+    uses: ./.github/workflows/build.yml
+    with:
+      source-ref: ${{ needs.discover.outputs.source-sha }}
+  panel:
+    needs: discover
+    if: needs.discover.outputs.changed == 'true'
+    permissions:
+      contents: read
+    uses: ./.github/workflows/check-runtime.yml
+    with:
+      source-ref: ${{ needs.discover.outputs.source-sha }}
+  report:
+    needs: [discover, compatibility, panel]
+    if: always() && needs.discover.outputs.changed == 'true'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 3
+    permissions:
+      contents: read
+      checks: write
+    steps:
+      - name: Attach validation result to the PR commit
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          SOURCE_SHA: ${{ needs.discover.outputs.source-sha }}
+          BUILD_RESULT: ${{ needs.compatibility.result }}
+          PANEL_RESULT: ${{ needs.panel.result }}
+        run: |
+          python3 - <<'PY'
+          import json, os, subprocess
+          ok = os.environ['BUILD_RESULT']=='success' and os.environ['PANEL_RESULT']=='success'
+          body = {
+              'name':'Original FPTN compatibility', 'head_sha':os.environ['SOURCE_SHA'],
+              'status':'completed', 'conclusion':'success' if ok else 'failure',
+              'details_url':f"https://github.com/{os.environ['GH_REPO']}/actions/runs/{os.environ['GITHUB_RUN_ID']}",
+              'output':{'title':'Upstream checks passed' if ok else 'Upstream checks need attention',
+                        'summary':f"Client build: {os.environ['BUILD_RESULT']}; panel: {os.environ['PANEL_RESULT']}. Router validation is still required."}}
+          subprocess.run(['gh','api','--method','POST',f"repos/{os.environ['GH_REPO']}/check-runs",'--input','-'],
+                         input=json.dumps(body),text=True,check=True)
+          PY
