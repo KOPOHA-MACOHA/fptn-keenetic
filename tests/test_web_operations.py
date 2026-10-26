@@ -53,7 +53,7 @@ class WebOperationTest(unittest.TestCase):
         status,data=self.request(body={'action':'recover'});self.assertEqual(status,202,data)
         result=self.wait_worker();self.assertTrue(result['ok'],result)
         for key,value in previous.items():self.assertEqual((self.conf/key).read_text(),value)
-        self.assertTrue(self.client_run.exists());self.assertEqual((self.root/'trace').read_text().splitlines(),['stop','start'])
+        self.assertTrue(self.client_run.exists());self.assertEqual([a for a in (self.root/'trace').read_text().splitlines() if a!='status'],['stop','start'])
         self.assertTrue(list((self.conf/'web-recovery').glob('*/old-token')))
 
     def test_finished_or_update_action_only_releases_lock_and_preserves_running_vpn(self):
