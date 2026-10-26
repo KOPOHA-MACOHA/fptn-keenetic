@@ -38,8 +38,8 @@ class WebOperationTest(unittest.TestCase):
             self.assertFalse(json.loads(self.helper('op-state').stdout)['canRecover'])
             self.assertEqual(self.request(body={'action':'recover'})[0],409)
         finally:child.terminate();child.wait(timeout=5)
-        self.assertTrue(json.loads(self.helper('op-state').stdout)['canRecover'])
-        self.assertEqual(self.request(body={'action':'recover'})[0],202)
+        state=json.loads(self.helper('op-state').stdout);self.assertTrue(state['canRecover'],state)
+        status,data=self.request(body={'action':'recover'});self.assertEqual(status,202,data)
         self.assertTrue(self.wait_worker()['ok']);self.assertFalse((self.root/'trace').exists())
 
     def test_interrupted_save_restores_snapshot_and_previously_running_client(self):
@@ -49,8 +49,8 @@ class WebOperationTest(unittest.TestCase):
         (lock/'was-running').write_text('yes\n');(lock/'rollback-needed').touch()
         (self.conf/'token').write_text('partial-change');(self.conf/'server').write_text('partial-change')
         self.client_run.mkdir();self.stale()
-        status,data=self.request();self.assertEqual(status,200,data);self.assertTrue(data['operationState']['canRecover'])
-        self.assertEqual(self.request(body={'action':'recover'})[0],202)
+        status,data=self.request();self.assertEqual(status,200,data);self.assertTrue(data['operationState']['canRecover'],data['operationState'])
+        status,data=self.request(body={'action':'recover'});self.assertEqual(status,202,data)
         result=self.wait_worker();self.assertTrue(result['ok'],result)
         for key,value in previous.items():self.assertEqual((self.conf/key).read_text(),value)
         self.assertTrue(self.client_run.exists());self.assertEqual((self.root/'trace').read_text().splitlines(),['stop','start'])
@@ -59,16 +59,16 @@ class WebOperationTest(unittest.TestCase):
     def test_finished_or_update_action_only_releases_lock_and_preserves_running_vpn(self):
         for action in ['save','update']:
             self.reserve(action);self.stale();self.client_run.mkdir(exist_ok=True)
-            self.assertEqual(self.request(body={'action':'recover'})[0],202)
+            status,data=self.request(body={'action':'recover'});self.assertEqual(status,202,data)
             self.assertTrue(self.wait_worker()['ok']);self.assertTrue(self.client_run.exists())
             self.assertFalse((self.root/'trace').exists())
 
     def test_pid_reuse_record_does_not_own_an_unmarked_process(self):
         self.reserve();owner=self.run/'action/owner.json';record=json.loads(owner.read_text());record['start']='0';owner.write_text(json.dumps(record))
-        self.assertTrue(json.loads(self.helper('op-state').stdout)['canRecover'])
+        state=json.loads(self.helper('op-state').stdout);self.assertTrue(state['canRecover'],state)
         child=subprocess.Popen(['sleep','30'])
         try:
-            self.assertEqual(self.request(body={'action':'recover'})[0],202)
+            status,data=self.request(body={'action':'recover'});self.assertEqual(status,202,data)
             self.assertTrue(self.wait_worker()['ok']);self.assertIsNone(child.poll())
         finally:child.terminate();child.wait(timeout=5)
 

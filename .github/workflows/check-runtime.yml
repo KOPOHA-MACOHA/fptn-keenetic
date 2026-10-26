@@ -31,4 +31,4 @@ jobs:
           python3 scripts/package-web.py --check
           python3 -m unittest discover -s tests -p 'test_web_auth.py' -v
           python3 -m compileall -q scripts
-          python3 -m unittest discover -s tests -v
+          sudo --preserve-env=PATH python3 -m unittest discover -s tests -v

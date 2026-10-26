@@ -29,7 +29,11 @@ function operationState(): array {
     $uid = fileowner('/proc/' . getmypid());
     $marker = 'FPTN_OPERATION_ID=' . $owner['id'];
     foreach (glob('/proc/[0-9]*', GLOB_ONLYDIR) ?: [] as $process) {
-        if (@fileowner($process) !== $uid || !processRecord((int)basename($process))) continue;
+        if (@fileowner($process) !== $uid) continue;
+        $record=processRecord((int)basename($process));
+        // Existing unrelated daemons cannot have inherited a newly generated ID.
+        // In particular, do not require access to protected older processes.
+        if (!$record || (float)$record['start'] < (float)($owner['reservedStart'] ?? '0')) continue;
         $env = @file_get_contents($process . '/environ');
         if ($env === false) { $state['message']='Не удалось проверить дочерние процессы. Повторите позже.'; return $state; }
         if (in_array($marker, explode("\0", $env), true)) { $state['message']='Дочерний процесс операции ещё работает.'; return $state; }
@@ -42,6 +46,9 @@ function writeOwner(string $id, string $name): void {
     global $directory;
     $pid = (int)getenv('FPTN_OWNER_PID');$record=processRecord($pid);
     if ($record === null) failAuth('Не удалось определить процесс операции.');
+    $previous=json_decode((string)@file_get_contents($directory.'/owner.json'),true);
+    $record['reservedStart']=is_array($previous) && ($previous['id']??'')===$id
+        ? ($previous['reservedStart']??'0') : processRecord(getmypid())['start'];
     $record['id']=$id;$record['action']=$name;
     $temp=$directory . '/owner.new';
     if (file_put_contents($temp,json_encode($record)."\n") === false || !rename($temp,$directory.'/owner.json')) failAuth('Не удалось записать журнал операции.');
