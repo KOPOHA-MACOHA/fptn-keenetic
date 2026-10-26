@@ -144,7 +144,7 @@ sh -n "$STAGE/web/api.cgi"
 sh -n "$STAGE/web/index.cgi"
 # Exercise the real entry file before any installed file or process is changed.
 sh "$STAGE/web/index.cgi" > "$STAGE/entry-check" || fail 'Стартовый CGI не смог прочитать страницу. Установленные файлы не менялись.'
-grep -Fq 'data-ui-version="0.12.0"' "$STAGE/entry-check" || fail 'Стартовый CGI не выдал HTML панели. Установленные файлы не менялись.' 
+grep -Fq 'data-ui-version="0.12.1"' "$STAGE/entry-check" || fail 'Стартовый CGI не выдал HTML панели. Установленные файлы не менялись.' 
 sh -n "$STAGE/scripts/fptn-native-service.sh"
 TARGET=$(sh "$STAGE/scripts/fptn-client-identity.sh" validate "$STAGE/client-release.json") || fail 'Некорректное описание сборки клиента.'
 TARGET_REV=$(printf '%s' "$TARGET" | jq -r .buildRevision)
@@ -247,7 +247,7 @@ chmod 700 /opt/libexec/fptn/client-identity.sh.new
 mv /opt/libexec/fptn/client-identity.sh.new /opt/libexec/fptn/client-identity.sh
 printf '%s\n' "$ORIGIN" > "$CONF/web-origin"
 CLIENT_VERSION=$(jq -r '.clientVersion // "неизвестна"' "$CONF/web-meta.json" 2>/dev/null || echo неизвестна)
-jq -n --arg version "$CLIENT_VERSION" --arg revision "$REV" '{uiVersion:"0.12.0",clientVersion:$version,revision:$revision}' > "$CONF/web-meta.json.new"
+jq -n --arg version "$CLIENT_VERSION" --arg revision "$REV" '{uiVersion:"0.12.1",clientVersion:$version,revision:$revision}' > "$CONF/web-meta.json.new"
 mv "$CONF/web-meta.json.new" "$CONF/web-meta.json"
 cat > "$FRAGMENT" <<EOF
 # Managed by fptn-web-ui. Credentials live outside the document root.
@@ -273,7 +273,7 @@ check_panel() {
   PANEL_ERROR='Страница панели не отвечает.'
   curl --noproxy '*' -fsS -D "$STAGE/headers" --connect-timeout 1 --max-time 2 "$ORIGIN/" -o "$STAGE/page" 2>/dev/null || return 1
   PANEL_ERROR='На порту открылась другая версия панели.'
-  grep -Fq 'data-ui-version="0.12.0"' "$STAGE/page" || return 1
+  grep -Fq 'data-ui-version="0.12.1"' "$STAGE/page" || return 1
   PANEL_CACHE_WARNING=no
   grep -iq '^Cache-Control:.*no-store' "$STAGE/headers" || PANEL_CACHE_WARNING=yes
   PANEL_ERROR='Не прошла проверка ограничения доступа к API.'
@@ -281,7 +281,7 @@ check_panel() {
   [ "$CODE" = 401 ] || return 1
   PANEL_ERROR='API настройки входа не готово или отвечает другой версией.'
   curl --noproxy '*' -fsS --connect-timeout 1 --max-time 2 "$ORIGIN/api.cgi?auth-info" -o "$STAGE/auth-info.json" 2>/dev/null || return 1
-  jq -e '.uiVersion=="0.12.0" and (.configured|type=="boolean") and (.rootAvailable|type=="boolean")' "$STAGE/auth-info.json" >/dev/null 2>&1 || return 1
+  jq -e '.uiVersion=="0.12.1" and (.configured|type=="boolean") and (.rootAvailable|type=="boolean")' "$STAGE/auth-info.json" >/dev/null 2>&1 || return 1
   return 0
 }
 # rc.func may report failed before the daemon becomes visible. Decide from the
@@ -301,7 +301,7 @@ until check_panel; do
   fi
   sleep 1
 done
-echo 'lighttpd отвечает: страница и API панели 0.12.0 проверены.'
+echo 'lighttpd отвечает: страница и API панели 0.12.1 проверены.'
 if [ "$PANEL_CACHE_WARNING" = yes ]; then
   echo "Откройте свежую страницу по ссылке $ORIGIN/?v=$REV (заголовок кэша применится после перезагрузки lighttpd)."
 fi
@@ -336,11 +336,11 @@ fi
 printf '%s\n' "$TARGET" > "$CONF/client-release.json.new"
 chmod 600 "$CONF/client-release.json.new"
 mv "$CONF/client-release.json.new" "$CONF/client-release.json"
-printf '%s' "$TARGET" | jq --arg revision "$REV" '. + {uiVersion:"0.12.0",revision:$revision,clientRevision:.buildRevision,clientSha256:.sha256}' > "$CONF/web-meta.json.new"
+printf '%s' "$TARGET" | jq --arg revision "$REV" '. + {uiVersion:"0.12.1",revision:$revision,clientRevision:.buildRevision,clientSha256:.sha256}' > "$CONF/web-meta.json.new"
 mv "$CONF/web-meta.json.new" "$CONF/web-meta.json"
 DONE=yes
 echo
-echo "Панель 0.12.0: $ORIGIN/?v=$REV"
+echo "Панель 0.12.1: $ORIGIN/?v=$REV"
 rm -f "$CONF/web-key"
 echo 'Откройте панель: создайте логин и пароль или войдите через root Entware.'
 echo 'Пароль в терминале не нужен. Существующие настройки входа сохраняются.'

@@ -1,5 +1,5 @@
 'use strict';
-const UI_VERSION = '0.12.0';
+const UI_VERSION = '0.12.1';
 const $ = id => document.getElementById(id);
 if (window.top !== window.self) { document.documentElement.replaceChildren(); throw new Error('Panel cannot be framed'); }
 let profiles={},clientCapabilities=null;
@@ -8,13 +8,31 @@ const strategyLabels={'rolling-tunnel':'Скользящий туннель','du
 let updateInfo=null;
 let authConfigured=true,authMode='panel',accountData=null,accountPending=false;
 let key=sessionStorage.getItem('fptn-ui-session')||'';
+let sessionReady=false;
 let pending=false,lastBusy=false,loaded=false,polling=false,timer,dirty=false,savedSnapshot='',versionMismatch=false;
 let savedFallback={enabled:false,profiles:[],domains:[],budget:60};
 let previewToken='',serverNames=[],favorites=new Set(),excluded=new Set(),lastData=null;
 const healthNodes=new Map();
 const fallbackProfiles=['fallback-profile-1','fallback-profile-2'];
 function notice(message,error=false){$('notice').textContent=message;$('notice').classList.toggle('error',error);$('notice').hidden=false;clearTimeout(timer);timer=setTimeout(()=>{$('notice').hidden=true;},error?14000:6500);}
-function loggedOut(){key='';previewToken='';sessionStorage.removeItem('fptn-ui-session');accountData=null;for(const id of ['account-current-password','account-password','account-confirm','account-root-password'])$(id).value='';$('token').value='';$('logs').textContent='';$('dashboard').hidden=true;$('logout').hidden=true;$('login').hidden=false;loaded=false;lastData=null;loadAuthInfo().catch(error=>notice(error.message,true));}
+function showAuthLoading(){
+  sessionReady=false;$('login').hidden=true;$('dashboard').hidden=true;$('logout').hidden=true;
+  $('auth-loading').hidden=false;$('auth-loading-message').textContent='Проверяем сессию…';$('auth-retry').hidden=true;
+}
+function showAuthError(error){showAuthLoading();$('auth-loading-message').textContent=error.message;$('auth-retry').hidden=false;}
+async function showLogin(){
+  showAuthLoading();
+  try{await loadAuthInfo();$('auth-loading').hidden=true;$('login').hidden=false;}
+  catch(error){showAuthError(error);}
+}
+function loggedOut(){key='';previewToken='';sessionStorage.removeItem('fptn-ui-session');accountData=null;for(const id of ['account-current-password','account-password','account-confirm','account-root-password'])$(id).value='';$('token').value='';$('logs').textContent='';loaded=false;lastData=null;showLogin();}
+async function initializePanel(){
+  showAuthLoading();
+  if(!key){await showLogin();return;}
+  try{await openPanel();}
+  catch(error){if(key)showAuthError(error);}
+}
+
 async function api(query,body){
   const response=await fetch('api.cgi'+(query?'?'+query:''),{method:body?'POST':'GET',cache:'no-store',credentials:'omit',headers:{Authorization:'Bearer '+key,...(body?{'Content-Type':'application/json'}:{})},...(body?{body:JSON.stringify(body)}:{})});
   let data;try{data=await response.json();}catch{throw new Error('Не удалось прочитать ответ панели. Обновите страницу.');}
@@ -129,16 +147,18 @@ function applyStatus(data){
 }
 function showOffline(error){lastData=null;$('status-title').textContent='Нет связи с панелью';$('status-message').textContent=error.message;$('indicator').className='dot';setControls();}
 async function poll(){
-  if(!key||polling)return;polling=true;
+  if(!key||!sessionReady||polling)return;polling=true;
   try{const data=await api('status');const finished=(lastBusy||pending)&&!data.busy&&data.result;lastBusy=data.busy;applyStatus(data);
     if(finished){pending=false;notice(data.result.message,!data.result.ok);if(data.result.ok&&data.result.action==='save')await loadSettings();if(['check-update','update'].includes(data.result.action))await loadUpdates();}
     setControls();
   }catch(error){if(key)showOffline(error);}finally{polling=false;}
 }
 async function openPanel(){
-  const data=await api('status');sessionStorage.setItem('fptn-ui-session',key);$('password').value='';$('login').hidden=true;$('dashboard').hidden=false;$('logout').hidden=false;lastBusy=data.busy;applyStatus(data);
+  const data=await api('status');sessionStorage.setItem('fptn-ui-session',key);sessionReady=true;$('password').value='';$('auth-loading').hidden=true;$('login').hidden=true;$('dashboard').hidden=false;$('logout').hidden=false;lastBusy=data.busy;applyStatus(data);
   try{await loadSettings();}catch(error){notice(error.message,true);$('settings-error').hidden=false;$('settings-error').textContent='Список серверов не загружен: '+error.message;}
+  if(!key)return;
   try{await loadUpdates();}catch(error){notice(error.message,true);}
+  if(!key)return;
   try{await loadAccount();}catch(error){notice(error.message,true);}
   setControls();
 }
@@ -214,7 +234,8 @@ $('check-servers').addEventListener('click',()=>{if(dirty){notice('Сначал�
 $('settings-form').addEventListener('submit',event=>{event.preventDefault();const settings=collectSettings();if(settings.fallback.enabled&&settings.fallback.profiles.some(method=>!clientCapabilities?.methods.includes(method))){notice('Выберите запасные профили, доступные в установленном клиенте.',true);return;}if(settings.fallback.enabled&&(favorites.size<1||favorites.size>8||settings.fallback.profiles.length<1||settings.fallback.profiles.length>2||settings.fallback.domains.length<1||settings.fallback.domains.length>2)){notice('Для подбора выберите 1–8 избранных, 1–2 профиля и 1–2 SNI.',true);return;}if(settings.token&&settings.token!==previewToken){notice('Сначала нажмите «Прочитать серверы» для нового токена.',true);return;}const allowed=serverNames.filter(name=>!excluded.has(name));if(!allowed.length||allowed.length>64){notice('Оставьте от 1 до 64 разрешённых серверов.',true);return;}command({action:'save',...settings});});
 $('refresh-logs').addEventListener('click',async()=>{try{$('logs').textContent=(await api('logs')).log||'Журнал пока пуст.';}catch(error){notice(error.message,true);}});
 document.addEventListener('visibilitychange',()=>{if(!document.hidden)poll();});setInterval(()=>{if(!document.hidden)poll();},5000);
-fillProfiles();setControls();loadAuthInfo().then(()=>{if(key)return openPanel();}).catch(error=>notice(error.message,true));
+$('auth-retry').addEventListener('click',initializePanel);
+fillProfiles();setControls();initializePanel();
 
 async function loadUpdates(){
   updateInfo=await api('updates');

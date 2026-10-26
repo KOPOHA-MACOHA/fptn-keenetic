@@ -22,6 +22,7 @@ class Element{
 }
 const ids=[...html.matchAll(/id="([^"]+)"/g)].map(m=>m[1]);
 const elements=Object.fromEntries(ids.map(id=>[id,new Element(id)]));
+for(const tag of html.matchAll(/<[^>]*\bid="([^"]+)"[^>]*>/g))elements[tag[1]].hidden=/\shidden(?:[\s=>])/.test(tag[0]);
 for(const id of ['start','stop','restart'])elements[id].dataset.command=id;
 const document={hidden:false,documentElement:new Element('root'),getElementById:id=>{assert(elements[id],'Missing actual HTML element '+id);return elements[id];},createElement:tag=>new Element(tag),addEventListener(){},querySelectorAll(selector){
  if(selector==='[data-command]')return ['start','stop','restart'].map(id=>elements[id]);
@@ -29,7 +30,7 @@ const document={hidden:false,documentElement:new Element('root'),getElementById:
  throw new Error('Unexpected selector '+selector);
 }};
 const settings={capabilities:{schema:1,clientVersion:'0.4.0',methods:['obfuscation','sni-spoofing-chrome-149','sni-spoofing-chrome-150','sni-spoofing-firefox-151','sni-spoofing-yandex-26-4','sni-spoofing-safari-26-5','sni-spoofing-edge-151'],strategies:['rolling-tunnel','dual-rolling-tunnel','triple-rolling-tunnel','quad-rolling-tunnel']},server:'CZ',servers:['CZ','DE'],connection:{bypass:'obfuscation',strategy:'dual-rolling-tunnel',sni:'google.com'},policy:{mode:'manual',favorites:[],excluded:[]}};
-const stopped={status:'FPTN остановлен',uiVersion:'0.12.0',clientVersion:'0.4.0',upstreamVersion:'0.4.6',clientBuildRevision:'a'.repeat(40),revision:'1234567890',busy:false,report:null,service:{state:'stopped',message:'Служба остановлена',selectedServer:'',connected:false,supervisorAlive:false,canStart:true,canStop:false,canRestart:false}};
+const stopped={status:'FPTN остановлен',uiVersion:'0.12.1',clientVersion:'0.4.0',upstreamVersion:'0.4.6',clientBuildRevision:'a'.repeat(40),revision:'1234567890',busy:false,report:null,service:{state:'stopped',message:'Служба остановлена',selectedServer:'',connected:false,supervisorAlive:false,canStart:true,canStop:false,canRestart:false}};
 const win={location:{href:''}};win.top=win;win.self=win;
 let authState={configured:false,mode:null,rootAvailable:true};const requests=[];
 const context={console,document,window:win,Option:class{constructor(text,value){this.text=text;this.value=value;}},sessionStorage:{getItem(){return '';},setItem(){},removeItem(){}},setInterval(){},setTimeout(){return 1;},clearTimeout(){},fetch:async(url,options={})=>{
@@ -127,7 +128,7 @@ class FrontendTest(unittest.TestCase):
         sh=shutil.which('sh')
         result=subprocess.run([sh,str(ROOT/'web/index.cgi')],env={**os.environ,'PATH':'','SCRIPT_FILENAME':'/wrong/inherited/path'},capture_output=True,text=True)
         self.assertEqual(result.returncode,0,result.stderr)
-        self.assertIn('data-ui-version="0.12.0"',result.stdout)
+        self.assertIn('data-ui-version="0.12.1"',result.stdout)
         self.assertIn('Cache-Control: no-store',result.stdout)
 
     def test_real_ui_status_buttons_roles_drafts_and_versions(self):
@@ -138,3 +139,48 @@ class FrontendTest(unittest.TestCase):
             script=Path(folder)/'test.js';script.write_text(NODE)
             result=subprocess.run([node,str(script),str(ROOT/'web/index.html'),str(ROOT/'web/app.js')],capture_output=True,text=True,timeout=10)
             self.assertEqual(result.returncode,0,result.stdout+result.stderr)
+
+    def test_startup_session_never_flashes_login_and_preserves_key_on_network_error(self):
+        node=shutil.which('node')
+        if not node:self.skipTest('node unavailable')
+        import tempfile
+        html=(ROOT/'web/index.html').read_text()
+        self.assertRegex(html,r'<section[^>]*id="login"[^>]*\shidden[\s>]')
+        harness=NODE.split('(async()=>{',1)[0]
+        harness=harness.replace("getItem(){return '';}","getItem(){return process.env.SCENARIO==='none'?'':'s'.repeat(64);}")
+        harness=harness.replace('removeItem(){}','removeItem(){removed=true;}')
+        harness=harness.replace('let authState={configured:false,mode:null,','let authState={configured:true,mode:"panel",')
+        harness=harness.replace('const context={', 'let removed=false,firstStatus=false,firstInfo=false,resolveStatus,resolveInfo;const statusGate=new Promise(r=>resolveStatus=r),infoGate=new Promise(r=>resolveInfo=r);\nconst context={',1)
+        harness=harness.replace(' let data=settings;', ''' if(url.includes('?status')&&!firstStatus){firstStatus=true;await statusGate;if(process.env.SCENARIO==='expired')return {ok:false,status:401,json:async()=>({error:'expired'})};if(process.env.SCENARIO==='offline')throw new Error('network unavailable');}
+ if(url.includes('?auth-info')&&!firstInfo){firstInfo=true;await infoGate;}
+ let data=settings;''',1)
+        scenario=r'''
+(async()=>{
+ const tick=()=>new Promise(r=>setImmediate(r));
+ assert(elements.login.hidden&&elements.dashboard.hidden&&!elements['auth-loading'].hidden,'initial paint must show only neutral loading');
+ const scenario=process.env.SCENARIO;
+ if(scenario==='none'){
+   assert(firstInfo&&!firstStatus);resolveInfo();await tick();
+   assert(!elements.login.hidden&&elements.dashboard.hidden&&elements['auth-loading'].hidden);
+ }else{
+   assert(firstStatus&&!firstInfo);resolveStatus();await tick();
+   if(scenario==='valid'){
+     assert(elements.login.hidden&&!elements.dashboard.hidden&&elements['auth-loading'].hidden);assert(!firstInfo&&!removed);
+   }else if(scenario==='expired'){
+     assert(firstInfo&&removed);assert(elements.login.hidden&&elements.dashboard.hidden&&!elements['auth-loading'].hidden);
+     resolveInfo();await tick();assert(!elements.login.hidden&&elements['auth-loading'].hidden);
+   }else{
+     assert(!removed&&run('key')==='s'.repeat(64));assert(elements.login.hidden&&elements.dashboard.hidden&&!elements['auth-retry'].hidden);
+     await elements['auth-retry'].listeners.click[0]();
+     assert(elements.login.hidden&&!elements.dashboard.hidden&&elements['auth-loading'].hidden);
+   }
+ }
+ console.log('startup '+scenario+': PASS');
+})().catch(error=>{console.error(error);process.exit(1);});
+'''
+        with tempfile.TemporaryDirectory() as folder:
+            script=Path(folder)/'session.js';script.write_text(harness+scenario)
+            for case in ['valid','none','expired','offline']:
+                with self.subTest(case=case):
+                    result=subprocess.run([node,str(script),str(ROOT/'web/index.html'),str(ROOT/'web/app.js')],env={**os.environ,'SCENARIO':case},text=True,capture_output=True,timeout=10)
+                    self.assertEqual(result.returncode,0,result.stdout+result.stderr)
