@@ -8,6 +8,7 @@ import subprocess
 import unittest
 import time
 import test_service
+import client_fixture
 
 SCRIPT=Path(__file__).resolve().parents[1]/'scripts/fptn-native-service.sh'
 
@@ -83,6 +84,7 @@ touch '{created}'
         if not compiler: self.skipTest('C compiler unavailable')
         root=self.root/'opt'; lib=root/'libexec/fptn'; conf=root/'etc/fptn'
         lib.mkdir(parents=True); conf.mkdir(parents=True)
+        client_fixture.install(root)
         source=self.root/'client.c'
         source.write_text(r'''#include <signal.h>
 #include <stdio.h>
@@ -92,7 +94,8 @@ touch '{created}'
 volatile sig_atomic_t stopped=0;
 void stop(int s){stopped=1;}
 int main(int argc,char**argv){
- if(argc==2 && !strcmp(argv[1],"--help")){puts("--keenetic-server-policy --keenetic-probe-only");return 0;}
+ if(argc==2 && !strcmp(argv[1],"--help")){fputs(HELP_FIXTURE,stdout);return 0;}
+ if(argc==2 && !strcmp(argv[1],"--version")){puts("0.4.0");return 0;}
  int native=0,name=0; for(int i=1;i<argc;i++){
   if(!strcmp(argv[i],"--keenetic-native")) native=1;
   if(!strcmp(argv[i],"opkgtun0")) name=1;
@@ -118,7 +121,7 @@ int main(int argc,char**argv){
  if(!suppress || access(suppress,F_OK)) {puts("Connection #1 READY"); fflush(stdout);}
  while(!stopped) sleep(1); return 0;
 }
-''')
+'''.replace('HELP_FIXTURE',json.dumps(client_fixture.help_text())))
         subprocess.run([compiler,str(source),'-o',str(lib/'fptn-client-cli')],check=True,capture_output=True)
         (lib/'brotli').write_text('unused')
         (lib/'SHA256SUMS').write_text(''.join(hashlib.sha256((lib/f).read_bytes()).hexdigest()+'  '+f+'\n' for f in ['fptn-client-cli','brotli']))

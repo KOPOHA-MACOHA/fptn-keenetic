@@ -12,6 +12,7 @@ import subprocess
 import tempfile
 import time
 import unittest
+import client_fixture
 
 ROOT = Path(__file__).resolve().parents[1]
 CGI = ROOT / 'web/api.cgi'
@@ -48,6 +49,7 @@ class WebUiTest(unittest.TestCase):
         # Pass-through decoder: prefix/decode plumbing tested, not Brotli itself.
         lib = self.root / 'libexec/fptn'
         lib.mkdir(parents=True)
+        client_fixture.install(self.root)
         shutil.copyfile(ROOT/'scripts/fptn-web-auth.sh',lib/'web-auth.sh')
         shutil.copyfile(ROOT/'scripts/fptn-web-auth.php',lib/'web-auth.php')
         shutil.copyfile(ROOT/'scripts/fptn-web-operations.php',lib/'web-operations.php')
@@ -59,7 +61,7 @@ class WebUiTest(unittest.TestCase):
 import json,os,pathlib,shutil,subprocess,sys,signal
 root=pathlib.Path(os.environ['FPTN_PREFIX']); conf=root/'etc/fptn'; run=root/'var/run/fptn-keenetic'
 action=sys.argv[1]
-if action in ('get-settings','validate-settings','get-server-policy','validate-server-policy','get-fallback','validate-fallback'):
+if action in ('get-capabilities','get-settings','validate-settings','get-server-policy','validate-server-policy','get-fallback','validate-fallback'):
     sys.exit(subprocess.call(['sh',os.environ['FPTN_REAL_SERVICE'],action]))
 if action=='get-interface-mtu':print((root/'interface-mtu').read_text() if (root/'interface-mtu').exists() else '1420');sys.exit(0)
 if action=='set-interface-mtu':(root/'interface-mtu').write_text(sys.argv[2]);sys.exit(0)
@@ -235,7 +237,7 @@ else: sys.exit(2)
     def test_status_exposes_explicit_state_and_versions(self):
         (self.conf/'web-meta.json').write_text(json.dumps({'clientVersion':'0.4.0','revision':'abc'}))
         status,data=self.request()
-        self.assertEqual(status,200);self.assertEqual(data['uiVersion'],'0.10.0')
+        self.assertEqual(status,200);self.assertEqual(data['uiVersion'],'0.11.0')
         self.assertEqual(data['clientVersion'],'0.4.0')
         self.assertTrue(data['service']['canStart']);self.assertFalse(data['service']['canStop'])
         self.client_run.mkdir()
@@ -256,8 +258,8 @@ else: sys.exit(2)
     def test_entry_page_is_not_cached_and_assets_are_versioned(self):
         page=subprocess.run(['sh',str(ROOT/'web/index.cgi')],capture_output=True,check=True).stdout.decode()
         self.assertIn('Cache-Control: no-store',page)
-        self.assertIn('data-ui-version="0.10.0"',page)
-        self.assertIn('app.js?v=0.10.0',page)
+        self.assertIn('data-ui-version="0.11.0"',page)
+        self.assertIn('app.js?v=0.11.0',page)
 
     def test_failed_save_restores_previous_actual_firmware_mtu(self):
         old=self.settings();(self.conf/'connection.json').write_text(json.dumps(old))

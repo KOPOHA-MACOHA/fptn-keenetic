@@ -1,16 +1,18 @@
 'use strict';
-const UI_VERSION = '0.10.0';
+const UI_VERSION = '0.11.0';
 const $ = id => document.getElementById(id);
 if (window.top !== window.self) { document.documentElement.replaceChildren(); throw new Error('Panel cannot be framed'); }
-const profiles = {yandex:['26-4','26-3','25','24'],chrome:['149','148','147','146','145'],firefox:['151','150','149'],safari:['26-5','26-4']};
+let profiles={},clientCapabilities=null;
+const browserLabels={chrome:'Chrome',firefox:'Firefox',yandex:'Yandex',safari:'Safari'};
+const strategyLabels={'rolling-tunnel':'Скользящий туннель','dual-rolling-tunnel':'Двойной скользящий туннель','triple-rolling-tunnel':'Тройной скользящий туннель'};
 let updateInfo=null;
 let authConfigured=true,authMode='panel',accountData=null,accountPending=false;
 let key=sessionStorage.getItem('fptn-ui-session')||'';
 let pending=false,lastBusy=false,loaded=false,polling=false,timer,dirty=false,savedSnapshot='',versionMismatch=false;
-let savedFallback={enabled:false,profiles:['sni-spoofing-chrome-149','sni-spoofing-firefox-151'],domains:[],budget:60};
+let savedFallback={enabled:false,profiles:[],domains:[],budget:60};
 let previewToken='',serverNames=[],favorites=new Set(),excluded=new Set(),lastData=null;
 const healthNodes=new Map();
-const fallbackProfiles=['fallback-chrome','fallback-firefox','fallback-yandex','fallback-safari'];
+const fallbackProfiles=['fallback-profile-1','fallback-profile-2'];
 function notice(message,error=false){$('notice').textContent=message;$('notice').classList.toggle('error',error);$('notice').hidden=false;clearTimeout(timer);timer=setTimeout(()=>{$('notice').hidden=true;},error?14000:6500);}
 function loggedOut(){key='';previewToken='';sessionStorage.removeItem('fptn-ui-session');accountData=null;for(const id of ['account-current-password','account-password','account-confirm','account-root-password'])$(id).value='';$('token').value='';$('logs').textContent='';$('dashboard').hidden=true;$('logout').hidden=true;$('login').hidden=false;loaded=false;lastData=null;loadAuthInfo().catch(error=>notice(error.message,true));}
 async function api(query,body){
@@ -19,7 +21,7 @@ async function api(query,body){
   if(response.status===401){loggedOut();throw new Error(data.error||'Войдите по логину и паролю.');}
   if(!response.ok)throw new Error(data.error||'Ошибка запроса');return data;
 }
-function collectSettings(){return {server:$('server').value,token:$('token').value.trim(),connection:{mtu:Number($('mtu').value||0),outInterface:$('out-interface').value.trim(),strategy:$('strategy').value,bypass:$('mode').value==='obfuscation'?'obfuscation':$('profile').value,sni:$('sni').value.trim()||'google.com'},fallback:$('fallback-enabled').checked?{enabled:$('fallback-enabled').checked,profiles:fallbackProfiles.filter(id=>$(id).checked).map(id=>$(id).value),domains:$('fallback-domains').value.split(/\r?\n/).map(s=>s.trim()).filter(Boolean),budget:Number($('fallback-budget').value)}:{...savedFallback,enabled:false},policy:{mode:$('selection-mode').value,favorites:[...favorites].sort(),excluded:[...excluded].sort()}};}
+function collectSettings(){return {server:$('server').value,token:$('token').value.trim(),connection:{mtu:Number($('mtu').value||0),outInterface:$('out-interface').value.trim(),strategy:$('strategy').value,bypass:$('mode').value==='obfuscation'?'obfuscation':$('profile').value,sni:$('sni').value.trim()||'google.com'},fallback:$('fallback-enabled').checked?{enabled:$('fallback-enabled').checked,profiles:[...new Set(fallbackProfiles.map(id=>$(id).value).filter(Boolean))],domains:$('fallback-domains').value.split(/\r?\n/).map(s=>s.trim()).filter(Boolean),budget:Number($('fallback-budget').value)}:{...savedFallback,enabled:false},policy:{mode:$('selection-mode').value,favorites:[...favorites].sort(),excluded:[...excluded].sort()}};}
 function updateDirty(){
   dirty=loaded&&JSON.stringify(collectSettings())!==savedSnapshot;
   $('unsaved').hidden=!dirty;
@@ -77,12 +79,30 @@ function updateHealth(){
   else $('check-summary').textContent='Серверы ещё не проверены. Проверка использует сохранённый токен и метод обхода; действующий туннель остаётся запущенным.';
 }
 function showSelection(){const auto=$('selection-mode').value==='auto';$('manual-server').hidden=auto;$('server').disabled=auto;}
-function fillProfiles(selected){const browser=$('browser').value;$('profile').replaceChildren(...profiles[browser].map(version=>new Option(version.replaceAll('-','.'),'sni-spoofing-'+browser+'-'+version)));if(selected&&[...$('profile').options].some(o=>o.value===selected))$('profile').value=selected;}
+function profileLabel(method){const match=method.match(/^sni-spoofing-([a-z][a-z0-9]*)-([0-9]+(?:-[0-9]+)*)$/);return match?(browserLabels[match[1]]||match[1][0].toUpperCase()+match[1].slice(1))+' '+match[2].replaceAll('-','.'):method;}
+function compareProfileVersions(a,b){const left=a.version.split('-').map(Number),right=b.version.split('-').map(Number);for(let i=0;i<Math.max(left.length,right.length);i++){const difference=(right[i]||0)-(left[i]||0);if(difference)return difference;}return 0;}
+function renderCapabilities(caps){
+  if(caps?.schema!==1||!Array.isArray(caps.methods)||!Array.isArray(caps.strategies))throw new Error('Не удалось прочитать возможности установленного клиента.');
+  clientCapabilities=caps;profiles={};
+  for(const method of caps.methods){const match=method.match(/^sni-spoofing-([a-z][a-z0-9]*)-([0-9]+(?:-[0-9]+)*)$/);if(match)(profiles[match[1]]||=[]).push({id:method,version:match[2]});}
+  for(const values of Object.values(profiles))values.sort(compareProfileVersions);
+  $('browser').replaceChildren(...Object.keys(profiles).map(name=>new Option(browserLabels[name]||name[0].toUpperCase()+name.slice(1),name)));
+  $('strategy').replaceChildren(...caps.strategies.map(name=>new Option(strategyLabels[name]||name,name)));
+  const sniMode=[...$('mode').options].find(option=>option.value==='sni');if(sniMode)sniMode.disabled=!Object.keys(profiles).length;
+  for(const id of fallbackProfiles)$(id).replaceChildren(new Option('Не использовать',''),...Object.values(profiles).flat().map(item=>new Option(profileLabel(item.id),item.id)));
+}
+function fillProfiles(selected){
+  const values=profiles[$('browser').value]||[];$('profile').replaceChildren(...values.map(item=>new Option(item.version.replaceAll('-','.'),item.id)));
+  if(selected&&values.some(item=>item.id===selected))$('profile').value=selected;
+}
+function setFallbackProfiles(selected){
+  fallbackProfiles.forEach((id,index)=>{const value=selected[index]||'';if(value&&![...$(id).options].some(option=>option.value===value)){const unavailable=new Option('Недоступен в этой версии: '+profileLabel(value),value);unavailable.disabled=true;$(id).append(unavailable);}$(id).value=value;});
+}
 function showSni(){$('sni-fields').hidden=$('mode').value!=='sni';}
 async function loadSettings(){
-  const data=await api('settings');const policy=data.policy||{mode:'manual',favorites:[],excluded:[]};favorites=new Set(policy.favorites);excluded=new Set(policy.excluded);$('selection-mode').value=policy.mode;fillServers(data.servers,data.server);
+  const data=await api('settings');renderCapabilities(data.capabilities);const policy=data.policy||{mode:'manual',favorites:[],excluded:[]};favorites=new Set(policy.favorites);excluded=new Set(policy.excluded);$('selection-mode').value=policy.mode;fillServers(data.servers,data.server);
   $('mtu').value=String(data.connection.mtu??0);$('out-interface').value=data.connection.outInterface||'';
-  $('strategy').value=data.connection.strategy;const bypass=data.connection.bypass;$('mode').value=bypass==='obfuscation'?'obfuscation':'sni';if(bypass!=='obfuscation')$('browser').value=bypass.split('-')[2];fillProfiles(bypass);$('sni').value=data.connection.sni;showSni();const fallback=data.fallback||{enabled:false,profiles:['sni-spoofing-chrome-149','sni-spoofing-firefox-151'],domains:[],budget:60};savedFallback=JSON.parse(JSON.stringify(fallback));$('fallback-enabled').checked=fallback.enabled;for(const id of fallbackProfiles)$(id).checked=fallback.profiles.includes($(id).value);$('fallback-domains').value=(fallback.domains.length?fallback.domains:[data.connection.sni]).join('\n');$('fallback-budget').value=String(fallback.budget);$('fallback-fields').hidden=!fallback.enabled;previewToken='';$('token').value='';loaded=true;savedSnapshot=JSON.stringify(collectSettings());updateDirty();
+  $('strategy').value=data.connection.strategy;const bypass=data.connection.bypass;$('mode').value=bypass==='obfuscation'?'obfuscation':'sni';if(bypass!=='obfuscation')$('browser').value=bypass.split('-')[2];fillProfiles(bypass);$('sni').value=data.connection.sni;showSni();const fallback=data.fallback||{enabled:false,profiles:[],domains:[],budget:60};savedFallback=JSON.parse(JSON.stringify(fallback));$('fallback-enabled').checked=fallback.enabled;setFallbackProfiles(fallback.profiles);$('fallback-domains').value=(fallback.domains.length?fallback.domains:[data.connection.sni]).join('\n');$('fallback-budget').value=String(fallback.budget);$('fallback-fields').hidden=!fallback.enabled;previewToken='';$('token').value='';loaded=true;savedSnapshot=JSON.stringify(collectSettings());updateDirty();
 }
 function applyStatus(data){
   if(!data.service||typeof data.service.state!=='string')throw new Error('Старая версия API. Обновите панель и управляющий скрипт.');
@@ -180,7 +200,7 @@ $('browser').addEventListener('change',()=>{fillProfiles();updateDirty();});$('m
 for(const id of ['server','strategy','profile','sni','token','mtu','out-interface'])$(id).addEventListener('input',updateDirty);
 for(const id of ['server','strategy','profile','sni','mtu','out-interface'])$(id).addEventListener('change',updateDirty);
 $('fallback-enabled').addEventListener('change',()=>{$('fallback-fields').hidden=!$('fallback-enabled').checked;updateDirty();});
-for(const id of fallbackProfiles)$(id).addEventListener('change',()=>{if(fallbackProfiles.filter(name=>$(name).checked).length>2){$(id).checked=false;notice('Можно выбрать до двух запасных профилей.',true);}updateDirty();});
+for(const id of fallbackProfiles)$(id).addEventListener('change',updateDirty);
 for(const id of ['fallback-domains','fallback-budget'])$(id).addEventListener('change',updateDirty);
 $('fallback-domains').addEventListener('input',updateDirty);
 $('preview').addEventListener('click',async()=>{const token=$('token').value.trim();if(!token){notice('Вставьте новый токен.',true);return;}$('preview').disabled=true;try{const data=await api('',{action:'preview',token});fillServers(data.servers,$('server').value);previewToken=token;loaded=true;updateDirty();$('settings-error').hidden=true;notice('Серверы прочитаны. Примените настройки.');}catch(error){notice(error.message,true);}finally{setControls();}});
@@ -189,7 +209,7 @@ document.querySelectorAll('[data-command]').forEach(button=>button.addEventListe
 $('recover-operation').addEventListener('click',()=>command({action:'recover'}));
 $('autostart-toggle').addEventListener('click',()=>command({action:lastData?.autostart?'disable':'enable'}));
 $('check-servers').addEventListener('click',()=>{if(dirty){notice('Сначала примените изменения настроек.',true);return;}command({action:'check'});});
-$('settings-form').addEventListener('submit',event=>{event.preventDefault();const settings=collectSettings();if(settings.fallback.enabled&&(favorites.size<1||favorites.size>8||settings.fallback.profiles.length<1||settings.fallback.profiles.length>2||settings.fallback.domains.length<1||settings.fallback.domains.length>2)){notice('Для подбора выберите 1–8 избранных, 1–2 профиля и 1–2 SNI.',true);return;}if(settings.token&&settings.token!==previewToken){notice('Сначала нажмите «Прочитать серверы» для нового токена.',true);return;}const allowed=serverNames.filter(name=>!excluded.has(name));if(!allowed.length||allowed.length>64){notice('Оставьте от 1 до 64 разрешённых серверов.',true);return;}command({action:'save',...settings});});
+$('settings-form').addEventListener('submit',event=>{event.preventDefault();const settings=collectSettings();if(settings.fallback.enabled&&settings.fallback.profiles.some(method=>!clientCapabilities?.methods.includes(method))){notice('Выберите запасные профили, доступные в установленном клиенте.',true);return;}if(settings.fallback.enabled&&(favorites.size<1||favorites.size>8||settings.fallback.profiles.length<1||settings.fallback.profiles.length>2||settings.fallback.domains.length<1||settings.fallback.domains.length>2)){notice('Для подбора выберите 1–8 избранных, 1–2 профиля и 1–2 SNI.',true);return;}if(settings.token&&settings.token!==previewToken){notice('Сначала нажмите «Прочитать серверы» для нового токена.',true);return;}const allowed=serverNames.filter(name=>!excluded.has(name));if(!allowed.length||allowed.length>64){notice('Оставьте от 1 до 64 разрешённых серверов.',true);return;}command({action:'save',...settings});});
 $('refresh-logs').addEventListener('click',async()=>{try{$('logs').textContent=(await api('logs')).log||'Журнал пока пуст.';}catch(error){notice(error.message,true);}});
 document.addEventListener('visibilitychange',()=>{if(!document.hidden)poll();});setInterval(()=>{if(!document.hidden)poll();},5000);
 fillProfiles();setControls();loadAuthInfo().then(()=>{if(key)return openPanel();}).catch(error=>notice(error.message,true));

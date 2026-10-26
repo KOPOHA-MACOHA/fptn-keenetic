@@ -8,6 +8,7 @@ import subprocess
 import tempfile
 import unittest
 import test_native_service
+import client_fixture
 
 ROOT=Path(__file__).resolve().parents[1]
 
@@ -16,7 +17,7 @@ class TransportPlanTest(unittest.TestCase):
         if not shutil.which('php-cgi') and not shutil.which('php'):self.skipTest('PHP unavailable locally; installed in CI')
         self.tmp=tempfile.TemporaryDirectory();self.addCleanup(self.tmp.cleanup);self.root=Path(self.tmp.name)
         self.conf=self.root/'etc/fptn';self.conf.mkdir(parents=True);self.run=self.root/'var/run/fptn-keenetic';self.run.mkdir(parents=True)
-        lib=self.root/'libexec/fptn';lib.mkdir(parents=True)
+        lib=self.root/'libexec/fptn';lib.mkdir(parents=True);client_fixture.install(self.root)
         (lib/'brotli').write_text('#!/bin/sh\ncat\n');(lib/'brotli').chmod(0o700)
         self.base={'bypass':'obfuscation','strategy':'dual-rolling-tunnel','sni':'google.com'}
         self.policy={'mode':'auto','favorites':['CZ'],'excluded':['EX']}
@@ -60,6 +61,18 @@ class TransportPlanTest(unittest.TestCase):
     def test_compressed_prefix_pipeline_uses_bounded_decoder_without_network(self):
         for prefix in ['fptnb:','fptnb//']:
             (self.conf/'token').write_text(prefix+base64.b64encode(json.dumps(self.token).encode()).decode());self.assertTrue(self.plan()['enabled'])
+
+    def test_defaults_and_validation_follow_replaced_client(self):
+        client=self.root/'libexec/fptn/fptn-client-cli'
+        client.write_text('#!/bin/sh\ncase "$1" in --help) echo "obfuscation sni-spoofing-chrome-150 sni-spoofing-edge-152 dual-rolling-tunnel";; --version) echo 0.4.0;; esac\n')
+        client.chmod(0o700);(self.conf/'fallback.json').unlink()
+        result=self.call('transport-settings');self.assertEqual(result.returncode,0,result.stderr)
+        self.assertEqual(json.loads(result.stdout)['profiles'],['sni-spoofing-chrome-150','sni-spoofing-edge-152'])
+        current={**self.settings,'profiles':['sni-spoofing-edge-152']}
+        self.assertEqual(self.call('transport-validate',{'fallback':current,'policy':self.policy}).returncode,0)
+        old={**self.settings,'profiles':['sni-spoofing-chrome-149']}
+        self.assertNotEqual(self.call('transport-validate',{'fallback':old,'policy':self.policy}).returncode,0)
+        self.assertEqual(self.call('transport-validate',{'fallback':{**old,'enabled':False},'policy':self.policy}).returncode,0)
 
 class NativeFallbackTest(unittest.TestCase):
     setUp=test_native_service.NativeServiceTest.setUp

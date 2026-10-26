@@ -1,0 +1,22 @@
+Usage: fptn-client [--help] [--version] --access-token VAR
+--keenetic-native --keenetic-server-policy --keenetic-probe-only
+--bypass-method
+  obfuscation - TLS obfuscation
+  sni-spoofing-chrome-149 - Chrome 149
+  sni-spoofing-chrome-148 - Chrome 148
+  sni-spoofing-chrome-147 - Chrome 147
+  sni-spoofing-chrome-146 - Chrome 146
+  sni-spoofing-chrome-145 - Chrome 145
+  sni-spoofing-firefox-151 - Firefox 151
+  sni-spoofing-firefox-150 - Firefox 150
+  sni-spoofing-firefox-149 - Firefox 149
+  sni-spoofing-yandex-26-4 - Yandex 26.4
+  sni-spoofing-yandex-26-3 - Yandex 26.3
+  sni-spoofing-yandex-25 - Yandex 25
+  sni-spoofing-yandex-24 - Yandex 24
+  sni-spoofing-safari-26-5 - Safari 26.5
+  sni-spoofing-safari-26-4 - Safari 26.4
+--connection-strategy
+  rolling-tunnel - single
+  dual-rolling-tunnel - double
+  triple-rolling-tunnel - triple

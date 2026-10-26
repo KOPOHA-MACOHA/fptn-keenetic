@@ -6,6 +6,7 @@ import shutil
 import subprocess
 import tempfile
 import unittest
+import client_fixture
 
 REPO=Path(__file__).resolve().parents[1]
 MOCK=r'''#!/usr/bin/env python3
@@ -46,7 +47,7 @@ elif command=='curl':
   if 'auth-info' in url:
    with (root.parent/'trace').open('a') as f:f.write('http-auth-info\n')
   if '-K' in args:sys.stdin.read()
-  info={'uiVersion':'old' if (root/'wrong-api').exists() else '0.10.0','service':{'state':'stopped'},'busy':False,'status':'stopped','configured':True,'rootAvailable':True}
+  info={'uiVersion':'old' if (root/'wrong-api').exists() else '0.11.0','service':{'state':'stopped'},'busy':False,'status':'stopped','configured':True,'rootAvailable':True}
   text=json.dumps(info)
   if out:out.write_text(text)
   else:print(text)
@@ -86,6 +87,7 @@ if [ -f "$FPTN_PREFIX/false-failed-restart" ]; then exit 1; fi
         def controller(label):return '''#!/bin/sh
 echo LABEL-$1 >> "$FPTN_TEST_TRACE"
 case "$1" in
+ get-fallback) echo '{"enabled":false,"profiles":[],"domains":[],"budget":60}' ;;
  get-settings) echo '{"bypass":"obfuscation","strategy":"dual-rolling-tunnel","sni":"google.com"}' ;;
  stop) [ ! -f "$FPTN_PREFIX/fail-stop" ] || exit 1; rm -rf "$FPTN_PREFIX/var/run/fptn-keenetic" ;;
  start) python3 -c 'import signal,sys;sys.exit(signal.getsignal(signal.SIGTERM)==signal.SIG_IGN)' || exit 1; mkdir -p "$FPTN_PREFIX/var/run/fptn-keenetic" ;;
@@ -99,13 +101,13 @@ esac
         (lib/'brotli').write_text('dummy')
         self.old_sums=''.join(hashlib.sha256((lib/p).read_bytes()).hexdigest()+'  '+p+'\n' for p in ['fptn-client-cli','brotli'])
         (lib/'SHA256SUMS').write_text(self.old_sums)
-        paths=['web/index.html','web/index.cgi','web/style.css','web/app.js','web/api.cgi','scripts/fptn-native-service.sh','scripts/fptn-web-auth.sh','scripts/fptn-web-auth.php','scripts/fptn-web-operations.php','scripts/fptn-transport-plan.php','scripts/fptn-web-update.sh']
+        paths=['web/index.html','web/index.cgi','web/style.css','web/app.js','web/api.cgi','scripts/fptn-native-service.sh','scripts/fptn-web-auth.sh','scripts/fptn-web-auth.php','scripts/fptn-web-operations.php','scripts/fptn-transport-plan.php','scripts/fptn-web-update.sh','scripts/fptn-client-capabilities.sh']
         for name in paths:
             target=self.payload/name;target.parent.mkdir(parents=True,exist_ok=True)
             target.write_text(controller('staged') if name=='scripts/fptn-native-service.sh' else (REPO/name).read_text())
         (self.payload/'web/SHA256SUMS').write_text(''.join(hashlib.sha256((self.payload/p).read_bytes()).hexdigest()+'  '+p+'\n' for p in paths))
         (self.payload/'client').mkdir()
-        new=self.payload/'client/fptn-client-cli';new.write_text('#!/bin/sh\ncase "$1" in --help) echo --keenetic-probe-only;; --version) echo 0.4.0;; esac\n')
+        new=self.payload/'client/fptn-client-cli';new.write_text('#!/bin/sh\ncase "$1" in --help) cat '+str(REPO/'tests/fixtures/client-help.txt')+';; --version) echo 0.4.0;; esac\n')
         (self.payload/'client/SHA256SUMS').write_text(hashlib.sha256(new.read_bytes()).hexdigest()+'  fptn-client-cli\n')
         self.installer=self.base/'installer.sh'
         # Only translate its absolute /opt filesystem paths; execute all transaction code.

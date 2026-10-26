@@ -60,6 +60,12 @@ trim_logs() {
   done
 }
 
+capabilities_json() {
+  CAP_HELPER=$(dirname "$SELF")/fptn-client-capabilities.sh
+  [ -f "$CAP_HELPER" ] || CAP_HELPER=$LIB/client-capabilities.sh
+  sh "$CAP_HELPER" "${FPTN_CAP_CLIENT:-$LIB/fptn-client-cli}"
+}
+
 # JSON is data, never sourced as shell code. Older jq builds need no regex support.
 validate_connection() {
   SETTINGS=$(head -c 16385)
@@ -76,11 +82,8 @@ validate_connection() {
     ($mtu|type=="number" and floor==. and (.==0 or (.>=576 and .<=65535))) and
     ($iface|type=="string" and length<=15 and all(explode[]; (.>=48 and .<=57) or (.>=65 and .<=90) or (.>=97 and .<=122) or .==45 or .==46 or .==95))' >/dev/null || fail 'Проверьте MTU и имя исходящего интерфейса.'
   case "$OUT_IFACE" in -*) fail 'Неверное имя интерфейса.' ;; opkgtun0) fail 'Сам туннель FPTN не может быть исходящим интерфейсом.' ;; esac
-  case "$BYPASS" in
-    obfuscation|sni-spoofing-chrome-149|sni-spoofing-chrome-148|sni-spoofing-chrome-147|sni-spoofing-chrome-146|sni-spoofing-chrome-145|sni-spoofing-firefox-151|sni-spoofing-firefox-150|sni-spoofing-firefox-149|sni-spoofing-yandex-26-4|sni-spoofing-yandex-26-3|sni-spoofing-yandex-25|sni-spoofing-yandex-24|sni-spoofing-safari-26-5|sni-spoofing-safari-26-4) ;;
-    *) fail 'Неизвестный метод обхода.' ;;
-  esac
-  case "$STRATEGY" in rolling-tunnel|dual-rolling-tunnel|triple-rolling-tunnel) ;; *) fail 'Неизвестная стратегия.' ;; esac
+  CAPABILITIES=$(capabilities_json) || fail 'Не удалось прочитать возможности клиента.'
+  printf '%s' "$CAPABILITIES" | jq -e --arg method "$BYPASS" --arg strategy "$STRATEGY"     '(.methods|index($method)!=null) and (.strategies|index($strategy)!=null)' >/dev/null || fail 'Метод или стратегия не поддерживаются установленным клиентом.'
   printf '%s\n' "$SNI" | awk '
     NR!=1 {exit 1}
     length($0)<1 || length($0)>253 || $0 ~ /[^a-zA-Z0-9.-]/ {exit 1}
@@ -92,7 +95,9 @@ validate_connection() {
 }
 connection_json() {
   if [ -f "$CONF/connection.json" ]; then validate_connection < "$CONF/connection.json"
-  else printf '%s\n' '{"bypass":"obfuscation","strategy":"dual-rolling-tunnel","sni":"google.com","mtu":0,"outInterface":""}'
+  else
+    CAPABILITIES=$(capabilities_json) || return 1
+    printf '%s' "$CAPABILITIES" | jq '{bypass:"obfuscation",strategy:(if (.strategies|index("dual-rolling-tunnel"))!=null then "dual-rolling-tunnel" else .strategies[0] end),sni:"google.com",mtu:0,outInterface:""}'
   fi
 }
 load_connection() {
@@ -146,7 +151,7 @@ server_policy_json() {
 }
 fallback_json() {
   if [ ! -f "$CONF/fallback.json" ] && [ ! -f "$LIB/transport-plan.php" ]; then
-    printf '%s\n' '{"enabled":false,"profiles":["sni-spoofing-chrome-149","sni-spoofing-firefox-151"],"domains":[],"budget":60}'
+    printf '%s\n' '{"enabled":false,"profiles":[],"domains":[],"budget":60}'
   else sh "$LIB/web-auth.sh" transport-settings; fi
 }
 make_transport_plan() {
@@ -674,6 +679,7 @@ case "${1:-}" in
   web-password) echo 'Логин и пароль задаются в браузере. Для сброса: fptnctl web-reset-login.' ;;
   get-fallback) fallback_json ;;
   validate-fallback) sh "$LIB/web-auth.sh" transport-validate ;;
+  get-capabilities) capabilities_json ;;
   get-settings) connection_json ;;
   validate-settings) validate_connection ;;
   get-interface-mtu) interface_mtu ;;

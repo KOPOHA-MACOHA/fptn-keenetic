@@ -9,7 +9,7 @@ ROOT=Path(__file__).resolve().parents[1]
 NODE=r'''
 const fs=require('fs'),vm=require('vm'),assert=require('assert');
 const html=fs.readFileSync(process.argv[2],'utf8');
-const initial={'auth-choice':'panel','fallback-budget':'60','fallback-chrome':'sni-spoofing-chrome-149','fallback-firefox':'sni-spoofing-firefox-151','fallback-yandex':'sni-spoofing-yandex-26-4','fallback-safari':'sni-spoofing-safari-26-5',browser:'yandex',mode:'obfuscation','selection-mode':'manual',strategy:'dual-rolling-tunnel',sni:'google.com'};
+const initial={'auth-choice':'panel','fallback-budget':'60',browser:'yandex',mode:'obfuscation','selection-mode':'manual',strategy:'dual-rolling-tunnel',sni:'google.com'};
 class Element{
  constructor(id){this.id=id;this.value=initial[id]||'';this.children=[];this.listeners={};this.dataset={};this.disabled=false;this.hidden=false;this.textContent='';this.className='';this.classList={add:()=>{},toggle:()=>{}};}
  replaceChildren(...nodes){this.children=nodes;if(['server','profile'].includes(this.id))this.value=nodes[0]?.value||'';}
@@ -28,8 +28,8 @@ const document={hidden:false,documentElement:new Element('root'),getElementById:
  if(selector.includes('#dashboard input'))return ['server','profile','mode','strategy','selection-mode','sni','token','browser'].map(id=>elements[id]);
  throw new Error('Unexpected selector '+selector);
 }};
-const settings={server:'CZ',servers:['CZ','DE'],connection:{bypass:'obfuscation',strategy:'dual-rolling-tunnel',sni:'google.com'},policy:{mode:'manual',favorites:[],excluded:[]}};
-const stopped={status:'FPTN остановлен',uiVersion:'0.10.0',clientVersion:'0.4.0',revision:'1234567890',busy:false,report:null,service:{state:'stopped',message:'Служба остановлена',selectedServer:'',connected:false,supervisorAlive:false,canStart:true,canStop:false,canRestart:false}};
+const settings={capabilities:{schema:1,clientVersion:'0.4.0',methods:['obfuscation','sni-spoofing-chrome-149','sni-spoofing-chrome-150','sni-spoofing-firefox-151','sni-spoofing-yandex-26-4','sni-spoofing-safari-26-5','sni-spoofing-edge-151'],strategies:['rolling-tunnel','dual-rolling-tunnel','triple-rolling-tunnel','quad-rolling-tunnel']},server:'CZ',servers:['CZ','DE'],connection:{bypass:'obfuscation',strategy:'dual-rolling-tunnel',sni:'google.com'},policy:{mode:'manual',favorites:[],excluded:[]}};
+const stopped={status:'FPTN остановлен',uiVersion:'0.11.0',clientVersion:'0.4.0',revision:'1234567890',busy:false,report:null,service:{state:'stopped',message:'Служба остановлена',selectedServer:'',connected:false,supervisorAlive:false,canStart:true,canStop:false,canRestart:false}};
 const win={location:{href:''}};win.top=win;win.self=win;
 let authState={configured:false,mode:null,rootAvailable:true};const requests=[];
 const context={console,document,window:win,Option:class{constructor(text,value){this.text=text;this.value=value;}},sessionStorage:{getItem(){return '';},setItem(){},removeItem(){}},setInterval(){},setTimeout(){return 1;},clearTimeout(){},fetch:async(url,options={})=>{
@@ -54,6 +54,9 @@ const run=code=>vm.runInContext(code,context);
  assert(!elements.start.disabled&&elements.stop.disabled,'stopped: start only');
  await run('loadUpdates()');assert(!elements['install-update'].hidden&&!elements['install-update'].disabled);assert(elements['update-status'].textContent.includes('0.9.1'));
  assert(elements.versions.textContent.includes('0.4.0'));
+ assert(elements.browser.options.some(option=>option.value==='edge'));elements.browser.value='chrome';elements.browser.dispatch('change');assert(elements.profile.options.some(option=>option.value==='sni-spoofing-chrome-150'));
+ assert(elements.strategy.options.some(option=>option.value==='quad-rolling-tunnel'));
+ elements['fallback-profile-1'].value='sni-spoofing-edge-151';elements['fallback-profile-2'].value='sni-spoofing-chrome-150';elements['fallback-enabled'].checked=true;assert(run('collectSettings().fallback.profiles').join(',')==='sni-spoofing-edge-151,sni-spoofing-chrome-150');elements['fallback-enabled'].checked=false;
  assert(elements.mtu.value==='0'&&elements['out-interface'].value==='');
  assert(elements['server-list'].children.length===2,'roles must be rendered');
  assert(elements['server-list'].children[0].children[1].textContent==='☆');
@@ -124,7 +127,7 @@ class FrontendTest(unittest.TestCase):
         sh=shutil.which('sh')
         result=subprocess.run([sh,str(ROOT/'web/index.cgi')],env={**os.environ,'PATH':'','SCRIPT_FILENAME':'/wrong/inherited/path'},capture_output=True,text=True)
         self.assertEqual(result.returncode,0,result.stderr)
-        self.assertIn('data-ui-version="0.10.0"',result.stdout)
+        self.assertIn('data-ui-version="0.11.0"',result.stdout)
         self.assertIn('Cache-Control: no-store',result.stdout)
 
     def test_real_ui_status_buttons_roles_drafts_and_versions(self):

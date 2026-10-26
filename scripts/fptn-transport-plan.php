@@ -1,10 +1,21 @@
 <?php
 // Private planning helper: no network scanning, protocol changes, or credential output.
+function clientCapabilities(): array {
+    global $root;
+    static $cached=null;if($cached!==null)return $cached;
+    $helper=$root.'/libexec/fptn/client-capabilities.sh';if(!is_file($helper))$helper=__DIR__.'/fptn-client-capabilities.sh';
+    $process=proc_open(['sh',$helper],[0=>['file','/dev/null','r'],1=>['pipe','w'],2=>['file','/dev/null','w']],$pipes);
+    if(!is_resource($process))failAuth('Не удалось прочитать возможности клиента.');
+    $text=stream_get_contents($pipes[1],65537);fclose($pipes[1]);$code=proc_close($process);
+    $value=json_decode((string)$text,true);
+    if($code!==0 || strlen((string)$text)>65536 || !is_array($value) || ($value['schema']??null)!==1 || !is_array($value['methods']??null))failAuth('Не удалось прочитать возможности клиента.');
+    return $cached=$value;
+}
 function fallbackSettings($value): array {
     if (!is_array($value) || !is_bool($value['enabled']??null) || !is_array($value['profiles']??null) || !is_array($value['domains']??null)) failAuth('Некорректные настройки резервных методов.');
-    $supported=['sni-spoofing-chrome-149','sni-spoofing-chrome-148','sni-spoofing-chrome-147','sni-spoofing-chrome-146','sni-spoofing-chrome-145','sni-spoofing-firefox-151','sni-spoofing-firefox-150','sni-spoofing-firefox-149','sni-spoofing-yandex-26-4','sni-spoofing-yandex-26-3','sni-spoofing-yandex-25','sni-spoofing-yandex-24','sni-spoofing-safari-26-5','sni-spoofing-safari-26-4'];
+    $supported=clientCapabilities()['methods'];
     if (count($value['profiles'])>2 || count($value['domains'])>2 || !in_array($value['budget']??null,[30,60,90,120],true)) failAuth('Выберите до двух профилей, до двух SNI и лимит 30–120 секунд.');
-    foreach($value['profiles'] as $profile) if(!is_string($profile) || !in_array($profile,$supported,true)) failAuth('Неизвестный запасной профиль.');
+    foreach($value['profiles'] as $profile) if(!is_string($profile) || !preg_match('/\Asni-spoofing-[a-z][a-z0-9]*-[0-9]+(?:-[0-9]+)*\z/D',$profile) || strlen($profile)>128 || ($value['enabled'] && !in_array($profile,$supported,true))) failAuth('Неизвестный запасной профиль.');
     $domains=[];
     foreach($value['domains'] as $domain){
         if(!is_string($domain) || strlen($domain)>253 || !preg_match('/\A[a-zA-Z0-9.-]+\z/D',$domain)) failAuth('Укажите корректные домены SNI.');
@@ -21,9 +32,17 @@ function readObject(string $path, int $limit=65536): array {
     if($text===false || strlen($text)>$limit) failAuth('Не удалось прочитать настройки подключения.');
     $value=json_decode($text,true);if(!is_array($value)) failAuth('Повреждены настройки подключения.');return $value;
 }
+function defaultFallbackProfiles(): array {
+    $latest=[];
+    foreach(clientCapabilities()['methods'] as $method)if(preg_match('/\Asni-spoofing-([a-z][a-z0-9]*)-([0-9-]+)\z/D',$method,$m)){
+        $version=str_replace('-','.',$m[2]);
+        if(!isset($latest[$m[1]]) || version_compare($version,$latest[$m[1]][1],'>'))$latest[$m[1]]=[$method,$version];
+    }
+    return array_slice(array_values(array_map(fn($item)=>$item[0],$latest)),0,2);
+}
 function configuredFallback(): array {
     global $conf;
-    return fallbackSettings(is_file($conf.'/fallback.json') ? readObject($conf.'/fallback.json') : ['enabled'=>false,'profiles'=>['sni-spoofing-chrome-149','sni-spoofing-firefox-151'],'domains'=>[],'budget'=>60]);
+    return fallbackSettings(is_file($conf.'/fallback.json') ? readObject($conf.'/fallback.json') : ['enabled'=>false,'profiles'=>defaultFallbackProfiles(),'domains'=>[],'budget'=>60]);
 }
 if($action==='transport-settings'){reply(configuredFallback());exit;}
 if($action==='transport-validate'){

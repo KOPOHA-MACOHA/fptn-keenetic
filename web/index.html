@@ -1,5 +1,5 @@
 <!doctype html>
-<html lang="ru" data-ui-version="0.10.0">
+<html lang="ru" data-ui-version="0.11.0">
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
@@ -7,13 +7,13 @@
   <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self'; style-src 'self'; connect-src 'self'; img-src 'self'; object-src 'none'; base-uri 'none'; form-action 'self'; frame-src 'none'">
   <title>FPTN · Keenetic</title>
   <link rel="icon" href="data:,">
-  <link rel="stylesheet" href="style.css?v=0.10.0-8f209edfd09d">
-  <script src="app.js?v=0.10.0-593ac69f76f9" defer></script>
+  <link rel="stylesheet" href="style.css?v=0.11.0-8f209edfd09d">
+  <script src="app.js?v=0.11.0-89a9f4a78f8b" defer></script>
 </head>
 <body>
   <div class="shell">
     <header><a class="brand" href="./"><span class="mark">F</span><span>FPTN <small>KEENETIC</small></span></a><button id="logout" class="quiet" hidden>Выйти</button></header>
-    <p id="versions" class="version-line">Панель 0.10.0 · версия клиента появится после входа</p>
+    <p id="versions" class="version-line">Панель 0.11.0 · версия клиента появится после входа</p>
     <div id="version-mismatch" class="banner error-banner" hidden><span id="version-mismatch-text"></span><button id="reload-ui" type="button">Обновить страницу</button></div>
     <section id="login" class="card login">
       <span class="eyebrow">ЛОКАЛЬНАЯ ПАНЕЛЬ</span>
@@ -58,10 +58,10 @@
           <div class="section-heading"><span class="step">02</span><h2>Параметры подключения</h2></div>
           <form id="settings-form">
             <label for="strategy">Стратегия подключения</label>
-            <select id="strategy"><option value="rolling-tunnel">Скользящий туннель</option><option value="dual-rolling-tunnel" selected>Двойной скользящий туннель</option><option value="triple-rolling-tunnel">Тройной скользящий туннель</option></select>
+            <select id="strategy"></select>
             <label for="mode">Метод обхода блокировок</label><select id="mode"><option value="obfuscation">Маскировка трафика · обфускация</option><option value="sni">Подмена домена · SNI + Reality</option></select>
             <div id="sni-fields" hidden>
-              <label for="browser">Браузер</label><select id="browser"><option value="yandex">Yandex</option><option value="chrome">Chrome</option><option value="firefox">Firefox</option><option value="safari">Safari</option></select>
+              <label for="browser">Браузер</label><select id="browser"></select>
               <label for="profile">Версия профиля</label><select id="profile"></select>
               <label for="sni">Домен SNI</label><input id="sni" type="text" value="google.com" maxlength="253" spellcheck="false" autocomplete="off" placeholder="example.com">
               <p class="hint">Автоподбор появится в отдельном обновлении. Сейчас укажите домен вручную.</p>
@@ -71,10 +71,8 @@
               <p class="hint">Сначала текущие настройки, затем разрешённые запасные методы на избранных, потом остальные серверы. Известное устойчивое сочетание пробуется первым. Исключённые серверы не проверяются.</p>
               <div id="fallback-fields" hidden>
                 <label>Запасные SNI-профили · выберите до двух</label>
-                <label class="fallback-check"><input type="checkbox" id="fallback-chrome" value="sni-spoofing-chrome-149"> Chrome 149</label>
-                <label class="fallback-check"><input type="checkbox" id="fallback-firefox" value="sni-spoofing-firefox-151"> Firefox 151</label>
-                <label class="fallback-check"><input type="checkbox" id="fallback-yandex" value="sni-spoofing-yandex-26-4"> Yandex 26.4</label>
-                <label class="fallback-check"><input type="checkbox" id="fallback-safari" value="sni-spoofing-safari-26-5"> Safari 26.5</label>
+                <label for="fallback-profile-1">Первый запасной профиль</label><select id="fallback-profile-1"></select>
+                <label for="fallback-profile-2">Второй запасной профиль</label><select id="fallback-profile-2"></select>
                 <label for="fallback-domains">До двух SNI · по одному на строке</label><textarea id="fallback-domains" rows="2" autocomplete="off" spellcheck="false"></textarea>
                 <label for="fallback-budget">Лимит перебора на избранных</label><select id="fallback-budget"><option value="30">30 секунд</option><option value="60">60 секунд</option><option value="90">90 секунд</option><option value="120">120 секунд</option></select>
                 <p class="hint">Для 1–8 разрешённых избранных. После лимита — обычный выбор остальных серверов. Обфускация проверяется автоматически; двойной/тройной туннель не меняется. Это реальные попытки FPTN, а не массовый поиск доменов.</p>
