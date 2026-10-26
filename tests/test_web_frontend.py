@@ -1,6 +1,7 @@
 """Run the actual UI script against a small DOM substitute, without a listener."""
 from pathlib import Path
 import shutil
+import os
 import subprocess
 import unittest
 
@@ -97,6 +98,13 @@ class FrontendTest(unittest.TestCase):
     def test_asset_urls_and_payload_checksums_match_actual_files(self):
         import sys
         subprocess.run([sys.executable,str(ROOT/'scripts/package-web.py'),'--check'],check=True,capture_output=True)
+
+    def test_entry_renders_without_path_or_external_utilities(self):
+        sh=shutil.which('sh')
+        result=subprocess.run([sh,str(ROOT/'web/index.cgi')],env={**os.environ,'PATH':'','SCRIPT_FILENAME':'/wrong/inherited/path'},capture_output=True,text=True)
+        self.assertEqual(result.returncode,0,result.stderr)
+        self.assertIn('data-ui-version="0.6.0"',result.stdout)
+        self.assertIn('Cache-Control: no-store',result.stdout)
 
     def test_real_ui_status_buttons_roles_drafts_and_versions(self):
         node=shutil.which('node')

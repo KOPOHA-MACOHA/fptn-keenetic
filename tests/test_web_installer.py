@@ -40,6 +40,8 @@ elif command=='curl':
  elif '/releases/download/' in url:shutil.copyfile(payload/'client'/url.rsplit('/',1)[1],out)
  elif '-w' in args:print('401',end='')
  elif 'api.cgi?' in url:
+  if 'auth-info' in url:
+   with (root.parent/'trace').open('a') as f:f.write('http-auth-info\n')
   if '-K' in args:sys.stdin.read()
   info={'uiVersion':'old' if (root/'wrong-api').exists() else '0.6.0','service':{'state':'stopped'},'busy':False,'status':'stopped','configured':True,'rootAvailable':True}
   text=json.dumps(info)
@@ -115,15 +117,23 @@ esac
         self.assertEqual((self.root/'libexec/fptn/SHA256SUMS').read_text(),self.old_sums)
         self.assertEqual((self.root/'share/fptn-web/index.html').read_text(),'original UI')
 
-    def test_first_stop_failure_never_mutates_or_recursively_rolls_back(self):
+    def test_stop_failure_restores_web_without_repeating_stop_or_replacing_binary(self):
         (self.root/'fail-stop').touch();result=self.execute()
         self.assertNotEqual(result.returncode,0,result.stdout+result.stderr)
         self.assert_original_files()
         trace=self.trace.read_text().splitlines()
         self.assertEqual(trace.count('staged-stop'),1)
-        self.assertNotIn('old-stop',trace);self.assertNotIn('lighttpd-restart',trace)
-        self.assertNotIn('Восстанавливаю файлы',result.stderr)
+        self.assertNotIn('old-stop',trace);self.assertEqual(trace.count('lighttpd-restart'),2)
+        self.assertIn('Восстанавливаю файлы',result.stderr)
         self.assertFalse((self.root/'var/run/fptn-web/action').exists())
+
+    def test_empty_entry_response_stops_before_touching_live_service(self):
+        entry=self.payload/'web/index.cgi';entry.write_text("#!/bin/sh\nprintf 'Content-Type: text/html\\r\\n\\r\\n'\n")
+        names=[line.split('  ',1)[1] for line in (self.payload/'web/SHA256SUMS').read_text().splitlines()]
+        (self.payload/'web/SHA256SUMS').write_text(''.join(hashlib.sha256((self.payload/p).read_bytes()).hexdigest()+'  '+p+'\n' for p in names))
+        result=self.execute();self.assertNotEqual(result.returncode,0)
+        self.assert_original_files();self.assertFalse(self.trace.exists())
+        self.assertTrue((self.root/'var/run/fptn-keenetic').exists())
 
     def test_missing_php_stops_before_replacing_or_stopping_anything(self):
         (self.root/'fail-php').touch();result=self.execute()
@@ -136,6 +146,7 @@ esac
         result=self.execute();self.assertEqual(result.returncode,0,result.stdout+result.stderr)
         trace=self.trace.read_text().splitlines()
         self.assertIn('staged-stop',trace);self.assertIn('staged-start',trace)
+        self.assertLess(trace.index('http-auth-info'),trace.index('staged-stop'))
         self.assertNotIn('old-stop',trace)
         self.assertTrue((self.root/'var/run/fptn-keenetic').exists())
         self.assertFalse((self.root/'var/run/fptn-web/action').exists())
@@ -168,8 +179,8 @@ esac
         self.assertNotEqual(result.returncode,0,result.stdout+result.stderr)
         self.assert_original_files()
         trace=self.trace.read_text().splitlines()
-        self.assertIn('old-start',trace)
-        self.assertEqual(trace.count('staged-stop'),1)
+        self.assertNotIn('old-start',trace)
+        self.assertNotIn('staged-stop',trace)
         self.assertTrue((self.root/'var/run/fptn-keenetic').exists())
         self.assertFalse((self.root/'var/run/fptn-web/action').exists())
 

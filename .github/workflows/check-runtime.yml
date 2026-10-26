@@ -15,11 +15,13 @@ jobs:
     timeout-minutes: 10
     steps:
       - uses: actions/checkout@v4
-      - name: Prepare existing-router PHP runtime for auth tests
+      - name: Prepare PHP and lighttpd integration tests
         run: |
           sudo apt-get update -qq
-          sudo apt-get install -y -qq php-cgi
+          sudo apt-get install -y -qq php-cgi lighttpd
           php-cgi -n -v
+      - name: Verify real lighttpd entry and authentication endpoints
+        run: python3 -m unittest discover -s tests -p 'test_lighttpd_entry.py' -v
       - name: Verify scripts, UI, credentials and upgrade rollback
         run: |
           python3 scripts/package-web.py --check

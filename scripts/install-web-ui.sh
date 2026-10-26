@@ -31,6 +31,10 @@ ip -4 addr show | grep -Fq "inet $LAN/" || fail 'Этот IPv4 не назнач
 [ -f "$MAIN" ] || fail 'Не найдена конфигурация lighttpd.'
 lighttpd -tt -f "$MAIN" || fail 'Текущая конфигурация lighttpd уже содержит ошибку.'
 lighttpd -p -f "$MAIN" | grep -q '"mod_cgi"' || fail 'В существующем lighttpd не включён mod_cgi.'
+SETENV_MODULE=
+if ! lighttpd -p -f "$MAIN" | grep -Fq '"mod_setenv"'; then
+  SETENV_MODULE='server.modules += ( "mod_setenv" )'
+fi
 if [ -e "$FRAGMENT" ]; then
   grep -Fq '# Managed by fptn-web-ui' "$FRAGMENT" || fail '95-fptn.conf занят чужой конфигурацией.'
 fi
@@ -65,7 +69,7 @@ finish() {
   RESTORE_SAFE=yes
   if [ "$CHANGED" = yes ] && [ "$DONE" != yes ]; then
     echo 'Установка не завершилась. Восстанавливаю файлы и lighttpd.' >&2
-    if [ "$RESTART_ATTEMPTED" = yes ] || [ -d /opt/var/run/fptn-keenetic ]; then
+    if [ "$SERVICE_STOPPED" = yes ] && { [ "$RESTART_ATTEMPTED" = yes ] || [ -d /opt/var/run/fptn-keenetic ]; }; then
       if ! sh "$STAGE/scripts/fptn-native-service.sh" stop; then
         echo 'Новый клиент не остановлен. Оставляю его файлы на месте; резервная копия сохранена.' >&2
         RESTORE_SAFE=no
@@ -113,6 +117,9 @@ sh -n "$STAGE/scripts/fptn-web-auth.sh"
 sh "$STAGE/scripts/fptn-web-auth.sh" info >/dev/null || fail 'Не удалось запустить PHP существующей панели nfqws. Файлы не менялись.'
 sh -n "$STAGE/web/api.cgi"
 sh -n "$STAGE/web/index.cgi"
+# Exercise the real entry file before any installed file or process is changed.
+sh "$STAGE/web/index.cgi" > "$STAGE/entry-check" || fail 'Стартовый CGI не смог прочитать страницу. Установленные файлы не менялись.'
+grep -Fq 'data-ui-version="0.6.0"' "$STAGE/entry-check" || fail 'Стартовый CGI не выдал HTML панели. Установленные файлы не менялись.' 
 sh -n "$STAGE/scripts/fptn-native-service.sh"
 if ! /opt/libexec/fptn/fptn-client-cli --help | grep -q -- '--keenetic-probe-only'; then
   CLIENT_UPDATE=yes
@@ -147,21 +154,6 @@ echo "Резервная копия: $BACKUP"
 mkdir /opt/var/run/fptn-web/action 2>/dev/null || fail 'Параллельно началась операция панели. Изменений нет.'
 INSTALL_LOCK=yes
 printf 'update\n' > /opt/var/run/fptn-web/action/action
-if [ "$CLIENT_UPDATE" = yes ]; then
-  [ ! -d /opt/var/run/fptn-keenetic ] || WAS_RUNNING=yes
-  # Use the verified new stop implementation, not the installed faulty one.
-  if ! sh "$STAGE/scripts/fptn-native-service.sh" stop; then
-    fail 'Не удалось остановить старую службу. Бинарник, панель и конфигурация не заменялись.'
-  fi
-  SERVICE_STOPPED=yes
-  CHANGED=yes
-  cp "$STAGE/client/fptn-client-cli" /opt/libexec/fptn/fptn-client-cli.new
-  chmod 700 /opt/libexec/fptn/fptn-client-cli.new
-  # Arm restoration before rename so an interrupt after rename is also covered.
-  CLIENT_SWAPPED=yes
-  mv /opt/libexec/fptn/fptn-client-cli.new /opt/libexec/fptn/fptn-client-cli
-  (cd /opt/libexec/fptn; sha256sum fptn-client-cli brotli > SHA256SUMS.new; mv SHA256SUMS.new SHA256SUMS)
-fi
 CHANGED=yes
 mkdir -p "$WEB"
 chmod 755 "$WEB"
@@ -184,9 +176,15 @@ jq -n --arg version "$CLIENT_VERSION" --arg revision "$REV" '{uiVersion:"0.6.0",
 mv "$CONF/web-meta.json.new" "$CONF/web-meta.json"
 cat > "$FRAGMENT" <<EOF
 # Managed by fptn-web-ui. Credentials live outside the document root.
+$SETENV_MODULE
 \$SERVER["socket"] == "$LAN:$PORT" {
     server.document-root = "$WEB"
-    index-file.names = ( "index.cgi" )
+    index-file.names = ( "index.html" )
+    setenv.add-response-header = (
+        "Cache-Control" => "no-store, max-age=0",
+        "Pragma" => "no-cache",
+        "X-Frame-Options" => "DENY"
+    )
     cgi.assign = ( ".cgi" => "/bin/sh" )
     server.max-request-size = 300
 }
@@ -201,8 +199,8 @@ check_panel() {
   curl --noproxy '*' -fsS -D "$STAGE/headers" --connect-timeout 1 --max-time 2 "$ORIGIN/" -o "$STAGE/page" 2>/dev/null || return 1
   PANEL_ERROR='На порту открылась другая версия панели.'
   grep -Fq 'data-ui-version="0.6.0"' "$STAGE/page" || return 1
-  PANEL_ERROR='Страница панели кэшируется.'
-  grep -iq '^Cache-Control:.*no-store' "$STAGE/headers" || return 1
+  PANEL_CACHE_WARNING=no
+  grep -iq '^Cache-Control:.*no-store' "$STAGE/headers" || PANEL_CACHE_WARNING=yes
   PANEL_ERROR='Не прошла проверка ограничения доступа к API.'
   CODE=$(curl --noproxy '*' -sS -o /dev/null -w '%{http_code}' --connect-timeout 1 --max-time 2 "$ORIGIN/api.cgi?status" 2>/dev/null) || return 1
   [ "$CODE" = 401 ] || return 1
@@ -215,10 +213,43 @@ check_panel() {
 # actual listener's responses, also when restart itself returned success.
 PANEL_DEADLINE=$(( $(date +%s) + 30 ))
 until check_panel; do
-  [ "$(date +%s)" -lt "$PANEL_DEADLINE" ] || fail "Панель не готова после ожидания: $PANEL_ERROR"
+  if [ "$(date +%s)" -ge "$PANEL_DEADLINE" ]; then
+    mkdir -p "$BACKUP/http-diagnostic"
+    for item in headers page auth-info.json; do
+      [ ! -f "$STAGE/$item" ] || cp "$STAGE/$item" "$BACKUP/http-diagnostic/$item"
+    done
+    echo "Ответ сервера сохранён: $BACKUP/http-diagnostic" >&2
+    if [ -f "$STAGE/page" ]; then
+      echo "Размер ответа страницы: $(wc -c < "$STAGE/page") байт." >&2
+    fi
+    fail "Панель не готова после ожидания: $PANEL_ERROR"
+  fi
   sleep 1
 done
 echo 'lighttpd отвечает: страница и API панели 0.6.0 проверены.'
+if [ "$PANEL_CACHE_WARNING" = yes ]; then
+  echo "Откройте свежую страницу по ссылке $ORIGIN/?v=$REV (заголовок кэша применится после перезагрузки lighttpd)."
+fi
+if [ "$CLIENT_UPDATE" = yes ]; then
+  [ ! -d /opt/var/run/fptn-keenetic ] || WAS_RUNNING=yes
+  # Use the verified new stop implementation, not the installed faulty one.
+  if ! sh "$STAGE/scripts/fptn-native-service.sh" stop; then
+    fail 'Не удалось остановить старую службу. Бинарник не заменялся; возвращаю прежнюю панель.'
+  fi
+  SERVICE_STOPPED=yes
+  CHANGED=yes
+  cp "$STAGE/client/fptn-client-cli" /opt/libexec/fptn/fptn-client-cli.new
+  chmod 700 /opt/libexec/fptn/fptn-client-cli.new
+  # Arm restoration before rename so an interrupt after rename is also covered.
+  CLIENT_SWAPPED=yes
+  mv /opt/libexec/fptn/fptn-client-cli.new /opt/libexec/fptn/fptn-client-cli
+  (cd /opt/libexec/fptn; sha256sum fptn-client-cli brotli > SHA256SUMS.new; mv SHA256SUMS.new SHA256SUMS)
+fi
+# Record the final ELF version after replacing it; the web preflight used the old client.
+CLIENT_VERSION=$(/opt/libexec/fptn/fptn-client-cli --version)
+jq -n --arg version "$CLIENT_VERSION" --arg revision "$REV" '{uiVersion:"0.6.0",clientVersion:$version,revision:$revision}' > "$CONF/web-meta.json.new"
+mv "$CONF/web-meta.json.new" "$CONF/web-meta.json"
+
 if [ "$CLIENT_UPDATE" = yes ] && [ "$WAS_RUNNING" = yes ]; then
   RESTART_ATTEMPTED=yes
   /opt/bin/fptnctl start || fail 'Обновлённый клиент не запустился.'
