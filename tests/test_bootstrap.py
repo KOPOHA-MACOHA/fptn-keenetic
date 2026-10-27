@@ -1,5 +1,5 @@
 """Bootstrap installs only missing dependencies and verifies the runtime installer."""
-import hashlib,json,os,shutil,subprocess,tempfile,unittest
+import hashlib,json,os,re,shutil,subprocess,tempfile,unittest
 from pathlib import Path
 ROOT=Path(__file__).resolve().parents[1]
 MOCK='''#!/usr/bin/env python3
@@ -22,6 +22,7 @@ class BootstrapTest(unittest.TestCase):
         self.tmp=tempfile.TemporaryDirectory();self.addCleanup(self.tmp.cleanup);self.root=Path(self.tmp.name)/'opt'
         for directory in ['bin','sbin','etc/lighttpd','lib/lighttpd']:(self.root/directory).mkdir(parents=True,exist_ok=True)
         self.env={**os.environ,'BOOT_ROOT':str(self.root)}
+        for name in ['python3','awk','mkdir','mktemp','readlink','dirname','sha256sum','jq','sh','rm','cat']:(self.root/'bin'/name).symlink_to(shutil.which(name))
         for name in ['id','opkg','curl','ip','lighttpd','ndmc','pidof','netstat']:
             p=self.root/'bin'/name;p.write_text(MOCK);p.chmod(0o700)
         (self.root/'sbin/ip').write_text('#!/bin/sh\n');(self.root/'sbin/ip').chmod(0o700)
@@ -33,7 +34,11 @@ class BootstrapTest(unittest.TestCase):
         (self.root/'remote-installer').write_text(payload)
         self.channel={'schema':1,'revision':'a'*40,'installerSha256':hashlib.sha256(payload.encode()).hexdigest()}
         self.save_channel()
-        self.script=self.root/'bootstrap.sh';self.script.write_text((ROOT/'install.sh').read_text().replace('/opt',str(self.root)).replace('[ -c /dev/net/tun ]','[ -f "'+str(self.root/'tun')+'" ]').replace('if ! command -v php-cgi >/dev/null 2>&1 && ! command -v php >/dev/null 2>&1; then', 'if [ ! -x "'+str(self.root/'bin/php-cgi')+'" ]; then'))
+        self.script=self.root/'bootstrap.sh'
+        script=(ROOT/'install.sh').read_text().replace('/opt',str(self.root)).replace('[ -c /dev/net/tun ]','[ -f "'+str(self.root/'tun')+'" ]')
+        # No host PHP/lighttpd may satisfy fixture dependency discovery, even in Actions.
+        script=re.sub(r'^PATH=.*$', 'PATH='+str(self.root/'bin'), script, flags=re.MULTILINE)
+        self.script.write_text(script)
     def save_channel(self):(self.root/'channel.json').write_text(json.dumps(self.channel))
     def execute(self):return subprocess.run(['sh',str(self.script),'install','192.168.1.1'],env=self.env,text=True,capture_output=True,timeout=10)
     def test_missing_php_is_installed_then_exact_revision_is_used(self):

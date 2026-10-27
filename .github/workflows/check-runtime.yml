@@ -29,6 +29,8 @@ jobs:
           sudo apt-get update -qq
           sudo apt-get install -y -qq php-cgi lighttpd
           php-cgi -n -v
+      - name: Verify isolated bootstrap on the runner with PHP and lighttpd installed
+        run: python3 -m unittest discover -s tests -p 'test_bootstrap.py' -v
       - name: Verify discovery and invalidation of client capabilities
         run: python3 -m unittest discover -s tests -p 'test_client_capabilities.py' -v
       - name: Verify client identity and binary update rollback
