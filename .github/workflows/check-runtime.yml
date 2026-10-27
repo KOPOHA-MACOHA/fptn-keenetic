@@ -54,3 +54,48 @@ jobs:
           python3 -m unittest discover -s tests -p 'test_web_auth.py' -v
           python3 -m compileall -q scripts
           sudo --preserve-env=PATH python3 -m unittest discover -s tests -v
+  package:
+    needs: test
+    if: inputs.source-ref == '' && github.event_name == 'push' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    permissions:
+      contents: write
+    env:
+      GH_TOKEN: ${{ github.token }}
+      GH_REPO: ${{ github.repository }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.source-ref || github.sha }}
+          persist-credentials: false
+      - name: Download the pinned client and decoder without rebuilding dependencies
+        run: |
+          set -eu
+          mkdir client decoder output
+          client="native-$(jq -r .buildRevision client-release.json)"
+          decoder=$(jq -r .decoderRelease runtime-assets.json)
+          for asset in fptn-client-cli sources.lock.json LICENSE-FPTN; do
+            gh release download "$client" --pattern "$asset" --dir client
+          done
+          for asset in brotli LICENSE-BROTLI BROTLI-SOURCE.txt; do
+            gh release download "$decoder" --pattern "$asset" --dir decoder
+          done
+          python3 scripts/package-runtime.py . client decoder output "$GITHUB_SHA"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: fptn-keenetic-install
+          path: |
+            output/*.tar.gz
+            output/SHA256SUMS
+          if-no-files-found: error
+      - name: Publish the tested complete runtime package
+        run: |
+          set -eu
+          tag="runtime-$GITHUB_SHA"
+          if ! gh release view "$tag" >/dev/null 2>&1; then
+            gh release create "$tag" --target "$GITHUB_SHA" --prerelease \
+              --title "FPTN Keenetic runtime ${GITHUB_SHA:0:7}" \
+              --notes 'Complete install/update package for Entware mipsel MIPS32r2 soft-float. Contains the existing verified client and Brotli decoder, panel and service. Runtime tests passed in Actions; clean installation still needs hardware validation. Run sh install.sh install inside the extracted folder. Routes, firewall and DNS remain managed by Keenetic.'
+          fi
+          gh release upload "$tag" output/*.tar.gz output/SHA256SUMS --clobber

@@ -1,5 +1,5 @@
 'use strict';
-const UI_VERSION = '0.12.1';
+const UI_VERSION = '0.13.0';
 const $ = id => document.getElementById(id);
 if (window.top !== window.self) { document.documentElement.replaceChildren(); throw new Error('Panel cannot be framed'); }
 let profiles={},clientCapabilities=null;
@@ -55,13 +55,14 @@ function setControls(){
   $('check-update').disabled=busy||!known;
   $('install-update').disabled=busy||!known||dirty||!updateInfo?.available;
   $('account-save').disabled=busy||!known||!accountData;
-  $('autostart-toggle').disabled=busy||!known;
-  $('start').disabled=busy||!known||!service.canStart;
+  $('autostart-toggle').disabled=busy||!known||lastData?.configured===false||lastData?.interfaceReady===false;
+  $('setup-interface').disabled=busy||!known||Boolean(service?.supervisorAlive);
+  $('start').disabled=busy||!known||!service.canStart||lastData?.configured===false||lastData?.interfaceReady===false;
   $('stop').disabled=busy||!known||!service.canStop;
   $('restart').disabled=busy||!known||!service.canRestart;
   $('save').disabled=busy||!known||!loaded||!dirty;
   $('preview').disabled=busy||versionMismatch;
-  $('check-servers').disabled=busy||!known||!loaded||dirty;
+  $('check-servers').disabled=busy||!known||!loaded||dirty||lastData?.configured===false;
   document.querySelectorAll('#dashboard input,#dashboard select,#dashboard textarea,.server-role').forEach(el=>{el.disabled=busy||versionMismatch;});
   if(!busy&&!versionMismatch){showSelection();showMtu();}
 }
@@ -119,7 +120,7 @@ function setFallbackProfiles(selected){
 function showMtu(){const custom=$('mtu-mode').value==='custom';$('mtu-custom').hidden=!custom;$('mtu').disabled=!custom;}
 function showSni(){$('sni-fields').hidden=$('mode').value!=='sni';}
 async function loadSettings(){
-  const data=await api('settings');renderCapabilities(data.capabilities);const policy=data.policy||{mode:'manual',favorites:[],excluded:[]};favorites=new Set(policy.favorites);excluded=new Set(policy.excluded);$('selection-mode').value=policy.mode;fillServers(data.servers,data.server);
+  const data=await api('settings');$('token-summary').textContent=data.configured===false?'Добавить токен FPTN':'Заменить токен';$('token-help').textContent=data.configured===false?'Вставьте токен из приложения FPTN. Он останется только на роутере.':'Текущий токен сохранён на роутере и не возвращается в браузер.';if(data.configured===false)$('token-details').open=true;renderCapabilities(data.capabilities);const policy=data.policy||{mode:'manual',favorites:[],excluded:[]};favorites=new Set(policy.favorites);excluded=new Set(policy.excluded);$('selection-mode').value=policy.mode;fillServers(data.servers,data.server);
   $('mtu-mode').value=data.connection.mtu>0?'custom':'auto';$('mtu').value=String(data.connection.mtu||data.interfaceMtu||1420);$('mtu-auto-option').textContent='Как в Keenetic'+(data.interfaceMtu?' ('+data.interfaceMtu+')':'');showMtu();$('out-interface').value=data.connection.outInterface||'';
   $('strategy').value=data.connection.strategy;const bypass=data.connection.bypass;$('mode').value=bypass==='obfuscation'?'obfuscation':'sni';if(bypass!=='obfuscation')$('browser').value=bypass.split('-')[2];fillProfiles(bypass);$('sni').value=data.connection.sni;showSni();const fallback=data.fallback||{enabled:false,profiles:[],domains:[],budget:60};savedFallback=JSON.parse(JSON.stringify(fallback));$('fallback-enabled').checked=fallback.enabled;setFallbackProfiles(fallback.profiles);$('fallback-domains').value=(fallback.domains.length?fallback.domains:[data.connection.sni]).join('\n');$('fallback-budget').value=String(fallback.budget);$('fallback-fields').hidden=!fallback.enabled;previewToken='';$('token').value='';loaded=true;savedSnapshot=JSON.stringify(collectSettings());updateDirty();
 }
@@ -132,6 +133,10 @@ function applyStatus(data){
   $('autostart-state').textContent=data.autostart?'Автозапуск включён':'Автозапуск выключен';
   $('autostart-toggle').textContent=data.autostart?'Выключить автозапуск':'Включить автозапуск';
   const service=data.service;
+  const needToken=data.configured===false,needInterface=data.interfaceReady===false;
+  $('onboarding').hidden=!needToken&&!needInterface;
+  $('onboarding-message').textContent=needToken?'Добавьте токен в разделе «Сервер и токен», прочитайте серверы и сохраните настройки. Для подключения нужен штатный интерфейс FPTN.':needInterface?'Создайте интерфейс FPTN, затем нажмите «Запустить». После подключения назначьте нужные домены и CIDR этому интерфейсу в Keenetic.':'';
+  $('setup-interface').hidden=!needInterface;$('setup-interface-help').hidden=!needInterface;
   const titles={stopped:'Служба остановлена',starting:'Запускаем службу',selecting:'Выбираем сервер',retrying:'Ожидаем повторного подключения',reconnecting:'Восстанавливаем соединение',stale:'Служба требует восстановления'};
   $('status-title').textContent=service.state==='running'?(service.connected?'Туннель подключён':'Клиент запущен'):titles[service.state]||'Состояние неизвестно';
   $('indicator').className='dot'+(service.connected?' active':['starting','selecting','retrying','reconnecting'].includes(service.state)?' busy':'');
@@ -140,7 +145,7 @@ function applyStatus(data){
   $('active-server').textContent=service.selectedServer||'Нет активного сервера';
   $('memory').textContent=data.rssKiB?'ОЗУ '+(data.rssKiB/1024).toFixed(1)+' МиБ':'';
   $('recover-operation').hidden=!data.operationState?.stale;
-  const operations={recover:'Восстановление управления',start:'Запуск клиента',stop:'Остановка клиента',restart:'Переподключение',save:'Применение настроек',check:'Проверка входа на серверы','check-update':'Проверка обновлений',update:'Установка обновления'};
+  const operations={'setup-interface':'Создание интерфейса FPTN',recover:'Восстановление управления',start:'Запуск клиента',stop:'Остановка клиента',restart:'Переподключение',save:'Применение настроек',check:'Проверка входа на серверы','check-update':'Проверка обновлений',update:'Установка обновления'};
   $('operation').hidden=!data.busy;$('operation').textContent=(operations[data.operation]||'Выполнение операции')+'…';
   if(data.operationState?.stale)$('operation').textContent=data.operationState.message;
   updateHealth();updateDirty();
@@ -225,6 +230,7 @@ $('fallback-enabled').addEventListener('change',()=>{$('fallback-fields').hidden
 for(const id of fallbackProfiles)$(id).addEventListener('change',updateDirty);
 for(const id of ['fallback-domains','fallback-budget'])$(id).addEventListener('change',updateDirty);
 $('fallback-domains').addEventListener('input',updateDirty);
+$('setup-interface').addEventListener('click',()=>command({action:'setup-interface'}));
 $('preview').addEventListener('click',async()=>{const token=$('token').value.trim();if(!token){notice('Вставьте новый токен.',true);return;}$('preview').disabled=true;try{const data=await api('',{action:'preview',token});fillServers(data.servers,$('server').value);previewToken=token;loaded=true;updateDirty();$('settings-error').hidden=true;notice('Серверы прочитаны. Примените настройки.');}catch(error){notice(error.message,true);}finally{setControls();}});
 async function command(body){if(pending||versionMismatch||(lastBusy&&!(body.action==='recover'&&lastData?.operationState?.canRecover)))return;pending=true;setControls();try{await api('',body);notice('Операция запущена. Состояние обновляется автоматически.');await poll();}catch(error){pending=false;setControls();notice(error.message,true);}}
 document.querySelectorAll('[data-command]').forEach(button=>button.addEventListener('click',()=>command({action:button.dataset.command})));

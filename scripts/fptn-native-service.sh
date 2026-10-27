@@ -285,7 +285,7 @@ setup_interface() {
   command -v ndmc >/dev/null 2>&1 || fail 'Нет ndmc.'
   mkdir -p "$CONF"
   if ndmc -c 'show interface OpkgTun0' >/dev/null 2>&1; then
-    [ -f "$CONF/native-interface" ] || fail 'OpkgTun0 уже существует и не принадлежит FPTN.'
+    [ "$(cat "$CONF/native-interface" 2>/dev/null)" = OpkgTun0 ] || fail 'OpkgTun0 уже существует и не принадлежит FPTN.'
     if [ -f "$CONF/native-setup-complete" ]; then
       echo 'OpkgTun0 уже настроен; настройки Keenetic сохранены без изменений.'
       return 0
@@ -488,7 +488,7 @@ attempt_service() {
 }
 start_service() {
   for cmd in ip timeout nice nohup jq base64 stty; do command -v "$cmd" >/dev/null 2>&1 || fail "Нет команды $cmd"; done
-  [ -s "$CONF/token" ] && [ -s "$CONF/server" ] || fail 'Сначала fptnctl configure.'
+  [ -s "$CONF/token" ] && [ -s "$CONF/server" ] || fail 'Вставьте токен и сохраните сервер в веб-панели.'
   load_connection
   START_TIMEOUT=70
   if [ -f "$CONF/server-policy.json" ]; then
@@ -563,7 +563,8 @@ status_json() {
   esac
   EFFECTIVE=null
   if [ "$CLIENT" = true ] && [ -f "$RUN/effective-connection.json" ]; then EFFECTIVE=$(cat "$RUN/effective-connection.json"); fi
-  CAN_START=false; [ "$STATE" != stopped ] || CAN_START=true
+  CAN_START=false
+  if [ "$STATE" = stopped ] && [ -s "$CONF/token" ] && [ -s "$CONF/server" ] && [ -f "$CONF/native-setup-complete" ]; then CAN_START=true; fi
   jq -n --arg state "$STATE" --arg message "$MESSAGE" --arg server "$ACTIVE" \
     --argjson effective "$EFFECTIVE" --argjson supervisor "$SUPERVISOR" --argjson client "$CLIENT" --argjson connected "$CONNECTED" --argjson canStart "$CAN_START" \
     '{effectiveConnection:$effective,state:$state,message:$message,selectedServer:$server,supervisorAlive:$supervisor,clientAlive:$client,connected:$connected,canStart:$canStart,canStop:$supervisor,canRestart:$supervisor}'
@@ -645,6 +646,61 @@ show_logs() {
     [ ! -f "$CONF/last.log" ] || tail -n 60 "$CONF/last.log"
   fi
 }
+uninstall_runtime() (
+  # Keep credentials and all firmware configuration, including routes using OpkgTun0.
+  [ -f "$LIB/.runtime-managed" ] || fail 'Удаление поддерживается после обновления до 0.13.0.'
+  WEB=$ROOT/share/fptn-web
+  FRAGMENT=$ROOT/etc/lighttpd/conf.d/95-fptn.conf
+  [ -f "$WEB/.fptn-web-owned" ] || fail 'Не подтверждено владение каталогом панели.'
+  [ ! -e "$FRAGMENT" ] || grep -Fq '# Managed by fptn-web-ui' "$FRAGMENT" || fail '95-fptn.conf изменён другим приложением.'
+  INIT=$ROOT/etc/init.d/S90fptn
+  [ ! -e "$INIT" ] || grep -Fq '# Managed by fptn-native' "$INIT" || fail 'S90fptn принадлежит другому приложению.'
+  HTTP_INIT=
+  for candidate in "$ROOT"/etc/init.d/S*lighttpd; do
+    [ -x "$candidate" ] || continue
+    [ -z "$HTTP_INIT" ] || fail 'Найдено несколько init-скриптов lighttpd.'
+    HTTP_INIT=$candidate
+  done
+  [ -n "$HTTP_INIT" ] || fail 'Не найден init-скрипт lighttpd.'
+  # Reserve through the same mutex as the browser/installer; never erase a live operation.
+  RESERVED=$(printf '%s' '{"action":"stop"}' | FPTN_OWNER_PID=$$ sh "$LIB/web-auth.sh" op-reserve) || fail 'Сначала завершите операцию панели.'
+  LOCK=$ROOT/var/run/fptn-web/action
+  FPTN_OPERATION_ID=$(printf '%s' "$RESERVED" | jq -er .id); export FPTN_OPERATION_ID
+  trap 'rm -rf "$LOCK"' EXIT
+  trap 'exit 1' INT TERM HUP
+  stop_service
+  BACKUP=$(mktemp -d "$CONF/uninstall-backup.XXXXXX")
+  if [ -f "$FRAGMENT" ]; then
+    cp -p "$FRAGMENT" "$BACKUP/95-fptn.conf"
+    rm "$FRAGMENT"
+    if ! lighttpd -tt -f "$ROOT/etc/lighttpd/lighttpd.conf"; then
+      cp -p "$BACKUP/95-fptn.conf" "$FRAGMENT"
+      fail 'Общая конфигурация lighttpd не прошла проверку; файлы службы сохранены.'
+    fi
+    # Init may report failed during a successful delayed restart, as on Hopper.
+    FPTN_OPERATION_ID= "$HTTP_INIT" restart || true
+    READY=no
+    for attempt in 1 2 3 4 5; do
+      if pidof lighttpd >/dev/null 2>&1; then READY=yes; break; fi
+      sleep 1
+    done
+    if [ "$READY" != yes ]; then
+      cp -p "$BACKUP/95-fptn.conf" "$FRAGMENT"
+      FPTN_OPERATION_ID= "$HTTP_INIT" restart || true
+      fail 'lighttpd не подтвердил запуск. Фрагмент панели восстановлен; файлы службы сохранены.'
+    fi
+  fi
+  rm -f "$CONF/autostart" "$INIT"
+  for file in index.html index.cgi app.js style.css api.cgi .fptn-web-owned; do rm -f "$WEB/$file"; done
+  rmdir "$WEB" 2>/dev/null || true
+  for file in fptn-client-cli brotli web-auth.sh web-auth.php web-operations.php transport-plan.php web-update.sh client-capabilities.sh client-identity.sh sources.lock.json SHA256SUMS LICENSE-FPTN LICENSE-BROTLI BROTLI-SOURCE.txt .runtime-managed; do rm -f "$LIB/$file"; done
+  rmdir "$LIB" 2>/dev/null || true
+  rm -f "$ROOT/bin/fptnctl"
+  echo 'Программа и панель FPTN удалены. Пакеты Entware и другие веб-панели сохранены.'
+  echo 'Токен, вход, настройки и резервные копии оставлены в /opt/etc/fptn. Повторная установка использует их.'
+  echo 'Интерфейс OpkgTun0 и маршруты Keenetic оставлены: удалить или переназначить их можно в Keenetic.'
+)
+
 set_autostart() {
   INIT=$ROOT/etc/init.d/S90fptn
   if [ -e "$INIT" ]; then grep -Fq '# Managed by fptn-native' "$INIT" || fail 'S90fptn занят чужим скриптом.'; fi
@@ -690,6 +746,8 @@ case "${1:-}" in
   check-servers) check_servers ;;
   install) install_native "${2:-/opt/tmp/fptn-native-client}" ;;
   setup-interface) setup_interface ;;
+  setup-interface-save) setup_interface; ndmc -c 'system configuration save' ;;
+  uninstall) uninstall_runtime ;;
   configure) mkdir -p "$CONF"; chmod 700 "$CONF"; configure ;;
   start) start_service ;;
   stop) stop_service ;;

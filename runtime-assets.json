@@ -1,0 +1,9 @@
+{
+  "schema": 1,
+  "platform": "mipsel-mips32r2-softfloat",
+  "decoderRelease": "decoder-3838b0141bfe83dd6e31dcc2a56a5458bcdb1e21",
+  "decoderSha256": "4975b92d3fccc483e3a2af6945debedbbd39c58d0e354fa8d0e3cfc004563332",
+  "decoderLicenseSha256": "3d180008e36922a4e8daec11c34c7af264fed5962d07924aea928c38e8663c94",
+  "decoderSourceSha256": "c609e6e55f9f7814d7f13d117cfac8fd41a861ac46e3e9b4eeea87db4b4cbdeb",
+  "clientLicenseSha256": "2f817d4133bca382fe26298f08c106f2c2f36206946e85a40049b38ab15dfaca"
+}

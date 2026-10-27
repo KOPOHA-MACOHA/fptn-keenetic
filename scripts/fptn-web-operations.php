@@ -65,7 +65,7 @@ if ($action === 'op-reserve') {
     if (is_dir($directory)) failAuth('Дождитесь операции или восстановите управление в панели.');
     $body=$pendingRequest;
     $name=$body['action']??'';
-    if (!in_array($name,['start','stop','restart','save','check','enable','disable','update','check-update'],true)) failAuth('Некорректная операция.');
+    if (!in_array($name,['start','stop','restart','save','check','enable','disable','update','check-update','setup-interface'],true)) failAuth('Некорректная операция.');
     $id=bin2hex(random_bytes(16));$prepared=$run.'/reserve-'.$id;
     if (!mkdir($prepared,0700)) failAuth('Не удалось создать журнал операции.');
     $target=$directory;$directory=$prepared;

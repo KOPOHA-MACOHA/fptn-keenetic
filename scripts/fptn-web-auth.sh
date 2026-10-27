@@ -14,7 +14,7 @@ if [ -z "$PHP" ]; then
     if command -v "$candidate" >/dev/null 2>&1; then PHP=$candidate; break; fi
   done
 fi
-[ -n "$PHP" ] || { echo 'Не найден PHP, используемый существующей панелью nfqws.' >&2; exit 1; }
+[ -n "$PHP" ] || { echo 'Не найден PHP. Установите пакет php8-cgi Entware.' >&2; exit 1; }
 DIR=$(dirname "$(readlink -f "$0")")
 FILE=$DIR/web-auth.php
 [ -f "$DIR/fptn-web-auth.php" ] && FILE=$DIR/fptn-web-auth.php

@@ -30,7 +30,7 @@ const document={hidden:false,documentElement:new Element('root'),getElementById:
  throw new Error('Unexpected selector '+selector);
 }};
 const settings={capabilities:{schema:1,clientVersion:'0.4.0',methods:['obfuscation','sni-spoofing-chrome-149','sni-spoofing-chrome-150','sni-spoofing-firefox-151','sni-spoofing-yandex-26-4','sni-spoofing-safari-26-5','sni-spoofing-edge-151'],strategies:['rolling-tunnel','dual-rolling-tunnel','triple-rolling-tunnel','quad-rolling-tunnel']},server:'CZ',servers:['CZ','DE'],connection:{bypass:'obfuscation',strategy:'dual-rolling-tunnel',sni:'google.com'},policy:{mode:'manual',favorites:[],excluded:[]}};
-const stopped={status:'FPTN остановлен',uiVersion:'0.12.1',clientVersion:'0.4.0',upstreamVersion:'0.4.6',clientBuildRevision:'a'.repeat(40),revision:'1234567890',busy:false,report:null,service:{state:'stopped',message:'Служба остановлена',selectedServer:'',connected:false,supervisorAlive:false,canStart:true,canStop:false,canRestart:false}};
+const stopped={status:'FPTN остановлен',uiVersion:'0.13.0',clientVersion:'0.4.0',upstreamVersion:'0.4.6',clientBuildRevision:'a'.repeat(40),revision:'1234567890',busy:false,report:null,service:{state:'stopped',message:'Служба остановлена',selectedServer:'',connected:false,supervisorAlive:false,canStart:true,canStop:false,canRestart:false}};
 const win={location:{href:''}};win.top=win;win.self=win;
 let authState={configured:false,mode:null,rootAvailable:true};const requests=[];
 const context={console,document,window:win,Option:class{constructor(text,value){this.text=text;this.value=value;}},sessionStorage:{getItem(){return '';},setItem(){},removeItem(){}},setInterval(){},setTimeout(){return 1;},clearTimeout(){},fetch:async(url,options={})=>{
@@ -53,6 +53,13 @@ const run=code=>vm.runInContext(code,context);
  assert(elements.start.disabled&&elements.stop.disabled,'unknown status must disable controls');
  context.data=stopped;run('applyStatus(data)');await run('loadSettings()');
  assert(!elements.start.disabled&&elements.stop.disabled,'stopped: start only');
+ const unconfigured={...stopped,configured:false,interfaceReady:false};context.data=unconfigured;run('applyStatus(data)');
+ assert(!elements.onboarding.hidden&&!elements['setup-interface'].hidden&&elements.start.disabled&&elements['check-servers'].disabled);
+ const savedServers=settings.servers,savedServer=settings.server;settings.configured=false;settings.servers=[];settings.server='';await run('loadSettings()');
+ assert(elements['token-details'].open&&elements['token-summary'].textContent.includes('Добавить'));assert(elements['server-list'].children.length===0);
+ settings.configured=true;settings.servers=savedServers;settings.server=savedServer;context.data={...stopped,configured:true,interfaceReady:true};run('applyStatus(data)');await run('loadSettings()');
+ assert(elements.onboarding.hidden&&elements['setup-interface'].hidden&&!elements.start.disabled);
+
  await run('loadUpdates()');assert(!elements['install-update'].hidden&&!elements['install-update'].disabled);assert(elements['update-status'].textContent.includes('0.9.1'));
  assert(elements.versions.textContent.includes('0.4.0')&&elements.versions.textContent.includes('исходный FPTN 0.4.6')&&elements.versions.textContent.includes('aaaaaaa'));
  assert(elements.browser.options.some(option=>option.value==='edge'));elements.browser.value='chrome';elements.browser.dispatch('change');assert(elements.profile.options.some(option=>option.value==='sni-spoofing-chrome-150'));
@@ -128,7 +135,7 @@ class FrontendTest(unittest.TestCase):
         sh=shutil.which('sh')
         result=subprocess.run([sh,str(ROOT/'web/index.cgi')],env={**os.environ,'PATH':'','SCRIPT_FILENAME':'/wrong/inherited/path'},capture_output=True,text=True)
         self.assertEqual(result.returncode,0,result.stderr)
-        self.assertIn('data-ui-version="0.12.1"',result.stdout)
+        self.assertIn('data-ui-version="0.13.0"',result.stdout)
         self.assertIn('Cache-Control: no-store',result.stdout)
 
     def test_real_ui_status_buttons_roles_drafts_and_versions(self):

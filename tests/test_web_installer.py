@@ -23,6 +23,7 @@ elif command=='php-cgi':
  elif os.environ.get('FPTN_AUTH_ACTION')=='op-reserve':
   lock=root/'var/run/fptn-web/action';lock.mkdir();(lock/'action').write_text('update\n');print(json.dumps({'id':'a'*32}))
  else:print(json.dumps({'configured':True,'mode':'panel','rootAvailable':True}))
+elif command=='ndmc':sys.exit(0 if (root/'foreign-interface').exists() else 1)
 elif command=='ip':print('    inet 192.168.1.1/24 scope global br0')
 elif command=='netstat':print('Active Internet connections (only servers)')
 elif command=='lighttpd':
@@ -48,7 +49,7 @@ elif command=='curl':
   if 'auth-info' in url:
    with (root.parent/'trace').open('a') as f:f.write('http-auth-info\n')
   if '-K' in args:sys.stdin.read()
-  info={'uiVersion':'old' if (root/'wrong-api').exists() else '0.12.1','service':{'state':'stopped'},'busy':False,'status':'stopped','configured':True,'rootAvailable':True}
+  info={'uiVersion':'old' if (root/'wrong-api').exists() else '0.13.0','service':{'state':'stopped'},'busy':False,'status':'stopped','configured':True,'rootAvailable':True}
   text=json.dumps(info)
   if out:out.write_text(text)
   else:print(text)
@@ -70,7 +71,7 @@ class WebInstallerTest(unittest.TestCase):
             (self.root/name).mkdir(parents=True,exist_ok=True)
         self.trace=self.base/'trace'
         self.env={**os.environ,'FPTN_PREFIX':str(self.root),'FPTN_TEST_TRACE':str(self.trace)}
-        for name in ['id','ip','netstat','lighttpd','curl','php-cgi','date','sleep']:
+        for name in ['id','ndmc','ip','netstat','lighttpd','curl','php-cgi','date','sleep']:
             path=self.root/'bin'/name;path.write_text(MOCK);path.chmod(0o700)
         (self.root/'etc/fptn/web-auth.json').write_text('{"username":"admin","hash":"test"}')
         for key in ['token','server']:(self.root/'etc/fptn'/key).write_text('dummy\n')
@@ -99,10 +100,10 @@ esac
         self.old_binary='#!/bin/sh\ncase "$1" in --help) echo old-client;; --version) echo 0.3.0;; esac\n'
         lib=self.root/'libexec/fptn'
         (lib/'fptn-client-cli').write_text(self.old_binary);(lib/'fptn-client-cli').chmod(0o700)
-        (lib/'brotli').write_text('dummy')
+        (lib/'brotli').write_text('dummy');(lib/'brotli').chmod(0o700)
         self.old_sums=''.join(hashlib.sha256((lib/p).read_bytes()).hexdigest()+'  '+p+'\n' for p in ['fptn-client-cli','brotli'])
         (lib/'SHA256SUMS').write_text(self.old_sums)
-        paths=['client-release.json','web/index.html','web/index.cgi','web/style.css','web/app.js','web/api.cgi','scripts/fptn-native-service.sh','scripts/fptn-web-auth.sh','scripts/fptn-web-auth.php','scripts/fptn-web-operations.php','scripts/fptn-transport-plan.php','scripts/fptn-web-update.sh','scripts/fptn-client-capabilities.sh','scripts/fptn-client-identity.sh']
+        paths=['client-release.json','web/index.html','web/index.cgi','web/style.css','web/app.js','web/api.cgi','scripts/fptn-native-service.sh','scripts/fptn-web-auth.sh','scripts/fptn-web-auth.php','scripts/fptn-web-operations.php','scripts/fptn-transport-plan.php','scripts/fptn-web-update.sh','scripts/fptn-client-capabilities.sh','scripts/fptn-client-identity.sh','scripts/fptn-platform.sh','runtime-assets.json']
         for name in paths:
             target=self.payload/name;target.parent.mkdir(parents=True,exist_ok=True)
             target.write_text(controller('staged') if name=='scripts/fptn-native-service.sh' else (REPO/name).read_text())
@@ -115,11 +116,18 @@ esac
         (self.payload/'client/sources.lock.json').write_text(source_lock)
         self.target={'schema':1,'platform':'mipsel-mips32r2-softfloat','buildRevision':'b'*40,'sha256':hashlib.sha256(new.read_bytes()).hexdigest(),'clientVersion':'0.4.0','upstreamRevision':'c'*40,'upstreamVersion':'0.4.6','sourceLockSha256':hashlib.sha256(source_lock.encode()).hexdigest()}
         (self.payload/'client-release.json').write_text(json.dumps(self.target))
+        assets=__import__('json').loads((self.payload/'runtime-assets.json').read_text())
+        for name,key in [('brotli','decoderSha256'),('LICENSE-BROTLI','decoderLicenseSha256'),('BROTLI-SOURCE.txt','decoderSourceSha256'),('LICENSE-FPTN','clientLicenseSha256')]:
+            data=('#!/bin/sh\ncat\n' if name=='brotli' else 'test '+name+'\n').encode()
+            (self.payload/'client'/name).write_bytes(data);assets[key]=hashlib.sha256(data).hexdigest()
+        (self.payload/'runtime-assets.json').write_text(__import__('json').dumps(assets))
         self.refresh_manifest()
         self.old_source='{"fptn":"'+('d'*40)+'"}\n';(lib/'sources.lock.json').write_text(self.old_source)
         self.installer=self.base/'installer.sh' 
         # Only translate its absolute /opt filesystem paths; execute all transaction code.
-        self.installer.write_text((REPO/'scripts/install-web-ui.sh').read_text().replace('/opt',str(self.root)))
+        self.installer.write_text((REPO/'scripts/install-web-ui.sh').read_text().replace('/opt',str(self.root)).replace('[ -c /dev/net/tun ]','[ -f "'+str(self.root/'tun')+'" ]'))
+        (self.root/'tun').touch()
+        (self.root/'etc/entware_release').write_text('arch=mipsel\ncpu_type=mips32r2\nfloat=soft\n')
 
     def refresh_manifest(self):
         names=[line.split('  ',1)[1] for line in (self.payload/'web/SHA256SUMS').read_text().splitlines()]
@@ -285,3 +293,44 @@ sys.exit(result.returncode)
         result=self.execute();self.assertNotEqual(result.returncode,0,result.stdout+result.stderr)
         self.assert_original_files();self.assertEqual((self.root/'etc/fptn/client-release.json').read_bytes(),previous)
         self.assertIn('old-start',self.trace.read_text());self.assertTrue((self.root/'var/run/fptn-keenetic').exists())
+
+    def fresh(self):
+        for file in ['bin/fptnctl','etc/lighttpd/conf.d/95-fptn.conf','etc/fptn/token','etc/fptn/server']:(self.root/file).unlink()
+        for directory in ['libexec/fptn','share/fptn-web','var/run/fptn-keenetic']:shutil.rmtree(self.root/directory)
+
+    def test_clean_install_includes_decoder_without_starting_vpn_or_requiring_token(self):
+        self.fresh();result=self.execute();self.assertEqual(result.returncode,0,result.stdout+result.stderr)
+        self.assertTrue((self.root/'bin/fptnctl').exists())
+        for file in ['fptn-client-cli','brotli','LICENSE-FPTN','LICENSE-BROTLI','BROTLI-SOURCE.txt','.runtime-managed']:
+            self.assertTrue((self.root/'libexec/fptn'/file).exists(),file)
+        self.assertFalse((self.root/'etc/fptn/token').exists());self.assertFalse((self.root/'etc/fptn/server').exists())
+        self.assertFalse((self.root/'var/run/fptn-keenetic').exists());self.assertFalse((self.root/'etc/fptn/autostart').exists())
+        self.assertNotIn('staged-start',self.trace.read_text());self.assertNotIn('staged-stop',self.trace.read_text())
+        self.assertEqual((self.root/'etc/fptn/web-auth.json').read_text(),'{'+'"username":"admin","hash":"test"'+'}')
+
+    def test_clean_install_http_failure_removes_new_program_but_preserves_retained_credentials(self):
+        self.fresh();(self.root/'wrong-api').touch();result=self.execute();self.assertNotEqual(result.returncode,0)
+        for path in ['bin/fptnctl','share/fptn-web','libexec/fptn','etc/lighttpd/conf.d/95-fptn.conf']:
+            self.assertFalse((self.root/path).exists(),path)
+        self.assertTrue((self.root/'etc/fptn/web-auth.json').exists())
+        self.assertEqual((self.root/'etc/lighttpd/lighttpd.conf').read_text(),'original main')
+
+    def test_wrong_platform_rejected_before_execution_or_live_changes(self):
+        (self.root/'etc/entware_release').write_text('arch=aarch64\ncpu_type=cortex-a53\nfloat=hard\n')
+        result=self.execute();self.assertNotEqual(result.returncode,0)
+        self.assert_original_files();self.assertFalse(self.trace.exists());self.assertNotIn('/releases/download/',(self.root/'downloads').read_text())
+
+    def test_foreign_tun_refused_on_clean_install(self):
+        self.fresh();(self.root/'foreign-interface').touch();result=self.execute();self.assertNotEqual(result.returncode,0)
+        self.assertIn('OpkgTun0',result.stderr);self.assertFalse(self.trace.exists());self.assertFalse((self.root/'libexec/fptn').exists())
+
+    def test_corrupt_decoder_refused_before_changing_clean_install(self):
+        self.fresh();(self.payload/'client/brotli').write_text('wrong bytes')
+        result=self.execute();self.assertNotEqual(result.returncode,0)
+        self.assertFalse((self.root/'libexec/fptn').exists());self.assertFalse(self.trace.exists())
+
+    def test_bundle_uses_local_verified_payload_without_network_downloads(self):
+        self.fresh();self.env['FPTN_PAYLOAD_DIR']=str(self.payload)
+        result=self.execute();self.assertEqual(result.returncode,0,result.stdout+result.stderr)
+        downloads=(self.root/'downloads').read_text()
+        self.assertNotIn('raw.githubusercontent.com',downloads);self.assertNotIn('/releases/download/',downloads)

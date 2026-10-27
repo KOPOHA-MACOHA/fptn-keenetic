@@ -1,0 +1,48 @@
+name: Publish verified token decoder
+on:
+  push:
+    branches: [main]
+    paths: [.github/workflows/publish-decoder.yml]
+  workflow_dispatch:
+permissions:
+  contents: write
+  actions: read
+jobs:
+  publish:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    env:
+      GH_TOKEN: ${{ github.token }}
+      GH_REPO: ${{ github.repository }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - name: Extract the already tested decoder, without recompiling FPTN
+        run: |
+          set -eu
+          gh api repos/KOPOHA-MACOHA/fptn-keenetic/actions/artifacts/12592432166/zip > decoder.zip
+          echo '9242ad167653eb5a32ec7a65690aecd5a91f7c36f223a2834c3cebc554a7312c  decoder.zip' | sha256sum -c -
+          python3 - <<'PY'
+          import hashlib,json,pathlib,zipfile
+          meta=json.loads(pathlib.Path('runtime-assets.json').read_text())
+          out=pathlib.Path('decoder');out.mkdir()
+          files={'brotli':'decoderSha256','LICENSE-BROTLI':'decoderLicenseSha256','BROTLI-SOURCE.txt':'decoderSourceSha256'}
+          with zipfile.ZipFile('decoder.zip') as archive:
+              for name,key in files.items():
+                  data=archive.read('fptn-connect-test/'+name)
+                  assert hashlib.sha256(data).hexdigest()==meta[key],name
+                  (out/name).write_bytes(data)
+          (out/'SHA256SUMS').write_text(''.join(meta[key]+'  '+name+'\n' for name,key in files.items()))
+          PY
+          python3 scripts/verify-elf.py decoder/brotli
+      - name: Preserve decoder independently of expiring Actions artifacts
+        run: |
+          set -eu
+          tag=$(jq -r .decoderRelease runtime-assets.json)
+          if ! gh release view "$tag" >/dev/null 2>&1; then
+            gh release create "$tag" --target 3838b0141bfe83dd6e31dcc2a56a5458bcdb1e21 \
+              --title 'Brotli token decoder for Entware mipsel' \
+              --notes 'Existing static decoder, built and round-trip tested in run 40177196930 and already used on Hopper. No VPN transport changes. Source and license included.'
+          fi
+          gh release upload "$tag" decoder/brotli decoder/LICENSE-BROTLI decoder/BROTLI-SOURCE.txt decoder/SHA256SUMS --clobber

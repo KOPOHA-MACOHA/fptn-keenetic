@@ -92,6 +92,7 @@ worker() {
     start) "$CTL" start >> "$LOCK/output" 2>&1; SUCCESS_MESSAGE='Служба запущена.' ;;
     stop) "$CTL" stop >> "$LOCK/output" 2>&1; SUCCESS_MESSAGE='Служба остановлена.' ;;
     restart) "$CTL" stop >> "$LOCK/output" 2>&1; "$CTL" start >> "$LOCK/output" 2>&1; SUCCESS_MESSAGE='Клиент переподключён.' ;;
+    setup-interface) "$CTL" setup-interface-save >> "$LOCK/output" 2>&1; SUCCESS_MESSAGE='Интерфейс FPTN создан, конфигурация Keenetic сохранена. Маршруты задаются в Keenetic.' ;;
     enable|disable) "$CTL" "$ACTION" >> "$LOCK/output" 2>&1; SUCCESS_MESSAGE='Настройка автозапуска сохранена.' ;;
     check) "$CTL" check-servers >> "$LOCK/output" 2>&1; SUCCESS_MESSAGE='Проверка входа на серверы завершена.' ;;
     check-update) sh "$LIB/web-update.sh" check >> "$LOCK/output" 2>&1; SUCCESS_MESSAGE='Проверка обновлений завершена.' ;;
@@ -99,7 +100,7 @@ worker() {
     save)
       # All validation precedes stopping or writing the current configuration.
       TOKEN=$(jq -r '.token // ""' "$LOCK/request.json")
-      [ -n "$TOKEN" ] || TOKEN=$(cat "$CONF/token")
+      [ -n "$TOKEN" ] || TOKEN=$(cat "$CONF/token" 2>/dev/null || true)
       TOKEN_JSON=$(printf '%s' "$TOKEN" | decode_token) || exit 1
       SERVER=$(jq -r '.server' "$LOCK/request.json")
       printf '%s' "$TOKEN_JSON" | jq -e --arg name "$SERVER" 'any(.servers[]; .name==$name)' >/dev/null || exit 1
@@ -168,7 +169,7 @@ ORIGIN=$(cat "$CONF/web-origin")
 [ -z "${HTTP_ORIGIN:-}" ] || [ "$HTTP_ORIGIN" = "$ORIGIN" ] || error '403 Forbidden' 'Запрос с другого сайта запрещён.'
 if [ "${QUERY_STRING:-}" = auth-info ] && [ "${REQUEST_METHOD:-}" = GET ]; then
   INFO=$(sh "$LIB/web-auth.sh" info) || error '503 Service Unavailable' 'Не удалось проверить настройки входа.'
-  respond '200 OK' "$(printf '%s' "$INFO" | jq '. + {uiVersion:"0.12.1"}')"
+  respond '200 OK' "$(printf '%s' "$INFO" | jq '. + {uiVersion:"0.13.0"}')"
 fi
 case "${QUERY_STRING:-}:${REQUEST_METHOD:-}" in login:POST|setup:POST)
   [ "${CONTENT_TYPE:-}" = application/json ] || error '415 Unsupported Media Type' 'Ожидается JSON.'
@@ -227,6 +228,9 @@ case "${REQUEST_METHOD:-}" in
             RSS=$(awk '$1=="VmRSS:" {print $2}' "/proc/$CLIENT_PID/status" 2>/dev/null || true) ;;
           esac
         fi
+        CONFIGURED=false; [ ! -s "$CONF/token" ] || [ ! -s "$CONF/server" ] || CONFIGURED=true
+        INTERFACE_READY=false
+        if [ "$(cat "$CONF/native-interface" 2>/dev/null)" = OpkgTun0 ] && [ -f "$CONF/native-setup-complete" ] && ip link show dev opkgtun0 >/dev/null 2>&1; then INTERFACE_READY=true; fi
         AUTOSTART=false; [ ! -f "$CONF/autostart" ] || AUTOSTART=true
         OP_STATE=$(sh "$LIB/web-auth.sh" op-state) || error '500 Internal Server Error' 'Не удалось проверить операцию.'
         BUSY=$(printf '%s' "$OP_STATE" | jq -r .busy)
@@ -234,8 +238,8 @@ case "${REQUEST_METHOD:-}" in
         IDENTITY=$(sh "$LIB/client-identity.sh" inspect 2>/dev/null) || IDENTITY='{}'
         RESULT='null'; [ ! -r "$RUN/result.json" ] || RESULT=$(cat "$RUN/result.json")
         respond '200 OK' "$(jq -n --arg status "$TEXT" --arg rss "${RSS:-0}" --arg operation "$OPERATION" \
-          --argjson identity "$IDENTITY" --argjson operationState "$OP_STATE" --argjson autostart "$AUTOSTART" --argjson service "$SERVICE" --argjson report "$REPORT" --argjson meta "$META" --argjson busy "$BUSY" --argjson result "$RESULT" \
-          '{operationState:$operationState,autostart:$autostart,status:$status,service:$service,report:$report,uiVersion:"0.12.1",clientVersion:($identity.clientVersion // $meta.clientVersion // "неизвестна"),clientIdentityVerified:($identity.clientIdentityVerified//false),clientBuildRevision:$identity.clientBuildRevision,clientSha256:$identity.clientSha256,upstreamVersion:$identity.upstreamVersion,upstreamRevision:$identity.upstreamRevision,revision:($meta.revision // ""),operation:$operation,rssKiB:($rss|tonumber),busy:$busy,result:$result}')"
+          --argjson configured "$CONFIGURED" --argjson interfaceReady "$INTERFACE_READY" --argjson identity "$IDENTITY" --argjson operationState "$OP_STATE" --argjson autostart "$AUTOSTART" --argjson service "$SERVICE" --argjson report "$REPORT" --argjson meta "$META" --argjson busy "$BUSY" --argjson result "$RESULT" \
+          '{configured:$configured,interfaceReady:$interfaceReady,operationState:$operationState,autostart:$autostart,status:$status,service:$service,report:$report,uiVersion:"0.13.0",clientVersion:($identity.clientVersion // $meta.clientVersion // "неизвестна"),clientIdentityVerified:($identity.clientIdentityVerified//false),clientBuildRevision:$identity.clientBuildRevision,clientSha256:$identity.clientSha256,upstreamVersion:$identity.upstreamVersion,upstreamRevision:$identity.upstreamRevision,revision:($meta.revision // ""),operation:$operation,rssKiB:($rss|tonumber),busy:$busy,result:$result}')"
         ;;
       updates)
         UPDATE=$(sh "$LIB/web-update.sh" status) || error '500 Internal Server Error' 'Не удалось прочитать обновление.'
@@ -246,10 +250,16 @@ case "${REQUEST_METHOD:-}" in
         FALLBACK=$("$CTL" get-fallback) || error '500 Internal Server Error' 'Некорректные настройки резервных методов.'
         INTERFACE_MTU=$("$CTL" get-interface-mtu 2>/dev/null) || INTERFACE_MTU=null
         POLICY=$("$CTL" get-server-policy) || error '500 Internal Server Error' 'Некорректные списки серверов.'
-        SERVERS=$(decode_token < "$CONF/token") || error '500 Internal Server Error' 'Не удалось прочитать серверы из сохранённого токена.'
-        SERVER=$(cat "$CONF/server")
-        respond '200 OK' "$(printf '%s' "$SERVERS" | jq --arg server "$SERVER" --argjson interfaceMtu "$INTERFACE_MTU" --argjson capabilities "$CAPABILITIES" --argjson fallback "$FALLBACK" --argjson connection "$CONNECTION" --argjson policy "$POLICY" \
-          '{interfaceMtu:$interfaceMtu,capabilities:$capabilities,fallback:$fallback,server:$server,servers:[.servers[].name],connection:$connection,policy:$policy}')"
+        SERVERS='{"servers":[]}'
+        SERVER=
+        CONFIGURED=false
+        if [ -s "$CONF/token" ]; then
+          SERVERS=$(decode_token < "$CONF/token") || error '500 Internal Server Error' 'Не удалось прочитать серверы из сохранённого токена.'
+          SERVER=$(cat "$CONF/server" 2>/dev/null || true)
+          [ -z "$SERVER" ] || CONFIGURED=true
+        fi
+        respond '200 OK' "$(printf '%s' "$SERVERS" | jq --argjson configured "$CONFIGURED" --arg server "$SERVER" --argjson interfaceMtu "$INTERFACE_MTU" --argjson capabilities "$CAPABILITIES" --argjson fallback "$FALLBACK" --argjson connection "$CONNECTION" --argjson policy "$POLICY" \
+          '{configured:$configured,interfaceMtu:$interfaceMtu,capabilities:$capabilities,fallback:$fallback,server:$server,servers:[.servers[].name],connection:$connection,policy:$policy}')"
         ;;
       logs)
         { "$CTL" logs 2>&1 || true; [ ! -f "$RUN/action.log" ] || tail -c 8192 "$RUN/action.log"; } |
@@ -280,7 +290,7 @@ case "${REQUEST_METHOD:-}" in
       unset TOKEN
       respond '200 OK' "$(printf '%s' "$SERVERS" | jq '{servers:[.servers[].name]}')"
     fi
-    case "$ACTION" in start|stop|restart|check|enable|disable|recover|check-update|update) ;; save)
+    case "$ACTION" in start|stop|restart|check|enable|disable|recover|check-update|update|setup-interface) ;; save)
       printf '%s' "$BODY" | jq -e '(.server|type=="string" and length>0 and length<=128) and
         (.token // ""|type=="string" and length<=262144)' >/dev/null 2>&1 || error '400 Bad Request' 'Некорректный сервер или токен.'
       printf '%s' "$BODY" | jq '.connection' | "$CTL" validate-settings >/dev/null 2>&1 || error '400 Bad Request' 'Проверьте стратегию, метод обхода и домен SNI.'
