@@ -16,6 +16,11 @@ value() { awk -F= -v key="$1" '$1==key {gsub(/["\047\r]/,"",$2); print $2}' /opt
 command -v ndmc >/dev/null 2>&1 || fail 'Требуется KeeneticOS.'
 [ -c /dev/net/tun ] || fail 'Включите компонент TUN Keenetic.'
 command -v opkg >/dev/null 2>&1 || fail 'Не найден opkg.'
+NEW_HTTP=no
+if [ ! -f /opt/etc/lighttpd/lighttpd.conf ] && ! command -v lighttpd >/dev/null 2>&1; then
+  pidof lighttpd >/dev/null 2>&1 && fail 'Уже работает lighttpd с другой конфигурацией.'
+  NEW_HTTP=yes
+fi
 PACKAGES=
 for pair in curl:curl jq:jq lighttpd:lighttpd; do
   command -v "${pair%:*}" >/dev/null 2>&1 || PACKAGES="$PACKAGES ${pair#*:}"
@@ -30,6 +35,20 @@ if [ -n "$PACKAGES" ]; then
   opkg update
   # Deliberate word splitting of a fixed list; no user-controlled package names.
   opkg install $PACKAGES
+fi
+if [ "$NEW_HTTP" = yes ]; then
+  # A newly installed Entware lighttpd otherwise defaults to :80, occupied by Keenetic.
+  # Keep its unused primary listener private; FPTN gets its own LAN :1111 socket.
+  BASE_FRAGMENT=/opt/etc/lighttpd/conf.d/05-fptn-bootstrap.conf
+  [ ! -e "$BASE_FRAGMENT" ] || fail 'Фрагмент начальной настройки lighttpd уже существует.'
+  if netstat -lnt 2>/dev/null | awk '$4 ~ /:1110$/ {found=1} END {exit !found}'; then fail 'Порт 1110 занят: lighttpd не перенастраивался.'; fi
+  [ -f /opt/etc/lighttpd/lighttpd.conf ] || fail 'Пакет lighttpd не создал основной конфиг.'
+  mkdir -p /opt/etc/lighttpd/conf.d
+  printf '%s\n' '# Initial Entware lighttpd listener, created by FPTN bootstrap.' 'server.bind := "127.0.0.1"' 'server.port := 1110' > "$BASE_FRAGMENT"
+  if ! lighttpd -tt -f /opt/etc/lighttpd/lighttpd.conf; then
+    rm -f "$BASE_FRAGMENT"
+    fail 'Не удалось подготовить новый lighttpd. Его основной конфиг не менялся.'
+  fi
 fi
 for cmd in curl jq sha256sum mktemp; do command -v "$cmd" >/dev/null 2>&1 || fail "Не найдена команда $cmd."; done
 BUNDLE=$(dirname "$(readlink -f "$0")")

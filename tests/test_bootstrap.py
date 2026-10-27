@@ -6,8 +6,12 @@ MOCK='''#!/usr/bin/env python3
 import json,os,pathlib,sys
 root=pathlib.Path(os.environ['BOOT_ROOT']);name=pathlib.Path(sys.argv[0]).name;args=sys.argv[1:]
 if name=='id':print(0)
+elif name=='pidof':sys.exit(1)
 elif name=='opkg':
  with (root/'opkg.log').open('a') as f:f.write(' '.join(args)+'\\n')
+ if args and args[0]=='install' and 'lighttpd' in args:
+  p=root/'etc/lighttpd/lighttpd.conf';p.parent.mkdir(parents=True,exist_ok=True);p.write_text('default package config')
+  p=root/'bin/lighttpd';p.write_text('#!/bin/sh\\nexit 0\\n');p.chmod(0o700)
 elif name=='curl':
  out=pathlib.Path(args[args.index('-o')+1]);url=next(a for a in args if a.startswith('http'))
  out.write_bytes((root/('channel.json' if url.endswith('web/update.json') else 'remote-installer')).read_bytes())
@@ -16,13 +20,14 @@ else:pass
 class BootstrapTest(unittest.TestCase):
     def setUp(self):
         self.tmp=tempfile.TemporaryDirectory();self.addCleanup(self.tmp.cleanup);self.root=Path(self.tmp.name)/'opt'
-        for directory in ['bin','sbin','etc','lib/lighttpd']:(self.root/directory).mkdir(parents=True,exist_ok=True)
+        for directory in ['bin','sbin','etc/lighttpd','lib/lighttpd']:(self.root/directory).mkdir(parents=True,exist_ok=True)
         self.env={**os.environ,'BOOT_ROOT':str(self.root)}
-        for name in ['id','opkg','curl','ip','lighttpd','ndmc']:
+        for name in ['id','opkg','curl','ip','lighttpd','ndmc','pidof','netstat']:
             p=self.root/'bin'/name;p.write_text(MOCK);p.chmod(0o700)
         (self.root/'sbin/ip').write_text('#!/bin/sh\n');(self.root/'sbin/ip').chmod(0o700)
         for module in ['cgi','setenv']:(self.root/'lib/lighttpd'/('mod_'+module+'.so')).touch()
         (self.root/'etc/entware_release').write_text('arch=mipsel\ncpu_type=mips32r2\nfloat=soft\n')
+        (self.root/'etc/lighttpd/lighttpd.conf').write_text('existing config')
         (self.root/'tun').touch()
         payload='#!/bin/sh\nprintf "%s\\n" "$*" > "$BOOT_ROOT/invoked"\n'
         (self.root/'remote-installer').write_text(payload)
@@ -49,3 +54,11 @@ class BootstrapTest(unittest.TestCase):
         self.assertNotEqual(self.execute().returncode,0);self.assertFalse((self.root/'invoked').exists())
         self.channel['revision']='main; echo anything';self.save_channel()
         self.assertNotEqual(self.execute().returncode,0);self.assertFalse((self.root/'invoked').exists())
+
+    def test_new_webserver_primary_listener_is_loopback_not_firmware_port(self):
+        (self.root/'etc/lighttpd/lighttpd.conf').unlink();(self.root/'bin/lighttpd').unlink()
+        result=self.execute();self.assertEqual(result.returncode,0,result.stdout+result.stderr)
+        base=self.root/'etc/lighttpd/conf.d/05-fptn-bootstrap.conf'
+        self.assertIn('server.bind := "127.0.0.1"',base.read_text());self.assertIn('server.port := 1110',base.read_text())
+        self.assertEqual((self.root/'etc/lighttpd/lighttpd.conf').read_text(),'default package config')
+        self.assertIn('lighttpd',(self.root/'opkg.log').read_text())
