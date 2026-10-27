@@ -34,7 +34,7 @@ class LighttpdEntryTest(unittest.TestCase):
             origin=f'http://127.0.0.1:{port}';(conf/'web-origin').write_text(origin+'\n')
             source=(ROOT/'scripts/install-web-ui.sh').read_text()
             fragment=source.split('cat > "$FRAGMENT" <<EOF\n',1)[1].split('\nEOF',1)[0]
-            for key,value in {'$SETENV_MODULE':'','$LAN':'127.0.0.1','$PORT':str(port),'$WEB':str(web),'\\$SERVER':'$SERVER'}.items():fragment=fragment.replace(key,value)
+            for key,value in {'$SETENV_MODULE':'','$CGI_MODULE':'','$LAN':'127.0.0.1','$PORT':str(port),'$WEB':str(web),'\\$SERVER':'$SERVER'}.items():fragment=fragment.replace(key,value)
             configuration=root/'lighttpd.conf'
             configuration.write_text(f'''server.modules = ( "mod_indexfile", "mod_setenv", "mod_cgi", "mod_staticfile" )
 mimetype.assign = ( ".html" => "text/html", ".css" => "text/css", ".js" => "text/javascript" )

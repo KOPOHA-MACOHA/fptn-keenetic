@@ -41,7 +41,7 @@ jobs:
           set -eu
           tag=$(jq -r .decoderRelease runtime-assets.json)
           if ! gh release view "$tag" >/dev/null 2>&1; then
-            gh release create "$tag" --target 3838b0141bfe83dd6e31dcc2a56a5458bcdb1e21 \
+            gh release create "$tag" --target "$GITHUB_SHA" \
               --title 'Brotli token decoder for Entware mipsel' \
               --notes 'Existing static decoder, built and round-trip tested in run 40177196930 and already used on Hopper. No VPN transport changes. Source and license included.'
           fi
