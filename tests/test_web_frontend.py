@@ -30,7 +30,7 @@ const document={hidden:false,documentElement:new Element('root'),getElementById:
  throw new Error('Unexpected selector '+selector);
 }};
 const settings={capabilities:{schema:1,clientVersion:'0.4.0',methods:['obfuscation','sni-spoofing-chrome-149','sni-spoofing-chrome-150','sni-spoofing-firefox-151','sni-spoofing-yandex-26-4','sni-spoofing-safari-26-5','sni-spoofing-edge-151'],strategies:['rolling-tunnel','dual-rolling-tunnel','triple-rolling-tunnel','quad-rolling-tunnel']},server:'CZ',servers:['CZ','DE'],connection:{bypass:'obfuscation',strategy:'dual-rolling-tunnel',sni:'google.com'},policy:{mode:'manual',favorites:[],excluded:[]}};
-const stopped={status:'FPTN остановлен',uiVersion:'0.14.0',clientVersion:'0.4.0',upstreamVersion:'0.4.6',clientBuildRevision:'a'.repeat(40),revision:'1234567890',busy:false,report:null,service:{state:'stopped',message:'Служба остановлена',selectedServer:'',connected:false,supervisorAlive:false,canStart:true,canStop:false,canRestart:false}};
+const stopped={status:'FPTN остановлен',uiVersion:'0.15.0',clientVersion:'0.4.0',upstreamVersion:'0.4.6',clientBuildRevision:'a'.repeat(40),revision:'1234567890',busy:false,report:null,service:{state:'stopped',message:'Служба остановлена',selectedServer:'',connected:false,supervisorAlive:false,canStart:true,canStop:false,canRestart:false}};
 const win={location:{href:''}};win.top=win;win.self=win;
 let authState={configured:false,mode:null,rootAvailable:true};const requests=[];
 const context={console,document,window:win,Option:class{constructor(text,value){this.text=text;this.value=value;}},sessionStorage:{getItem(){return '';},setItem(){},removeItem(){}},setInterval(){},setTimeout(){return 1;},clearTimeout(){},fetch:async(url,options={})=>{
@@ -65,6 +65,7 @@ const run=code=>vm.runInContext(code,context);
  assert(elements.browser.options.some(option=>option.value==='edge'));elements.browser.value='chrome';elements.browser.dispatch('change');assert(elements.profile.options.some(option=>option.value==='sni-spoofing-chrome-150'));
  assert(elements.strategy.options.some(option=>option.value==='quad-rolling-tunnel'));
  elements['fallback-profile-1'].value='sni-spoofing-edge-151';elements['fallback-profile-2'].value='sni-spoofing-chrome-150';elements['fallback-enabled'].checked=true;assert(run('collectSettings().fallback.profiles').join(',')==='sni-spoofing-edge-151,sni-spoofing-chrome-150');elements['fallback-enabled'].checked=false;
+ settings.connection.ipv6=true;await run('loadSettings()');assert(elements.ipv6.checked&&run('collectSettings().connection.ipv6'));settings.connection.ipv6=false;await run('loadSettings()');
  assert(elements['mtu-mode'].value==='auto'&&elements.mtu.value==='1420'&&elements['out-interface'].value==='');
  assert(elements['server-list'].children.length===2,'roles must be rendered');
  assert(elements['server-list'].children[0].children[1].textContent==='☆');
@@ -135,7 +136,7 @@ class FrontendTest(unittest.TestCase):
         sh=shutil.which('sh')
         result=subprocess.run([sh,str(ROOT/'web/index.cgi')],env={**os.environ,'PATH':'','SCRIPT_FILENAME':'/wrong/inherited/path'},capture_output=True,text=True)
         self.assertEqual(result.returncode,0,result.stderr)
-        self.assertIn('data-ui-version="0.14.0"',result.stdout)
+        self.assertIn('data-ui-version="0.15.0"',result.stdout)
         self.assertIn('Cache-Control: no-store',result.stdout)
 
     def test_real_ui_status_buttons_roles_drafts_and_versions(self):

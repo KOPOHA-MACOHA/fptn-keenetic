@@ -24,6 +24,7 @@ CONF=/opt/etc/fptn
 WEB=/opt/share/fptn-web
 FRAGMENT=/opt/etc/lighttpd/conf.d/95-fptn.conf
 MAIN=/opt/etc/lighttpd/lighttpd.conf
+HOOK=/opt/etc/ndm/netfilter.d/190-fptn-ipv6.sh
 for cmd in curl jq sha256sum lighttpd netstat ip mktemp timeout; do
   command -v "$cmd" >/dev/null 2>&1 || fail "Не найдена команда $cmd."
 done
@@ -55,6 +56,7 @@ fi
 if [ -e "$FRAGMENT" ]; then
   grep -Fq '# Managed by fptn-web-ui' "$FRAGMENT" || fail '95-fptn.conf занят чужой конфигурацией.'
 fi
+if [ -e "$HOOK" ]; then grep -Fq '# Managed by fptn IPv6' "$HOOK" || fail 'IPv6 hook занят другим приложением.'; fi
 [ ! -d "$WEB" ] || [ -f "$WEB/.fptn-web-owned" ] || fail 'Каталог панели уже занят чужими файлами.'
 if netstat -lnt 2>/dev/null | awk -v port="$PORT" '$4 ~ (":" port "$") {found=1} END {exit !found}'; then
   [ -f "$FRAGMENT" ] && [ -f "$WEB/.fptn-web-owned" ] || fail 'Порт 1111 занят. Изменений нет.'
@@ -79,6 +81,8 @@ UPDATE_EXISTED=no
 CAPS_EXISTED=no
 IDENTITY_HELPER_EXISTED=no
 UPLINK_EXISTED=no
+IPV6_HELPER_EXISTED=no
+HOOK_EXISTED=no
 IDENTITY_EXISTED=no
 SOURCE_LOCK_EXISTED=no
 SUMS_EXISTED=no
@@ -142,6 +146,10 @@ finish() {
     else rm -f /opt/libexec/fptn/web-update.sh; fi
     if [ "$CAPS_EXISTED" = yes ]; then cp -p "$BACKUP/client-capabilities.sh" /opt/libexec/fptn/client-capabilities.sh
     else rm -f /opt/libexec/fptn/client-capabilities.sh; fi
+    if [ "$HOOK_EXISTED" = yes ]; then cp -p "$BACKUP/190-fptn-ipv6.sh" "$HOOK"
+    else rm -f "$HOOK"; fi
+    if [ "$IPV6_HELPER_EXISTED" = yes ]; then cp -p "$BACKUP/ipv6.sh" /opt/libexec/fptn/ipv6.sh
+    else rm -f /opt/libexec/fptn/ipv6.sh; fi
     if [ "$UPLINK_EXISTED" = yes ]; then cp -p "$BACKUP/uplink.sh" /opt/libexec/fptn/uplink.sh
     else rm -f /opt/libexec/fptn/uplink.sh; fi
     if [ "$FRESH" = yes ]; then rm -rf /opt/libexec/fptn
@@ -177,7 +185,7 @@ fetch() {
 echo 'Скачиваю панель и управляющий скрипт. Сборка зависимостей не требуется.'
 mkdir -p "$STAGE/web" "$STAGE/scripts" "$STAGE/client"
 fetch "$BASE/web/SHA256SUMS" "$STAGE/SHA256SUMS"
-for path in web/index.html web/index.cgi web/style.css web/app.js web/api.cgi scripts/fptn-native-service.sh scripts/fptn-web-auth.sh scripts/fptn-web-auth.php scripts/fptn-web-operations.php scripts/fptn-transport-plan.php scripts/fptn-web-update.sh scripts/fptn-client-capabilities.sh scripts/fptn-client-identity.sh scripts/fptn-platform.sh scripts/fptn-uplink.sh runtime-assets.json client-release.json; do
+for path in web/index.html web/index.cgi web/style.css web/app.js web/api.cgi scripts/fptn-native-service.sh scripts/fptn-web-auth.sh scripts/fptn-web-auth.php scripts/fptn-web-operations.php scripts/fptn-transport-plan.php scripts/fptn-web-update.sh scripts/fptn-client-capabilities.sh scripts/fptn-client-identity.sh scripts/fptn-platform.sh scripts/fptn-uplink.sh scripts/fptn-ipv6.sh runtime-assets.json client-release.json; do
   fetch "$BASE/$path" "$STAGE/$path"
 done
 (cd "$STAGE"; sha256sum -c SHA256SUMS) || fail 'Контрольные суммы не совпали.'
@@ -195,7 +203,7 @@ sh -n "$STAGE/web/api.cgi"
 sh -n "$STAGE/web/index.cgi"
 # Exercise the real entry file before any installed file or process is changed.
 sh "$STAGE/web/index.cgi" > "$STAGE/entry-check" || fail 'Стартовый CGI не смог прочитать страницу. Установленные файлы не менялись.'
-grep -Fq 'data-ui-version="0.14.0"' "$STAGE/entry-check" || fail 'Стартовый CGI не выдал HTML панели. Установленные файлы не менялись.' 
+grep -Fq 'data-ui-version="0.15.0"' "$STAGE/entry-check" || fail 'Стартовый CGI не выдал HTML панели. Установленные файлы не менялись.' 
 sh -n "$STAGE/scripts/fptn-native-service.sh"
 TARGET=$(sh "$STAGE/scripts/fptn-client-identity.sh" validate "$STAGE/client-release.json") || fail 'Некорректное описание сборки клиента.'
 TARGET_REV=$(printf '%s' "$TARGET" | jq -r .buildRevision)
@@ -279,6 +287,8 @@ for file in LICENSE-FPTN LICENSE-BROTLI BROTLI-SOURCE.txt .runtime-managed; do
   [ ! -f /opt/libexec/fptn/"$file" ] || cp -p /opt/libexec/fptn/"$file" "$BACKUP/$file"
 done
 if [ -f /opt/libexec/fptn/uplink.sh ]; then UPLINK_EXISTED=yes; cp -p /opt/libexec/fptn/uplink.sh "$BACKUP/uplink.sh"; fi
+if [ -f /opt/libexec/fptn/ipv6.sh ]; then IPV6_HELPER_EXISTED=yes; cp -p /opt/libexec/fptn/ipv6.sh "$BACKUP/ipv6.sh"; fi
+if [ -f "$HOOK" ]; then HOOK_EXISTED=yes; cp -p "$HOOK" "$BACKUP/190-fptn-ipv6.sh"; fi
 echo "Резервная копия: $BACKUP"
 if [ -n "${FPTN_OPERATION_ID:-}" ]; then
   CURRENT=$(sh "$STAGE/scripts/fptn-web-auth.sh" op-state)
@@ -324,6 +334,20 @@ mv /opt/libexec/fptn/client-capabilities.sh.new /opt/libexec/fptn/client-capabil
 cp "$STAGE/scripts/fptn-client-identity.sh" /opt/libexec/fptn/client-identity.sh.new
 chmod 700 /opt/libexec/fptn/client-identity.sh.new
 mv /opt/libexec/fptn/client-identity.sh.new /opt/libexec/fptn/client-identity.sh
+cp "$STAGE/scripts/fptn-ipv6.sh" /opt/libexec/fptn/ipv6.sh.new
+chmod 700 /opt/libexec/fptn/ipv6.sh.new
+mv /opt/libexec/fptn/ipv6.sh.new /opt/libexec/fptn/ipv6.sh
+mkdir -p /opt/etc/ndm/netfilter.d
+cat > "$HOOK" <<'HOOKEOF'
+#!/bin/sh
+# Managed by fptn IPv6. Restore only the optional interface-scoped NAT66 rule.
+PATH=/opt/sbin:/opt/bin:/usr/sbin:/usr/bin:/sbin:/bin
+export PATH
+if [ -x /opt/bin/fptnctl ] && ! /opt/bin/fptnctl sync-ipv6 >/dev/null 2>&1; then
+  command -v logger >/dev/null 2>&1 && logger -t fptn 'Не удалось восстановить IPv6 NAT FPTN' || true
+fi
+HOOKEOF
+chmod 700 "$HOOK"
 cp "$STAGE/scripts/fptn-uplink.sh" /opt/libexec/fptn/uplink.sh.new
 chmod 700 /opt/libexec/fptn/uplink.sh.new
 mv /opt/libexec/fptn/uplink.sh.new /opt/libexec/fptn/uplink.sh
@@ -334,7 +358,7 @@ if [ "$FRESH" = yes ]; then
 fi
 printf '%s\n' "$ORIGIN" > "$CONF/web-origin"
 CLIENT_VERSION=$(jq -r '.clientVersion // "неизвестна"' "$CONF/web-meta.json" 2>/dev/null || echo неизвестна)
-jq -n --arg version "$CLIENT_VERSION" --arg revision "$REV" '{uiVersion:"0.14.0",clientVersion:$version,revision:$revision}' > "$CONF/web-meta.json.new"
+jq -n --arg version "$CLIENT_VERSION" --arg revision "$REV" '{uiVersion:"0.15.0",clientVersion:$version,revision:$revision}' > "$CONF/web-meta.json.new"
 mv "$CONF/web-meta.json.new" "$CONF/web-meta.json"
 cat > "$FRAGMENT" <<EOF
 # Managed by fptn-web-ui. Credentials live outside the document root.
@@ -361,7 +385,7 @@ check_panel() {
   PANEL_ERROR='Страница панели не отвечает.'
   curl --noproxy '*' -fsS -D "$STAGE/headers" --connect-timeout 1 --max-time 2 "$ORIGIN/" -o "$STAGE/page" 2>/dev/null || return 1
   PANEL_ERROR='На порту открылась другая версия панели.'
-  grep -Fq 'data-ui-version="0.14.0"' "$STAGE/page" || return 1
+  grep -Fq 'data-ui-version="0.15.0"' "$STAGE/page" || return 1
   PANEL_CACHE_WARNING=no
   grep -iq '^Cache-Control:.*no-store' "$STAGE/headers" || PANEL_CACHE_WARNING=yes
   PANEL_ERROR='Не прошла проверка ограничения доступа к API.'
@@ -369,7 +393,7 @@ check_panel() {
   [ "$CODE" = 401 ] || return 1
   PANEL_ERROR='API настройки входа не готово или отвечает другой версией.'
   curl --noproxy '*' -fsS --connect-timeout 1 --max-time 2 "$ORIGIN/api.cgi?auth-info" -o "$STAGE/auth-info.json" 2>/dev/null || return 1
-  jq -e '.uiVersion=="0.14.0" and (.configured|type=="boolean") and (.rootAvailable|type=="boolean")' "$STAGE/auth-info.json" >/dev/null 2>&1 || return 1
+  jq -e '.uiVersion=="0.15.0" and (.configured|type=="boolean") and (.rootAvailable|type=="boolean")' "$STAGE/auth-info.json" >/dev/null 2>&1 || return 1
   return 0
 }
 # rc.func may report failed before the daemon becomes visible. Decide from the
@@ -389,7 +413,7 @@ until check_panel; do
   fi
   sleep 1
 done
-echo 'lighttpd отвечает: страница и API панели 0.14.0 проверены.'
+echo 'lighttpd отвечает: страница и API панели 0.15.0 проверены.'
 if [ "$PANEL_CACHE_WARNING" = yes ]; then
   echo "Откройте свежую страницу по ссылке $ORIGIN/?v=$REV (заголовок кэша применится после перезагрузки lighttpd)."
 fi
@@ -424,12 +448,12 @@ fi
 printf '%s\n' "$TARGET" > "$CONF/client-release.json.new"
 chmod 600 "$CONF/client-release.json.new"
 mv "$CONF/client-release.json.new" "$CONF/client-release.json"
-printf '%s' "$TARGET" | jq --arg revision "$REV" '. + {uiVersion:"0.14.0",revision:$revision,clientRevision:.buildRevision,clientSha256:.sha256}' > "$CONF/web-meta.json.new"
+printf '%s' "$TARGET" | jq --arg revision "$REV" '. + {uiVersion:"0.15.0",revision:$revision,clientRevision:.buildRevision,clientSha256:.sha256}' > "$CONF/web-meta.json.new"
 mv "$CONF/web-meta.json.new" "$CONF/web-meta.json"
 : > /opt/libexec/fptn/.runtime-managed
 DONE=yes
 echo
-echo "Панель 0.14.0: $ORIGIN/?v=$REV"
+echo "Панель 0.15.0: $ORIGIN/?v=$REV"
 rm -f "$CONF/web-key"
 echo 'Откройте панель: создайте логин и пароль или войдите через root Entware.'
 echo 'Пароль в терминале не нужен. Существующие настройки входа сохраняются.'

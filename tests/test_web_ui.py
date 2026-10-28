@@ -64,6 +64,7 @@ root=pathlib.Path(os.environ['FPTN_PREFIX']); conf=root/'etc/fptn'; run=root/'va
 action=sys.argv[1]
 if action in ('get-capabilities','get-settings','validate-settings','get-server-policy','validate-server-policy','get-fallback','validate-fallback'):
     sys.exit(subprocess.call(['sh',os.environ['FPTN_REAL_SERVICE'],action]))
+if action=='check-ipv6':sys.exit(1 if (root/'nat-unavailable').exists() else 0)
 if action=='get-interface-mtu':print((root/'interface-mtu').read_text() if (root/'interface-mtu').exists() else '1420');sys.exit(0)
 if action=='set-interface-mtu':(root/'interface-mtu').write_text(sys.argv[2]);sys.exit(0)
 if action=='status-json':
@@ -113,7 +114,7 @@ else: sys.exit(2)
         return json.loads((self.run/'result.json').read_text())
 
     def settings(self, **overrides):
-        return {'bypass': 'obfuscation', 'strategy': 'dual-rolling-tunnel', 'sni': 'google.com', 'mtu':0, 'outInterface':'', **overrides}
+        return {'bypass': 'obfuscation', 'strategy': 'dual-rolling-tunnel', 'sni': 'google.com', 'mtu':0, 'outInterface':'', 'ipv6':False, **overrides}
 
     def save(self, **overrides):
         return self.request(body={'action': 'save', 'server': self.names[0],
@@ -238,7 +239,7 @@ else: sys.exit(2)
     def test_status_exposes_explicit_state_and_versions(self):
         (self.conf/'web-meta.json').write_text(json.dumps({'clientVersion':'0.4.0','revision':'abc'}))
         status,data=self.request()
-        self.assertEqual(status,200);self.assertEqual(data['uiVersion'],'0.14.0')
+        self.assertEqual(status,200);self.assertEqual(data['uiVersion'],'0.15.0')
         self.assertEqual(data['clientVersion'],'0.4.0')
         self.assertTrue(data['service']['canStart']);self.assertFalse(data['service']['canStop'])
         self.client_run.mkdir()
@@ -259,8 +260,8 @@ else: sys.exit(2)
     def test_entry_page_is_not_cached_and_assets_are_versioned(self):
         page=subprocess.run(['sh',str(ROOT/'web/index.cgi')],capture_output=True,check=True).stdout.decode()
         self.assertIn('Cache-Control: no-store',page)
-        self.assertIn('data-ui-version="0.14.0"',page)
-        self.assertIn('app.js?v=0.14.0',page)
+        self.assertIn('data-ui-version="0.15.0"',page)
+        self.assertIn('app.js?v=0.15.0',page)
 
     def test_failed_save_restores_previous_actual_firmware_mtu(self):
         old=self.settings();(self.conf/'connection.json').write_text(json.dumps(old))
@@ -302,6 +303,15 @@ else: sys.exit(2)
         ctl.write_text(text)
         status,data=self.request(body={'action':'setup-interface'});self.assertEqual(status,202,data);result=self.wait_worker();self.assertTrue(result['ok'],result)
         self.assertEqual((self.conf/'native-interface').read_text().strip(),'OpkgTun0');self.assertIn('setup-interface-save',(self.root/'trace').read_text())
+
+    def test_ipv6_preflight_is_before_stop_and_unavailable_nat_does_not_block_disabling(self):
+        (self.root/'nat-unavailable').touch();self.client_run.mkdir()
+        status,data=self.save(connection=self.settings(ipv6=True));self.assertEqual(status,400,data)
+        self.assertTrue(self.client_run.exists());self.assertFalse((self.run/'action').exists())
+        (self.conf/'connection.json').write_text(json.dumps(self.settings(ipv6=True)))
+        status,data=self.request('settings');self.assertEqual(status,200,data);self.assertTrue(data['connection']['ipv6'])
+        status,data=self.save(connection=self.settings(ipv6=False));self.assertEqual(status,202,data);self.assertTrue(self.wait_worker()['ok'])
+        self.assertFalse(json.loads((self.conf/'connection.json').read_text())['ipv6'])
 
 
 if __name__ == '__main__':

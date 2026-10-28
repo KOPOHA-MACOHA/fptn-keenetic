@@ -105,6 +105,7 @@ worker() {
       SERVER=$(jq -r '.server' "$LOCK/request.json")
       printf '%s' "$TOKEN_JSON" | jq -e --arg name "$SERVER" 'any(.servers[]; .name==$name)' >/dev/null || exit 1
       jq '.connection' "$LOCK/request.json" | "$CTL" validate-settings > "$LOCK/new-connection.json" || exit 1
+      if jq -e '.ipv6==true' "$LOCK/new-connection.json" >/dev/null; then "$CTL" check-ipv6 >> "$LOCK/output" 2>&1 || exit 1; fi
       if jq -e 'has("policy")' "$LOCK/request.json" >/dev/null; then
         POLICY=$(jq '.policy' "$LOCK/request.json" | "$CTL" validate-server-policy)
       else POLICY=$("$CTL" get-server-policy); fi
@@ -169,7 +170,7 @@ ORIGIN=$(cat "$CONF/web-origin")
 [ -z "${HTTP_ORIGIN:-}" ] || [ "$HTTP_ORIGIN" = "$ORIGIN" ] || error '403 Forbidden' 'Запрос с другого сайта запрещён.'
 if [ "${QUERY_STRING:-}" = auth-info ] && [ "${REQUEST_METHOD:-}" = GET ]; then
   INFO=$(sh "$LIB/web-auth.sh" info) || error '503 Service Unavailable' 'Не удалось проверить настройки входа.'
-  respond '200 OK' "$(printf '%s' "$INFO" | jq '. + {uiVersion:"0.14.0"}')"
+  respond '200 OK' "$(printf '%s' "$INFO" | jq '. + {uiVersion:"0.15.0"}')"
 fi
 case "${QUERY_STRING:-}:${REQUEST_METHOD:-}" in login:POST|setup:POST)
   [ "${CONTENT_TYPE:-}" = application/json ] || error '415 Unsupported Media Type' 'Ожидается JSON.'
@@ -239,7 +240,7 @@ case "${REQUEST_METHOD:-}" in
         RESULT='null'; [ ! -r "$RUN/result.json" ] || RESULT=$(cat "$RUN/result.json")
         respond '200 OK' "$(jq -n --arg status "$TEXT" --arg rss "${RSS:-0}" --arg operation "$OPERATION" \
           --argjson configured "$CONFIGURED" --argjson interfaceReady "$INTERFACE_READY" --argjson identity "$IDENTITY" --argjson operationState "$OP_STATE" --argjson autostart "$AUTOSTART" --argjson service "$SERVICE" --argjson report "$REPORT" --argjson meta "$META" --argjson busy "$BUSY" --argjson result "$RESULT" \
-          '{configured:$configured,interfaceReady:$interfaceReady,operationState:$operationState,autostart:$autostart,status:$status,service:$service,report:$report,uiVersion:"0.14.0",clientVersion:($identity.clientVersion // $meta.clientVersion // "неизвестна"),clientIdentityVerified:($identity.clientIdentityVerified//false),clientBuildRevision:$identity.clientBuildRevision,clientSha256:$identity.clientSha256,upstreamVersion:$identity.upstreamVersion,upstreamRevision:$identity.upstreamRevision,revision:($meta.revision // ""),operation:$operation,rssKiB:($rss|tonumber),busy:$busy,result:$result}')"
+          '{configured:$configured,interfaceReady:$interfaceReady,operationState:$operationState,autostart:$autostart,status:$status,service:$service,report:$report,uiVersion:"0.15.0",clientVersion:($identity.clientVersion // $meta.clientVersion // "неизвестна"),clientIdentityVerified:($identity.clientIdentityVerified//false),clientBuildRevision:$identity.clientBuildRevision,clientSha256:$identity.clientSha256,upstreamVersion:$identity.upstreamVersion,upstreamRevision:$identity.upstreamRevision,revision:($meta.revision // ""),operation:$operation,rssKiB:($rss|tonumber),busy:$busy,result:$result}')"
         ;;
       updates)
         UPDATE=$(sh "$LIB/web-update.sh" status) || error '500 Internal Server Error' 'Не удалось прочитать обновление.'
@@ -293,7 +294,10 @@ case "${REQUEST_METHOD:-}" in
     case "$ACTION" in start|stop|restart|check|enable|disable|recover|check-update|update|setup-interface) ;; save)
       printf '%s' "$BODY" | jq -e '(.server|type=="string" and length>0 and length<=128) and
         (.token // ""|type=="string" and length<=262144)' >/dev/null 2>&1 || error '400 Bad Request' 'Некорректный сервер или токен.'
-      printf '%s' "$BODY" | jq '.connection' | "$CTL" validate-settings >/dev/null 2>&1 || error '400 Bad Request' 'Проверьте стратегию, метод обхода и домен SNI.'
+      printf '%s' "$BODY" | jq '.connection' | "$CTL" validate-settings >/dev/null 2>&1 || error '400 Bad Request' 'Проверьте параметры подключения, MTU и SNI.'
+      if printf '%s' "$BODY" | jq -e '.connection.ipv6==true' >/dev/null; then
+        "$CTL" check-ipv6 >/dev/null 2>&1 || error '400 Bad Request' 'IPv6 NAT недоступен. Нужны ip6tables Entware и поддержка NAT66 в ядре.'
+      fi
       if printf '%s' "$BODY" | jq -e 'has("policy")' >/dev/null; then
         printf '%s' "$BODY" | jq '.policy' | "$CTL" validate-server-policy >/dev/null 2>&1 || error '400 Bad Request' 'Проверьте списки серверов.'
       fi

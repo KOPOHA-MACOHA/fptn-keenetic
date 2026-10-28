@@ -78,10 +78,15 @@ validate_connection() {
   SNI=$(printf '%s' "$SETTINGS" | jq -r '.sni')
   MTU=$(printf '%s' "$SETTINGS" | jq -r '.mtu // 0')
   OUT_IFACE=$(printf '%s' "$SETTINGS" | jq -r '.outInterface // ""')
+  IPV6=$(printf '%s' "$SETTINGS" | jq -r '.ipv6 // false')
   printf '%s' "$SETTINGS" | jq -e '(if has("mtu") then .mtu else 0 end) as $mtu | (if has("outInterface") then .outInterface else "" end) as $iface |
     ($mtu|type=="number" and floor==. and (.==0 or (.>=576 and .<=65535))) and
+    ((if has("ipv6") then .ipv6 else false end)|type=="boolean") and
     ($iface|type=="string" and length<=15 and all(explode[]; (.>=48 and .<=57) or (.>=65 and .<=90) or (.>=97 and .<=122) or .==45 or .==46 or .==95))' >/dev/null || fail 'Проверьте MTU и имя исходящего интерфейса.'
   case "$OUT_IFACE" in -*) fail 'Неверное имя интерфейса.' ;; opkgtun0) fail 'Сам туннель FPTN не может быть исходящим интерфейсом.' ;; esac
+  if [ "$IPV6" = true ]; then
+    [ "$MTU" -eq 0 ] || [ "$MTU" -ge 1280 ] || fail 'Для IPv6 MTU должен быть не меньше 1280.'
+  fi
   CAPABILITIES=$(capabilities_json) || fail 'Не удалось прочитать возможности клиента.'
   printf '%s' "$CAPABILITIES" | jq -e --arg method "$BYPASS" --arg strategy "$STRATEGY"     '(.methods|index($method)!=null) and (.strategies|index($strategy)!=null)' >/dev/null || fail 'Метод или стратегия не поддерживаются установленным клиентом.'
   printf '%s\n' "$SNI" | awk '
@@ -90,14 +95,14 @@ validate_connection() {
     {n=split($0,a,"."); if(n<2) exit 1
      for(i=1;i<=n;i++) if(length(a[i])<1 || length(a[i])>63 || a[i] ~ /^-|-$/) exit 1}
   ' || fail 'Укажите корректный домен SNI латиницей.'
-  jq -n --arg bypass "$BYPASS" --arg strategy "$STRATEGY" --arg sni "$SNI" --argjson mtu "$MTU" --arg outInterface "$OUT_IFACE" \
-    '{bypass:$bypass,strategy:$strategy,sni:$sni,mtu:$mtu,outInterface:$outInterface}'
+  jq -n --arg bypass "$BYPASS" --arg strategy "$STRATEGY" --arg sni "$SNI" --argjson mtu "$MTU" --arg outInterface "$OUT_IFACE" --argjson ipv6 "$IPV6" \
+    '{bypass:$bypass,strategy:$strategy,sni:$sni,mtu:$mtu,outInterface:$outInterface,ipv6:$ipv6}'
 }
 connection_json() {
   if [ -f "$CONF/connection.json" ]; then validate_connection < "$CONF/connection.json"
   else
     CAPABILITIES=$(capabilities_json) || return 1
-    printf '%s' "$CAPABILITIES" | jq '{bypass:"obfuscation",strategy:(if (.strategies|index("dual-rolling-tunnel"))!=null then "dual-rolling-tunnel" else .strategies[0] end),sni:"google.com",mtu:0,outInterface:""}'
+    printf '%s' "$CAPABILITIES" | jq '{bypass:"obfuscation",strategy:(if (.strategies|index("dual-rolling-tunnel"))!=null then "dual-rolling-tunnel" else .strategies[0] end),sni:"google.com",mtu:0,outInterface:"",ipv6:false}'
   fi
 }
 load_connection() {
@@ -107,6 +112,7 @@ load_connection() {
   SNI=$(printf '%s' "$SETTINGS" | jq -r '.sni')
   MTU=$(printf '%s' "$SETTINGS" | jq -r '.mtu // 0')
   OUT_IFACE=$(printf '%s' "$SETTINGS" | jq -r '.outInterface // ""')
+  IPV6=$(printf '%s' "$SETTINGS" | jq -r '.ipv6 // false')
 }
 interface_mtu() {
   VALUE=$(ip -o link show dev opkgtun0 | awk '{for(i=1;i<NF;i++) if($i=="mtu") {print $(i+1); exit}}')
@@ -123,6 +129,43 @@ set_native_mtu() {
   # Change only this owned interface's MTU through the firmware API.
   ndmc -c "interface OpkgTun0 ip mtu $1" || return 1
   [ "$(interface_mtu)" = "$1" ] || { echo 'Keenetic не применил MTU.' >&2; return 1; }
+}
+ipv6_helper() {
+  HELPER=$(dirname "$SELF")/fptn-ipv6.sh
+  [ -f "$HELPER" ] || HELPER=$LIB/ipv6.sh
+  # Old installations without this optional feature have nothing to clean up.
+  if [ "$1" = remove ] && [ ! -f "$HELPER" ]; then return 0; fi
+  sh "$HELPER" "$1"
+}
+ipv6_address_present() {
+  ip -6 -o addr show dev opkgtun0 | awk '$3=="inet6" && $4=="fd42:6670:746e::1/128" {found=1} END{exit !found}'
+}
+prepare_ipv6() {
+  if [ "$IPV6" != true ]; then
+    ipv6_helper remove || return 1
+    if [ -f "$CONF/ipv6-address-owned" ]; then
+      if ipv6_address_present; then ndmc -c 'interface OpkgTun0 no ipv6 address fd42:6670:746e::1/128' || return 1; fi
+      rm -f "$CONF/ipv6-address-owned"
+    fi
+    return 0
+  fi
+  [ "$(cat "$CONF/native-interface" 2>/dev/null)" = OpkgTun0 ] || return 1
+  [ "$MTU" -ge 1280 ] || { echo 'IPv6 требует MTU от 1280.' >&2; return 1; }
+  ipv6_helper check || return 1
+  if ! ipv6_address_present; then
+    if ip -6 -o addr show | awk '$3=="inet6" {split($4,a,"/");if(a[1]=="fd42:6670:746e::1" && $2!="opkgtun0")found=1} END{exit !found}'; then
+      echo 'IPv6-адрес FPTN уже используется другим интерфейсом.' >&2; return 1
+    fi
+    : > "$CONF/ipv6-address-owned"
+    ndmc -c 'interface OpkgTun0 ipv6 address fd42:6670:746e::1/128' || return 1
+    ipv6_address_present || { echo 'Keenetic не применил IPv6-адрес FPTN.' >&2; return 1; }
+  fi
+  ipv6_helper apply
+}
+sync_ipv6() {
+  if client_alive && [ -f "$CONF/connection.json" ] && jq -e '.ipv6==true' "$CONF/connection.json" >/dev/null; then
+    ipv6_helper apply
+  else ipv6_helper remove; fi
 }
 uplink_json() {
   HELPER=$(dirname "$SELF")/fptn-uplink.sh
@@ -369,6 +412,7 @@ run_service() {
   finish() {
     trap '' INT TERM HUP
     stop_child || return 1
+    ipv6_helper remove || echo 'Не удалось убрать IPv6 NAT; неизвестные правила не трогаю.' >&2
     [ ! -f "$RUN/client.log" ] || tail -c 65536 "$RUN/client.log" > "$CONF/last.log" || true
     [ ! -f "$RUN/supervisor.log" ] || tail -c 16384 "$RUN/supervisor.log" > "$CONF/service-last.log" || true
     rm -rf "$RUN"
@@ -461,6 +505,7 @@ attempt_service() {
   UPLINK_CANDIDATE=; UPLINK_OBSERVATIONS=0; UPLINK_TICKS=0
   if [ "$MTU" -eq 0 ]; then MTU=$(interface_mtu) || return 0
   else set_native_mtu "$MTU" || return 0; fi
+  prepare_ipv6 || return 0
   if [ "$USE_PLAN" = yes ]; then
     BYPASS=$(jq -r .connection.bypass "$RUN/attempt.json")
     SNI=$(jq -r .connection.sni "$RUN/attempt.json")
@@ -472,7 +517,7 @@ attempt_service() {
   set -- --keenetic-connect --keenetic-native \
     --access-token "$TOKEN" --preferred-server "$SERVER" \
     --out-network-interface "$IFACE" --gateway-ip "$GW" \
-    --tun-interface-name opkgtun0 --tun-interface-ip 10.0.0.1 --mtu-size "$MTU" \
+    --tun-interface-name opkgtun0 --tun-interface-ip 10.0.0.1 --tun-interface-ipv6 fd42:6670:746e::1 --mtu-size "$MTU" \
     --sni "$SNI" --bypass-method "$BYPASS" --connection-strategy "$STRATEGY" \
     --enable-split-tunnel false --enable-ad-block false --blacklist-domains ''
   READY_TIMEOUT=60
@@ -532,6 +577,7 @@ start_service() {
   for cmd in ip timeout nice nohup jq base64 stty; do command -v "$cmd" >/dev/null 2>&1 || fail "Нет команды $cmd"; done
   [ -s "$CONF/token" ] && [ -s "$CONF/server" ] || fail 'Вставьте токен и сохраните сервер в веб-панели.'
   load_connection
+  if [ "$IPV6" = true ]; then ipv6_helper check || fail 'IPv6 NAT недоступен. Выключите IPv6 в панели или установите поддержку ядра.'; fi
   START_TIMEOUT=70
   if [ -f "$CONF/server-policy.json" ]; then
     server_policy_json >/dev/null
@@ -632,7 +678,7 @@ check_servers() (
     --enable-split-tunnel false --enable-ad-block false --blacklist-domains ''
 )
 stop_service() {
-  [ -d "$RUN" ] || { echo 'FPTN остановлен.'; return 0; }
+  [ -d "$RUN" ] || { ipv6_helper remove || echo 'Не удалось убрать IPv6 NAT.' >&2; echo 'FPTN остановлен.'; return 0; }
   for RECORD in "$RUN/supervisor.pid" "$RUN/client.pid"; do
     [ -f "$RECORD" ] || continue
     RECORD_PID=; RECORD_STAMP=; RECORD_BOOT=
@@ -672,6 +718,7 @@ stop_service() {
   [ ! -f "$RUN/client.log" ] || tail -c 65536 "$RUN/client.log" > "$CONF/last.log" || true
   [ ! -f "$RUN/supervisor.log" ] || tail -c 16384 "$RUN/supervisor.log" > "$CONF/service-last.log" || true
   rm -rf "$RUN"
+  ipv6_helper remove || echo 'Не удалось убрать IPv6 NAT; неизвестные правила сохранены.' >&2
   echo 'Клиент остановлен. Штатный интерфейс и правила Keenetic сохранены.'
 }
 recover_service() {
@@ -713,6 +760,12 @@ uninstall_runtime() (
   trap 'rm -rf "$LOCK"' EXIT
   trap 'exit 1' INT TERM HUP
   stop_service
+  ipv6_helper remove || fail 'Удаление прервано: проверьте IPv6 NAT. Файлы программы сохранены.'
+  HOOK=$ROOT/etc/ndm/netfilter.d/190-fptn-ipv6.sh
+  if [ -e "$HOOK" ]; then
+    grep -Fq '# Managed by fptn IPv6' "$HOOK" || fail 'IPv6 hook изменён другим приложением.'
+    rm -f "$HOOK"
+  fi
   BACKUP=$(mktemp -d "$CONF/uninstall-backup.XXXXXX")
   if [ -f "$FRAGMENT" ]; then
     cp -p "$FRAGMENT" "$BACKUP/95-fptn.conf"
@@ -737,7 +790,7 @@ uninstall_runtime() (
   rm -f "$CONF/autostart" "$INIT"
   for file in index.html index.cgi app.js style.css api.cgi .fptn-web-owned; do rm -f "$WEB/$file"; done
   rmdir "$WEB" 2>/dev/null || true
-  for file in fptn-client-cli brotli web-auth.sh web-auth.php web-operations.php transport-plan.php web-update.sh client-capabilities.sh client-identity.sh uplink.sh sources.lock.json SHA256SUMS LICENSE-FPTN LICENSE-BROTLI BROTLI-SOURCE.txt .runtime-managed; do rm -f "$LIB/$file"; done
+  for file in fptn-client-cli brotli web-auth.sh web-auth.php web-operations.php transport-plan.php web-update.sh client-capabilities.sh client-identity.sh uplink.sh ipv6.sh sources.lock.json SHA256SUMS LICENSE-FPTN LICENSE-BROTLI BROTLI-SOURCE.txt .runtime-managed; do rm -f "$LIB/$file"; done
   rmdir "$LIB" 2>/dev/null || true
   rm -f "$ROOT/bin/fptnctl"
   echo 'Программа и панель FPTN удалены. Пакеты Entware и другие веб-панели сохранены.'
@@ -781,6 +834,8 @@ case "${1:-}" in
   validate-fallback) sh "$LIB/web-auth.sh" transport-validate ;;
   get-capabilities) capabilities_json ;;
   get-uplink) load_connection; uplink_json ;;
+  sync-ipv6) sync_ipv6 ;;
+  check-ipv6) ipv6_helper check ;;
   get-settings) connection_json ;;
   validate-settings) validate_connection ;;
   get-interface-mtu) interface_mtu ;;
