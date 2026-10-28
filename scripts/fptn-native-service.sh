@@ -164,7 +164,7 @@ prepare_ipv6() {
 }
 sync_ipv6() {
   # The firmware hook only notifies the owner. It never competes with stop or
-  # writes iptables while NDM may still hold the netfilter lock.
+  # writes rules while NDM may still hold the netfilter lock.
   if supervisor_owned && [ -f "$CONF/connection.json" ] && jq -e '.ipv6==true' "$CONF/connection.json" >/dev/null; then
     : > "$RUN/ipv6-resync"
   fi

@@ -1,4 +1,27 @@
 {
   "schema": 1,
-  "platforms": {}
+  "platforms": {
+    "aarch64": {
+      "client": {
+        "schema": 1,
+        "platform": "aarch64",
+        "buildRevision": "15ebc9817d8407241e421ebb9ac7a66c4069a8bd",
+        "sha256": "35bb43833f5dcac669f5029a0d7fcc02688725ec2c69176858052876b9f8fb60",
+        "clientVersion": "0.5.0",
+        "upstreamRevision": "a389bee62da930807c3bc85284ee4976e9c7e08f",
+        "upstreamVersion": "0.4.6",
+        "sourceLockSha256": "d5ea48c0782b30acdb980efc7297dac1da47fc8aeef77352c98b4eb54548a9a5"
+      },
+      "assets": {
+        "schema": 1,
+        "platform": "aarch64",
+        "decoderRelease": "port-aarch64-15ebc9817d8407241e421ebb9ac7a66c4069a8bd",
+        "decoderSha256": "0b74b076e007e713e1294a34d5b858a810700c6666ab1090efaac1ccdccfd58b",
+        "decoderLicenseSha256": "3d180008e36922a4e8daec11c34c7af264fed5962d07924aea928c38e8663c94",
+        "decoderSourceSha256": "c609e6e55f9f7814d7f13d117cfac8fd41a861ac46e3e9b4eeea87db4b4cbdeb",
+        "clientLicenseSha256": "2f817d4133bca382fe26298f08c106f2c2f36206946e85a40049b38ab15dfaca",
+        "clientRelease": "port-aarch64-15ebc9817d8407241e421ebb9ac7a66c4069a8bd"
+      }
+    }
+  }
 }
