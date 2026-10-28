@@ -1,0 +1,117 @@
+name: Build experimental ARM ports
+on:
+  push:
+    branches: [main, ports/build]
+    paths:
+      - 'ports/targets.json'
+      - 'scripts/render-platform.py'
+      - 'scripts/fix-platform-libgcc.py'
+      - 'scripts/verify-platform-elf.py'
+      - 'scripts/platform-dependency-key.py'
+      - '.github/workflows/build-platforms.yml'
+  workflow_dispatch:
+permissions:
+  contents: read
+concurrency:
+  group: ports-${{ github.ref }}
+  cancel-in-progress: true
+jobs:
+  compile:
+    strategy:
+      fail-fast: false
+      matrix:
+        platform: [aarch64, armv7-softfloat]
+    runs-on: ubuntu-24.04
+    timeout-minutes: 120
+    permissions:
+      contents: write
+    env:
+      GH_TOKEN: ${{ github.token }}
+      GH_REPO: ${{ github.repository }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - name: Render pinned SDK and ABI configuration
+        id: key
+        run: |
+          python3 scripts/render-platform.py . '${{ matrix.platform }}' ports/generated
+          echo "key=$(python3 scripts/platform-dependency-key.py ports/generated)" >> "$GITHUB_OUTPUT"
+          mkdir -p "$RUNNER_TEMP/port-deps"
+      - uses: docker/setup-buildx-action@v3
+      - name: Compile and emulate C++20/threads/atomic64/coroutines probe
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: ports/generated/Dockerfile
+          target: probe-export
+          outputs: type=local,dest=out/probe
+          cache-from: type=gha,scope=port-${{ matrix.platform }}
+          cache-to: type=gha,mode=max,scope=port-${{ matrix.platform }}
+      - id: restore
+        uses: actions/cache/restore@v4
+        with:
+          path: ${{ runner.temp }}/port-deps/dependencies.tar
+          key: port-dependencies-v1-${{ steps.key.outputs.key }}
+      - name: Prepare dependencies only on missing immutable snapshot
+        if: steps.restore.outputs.cache-hit != 'true'
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: ports/generated/Dockerfile
+          target: dependency-image
+          provenance: false
+          sbom: false
+          outputs: type=oci,dest=${{ runner.temp }}/port-deps/dependencies.tar
+          cache-from: type=gha,scope=port-${{ matrix.platform }}
+      - if: steps.restore.outputs.cache-hit != 'true'
+        uses: actions/cache/save@v4
+        with:
+          path: ${{ runner.temp }}/port-deps/dependencies.tar
+          key: port-dependencies-v1-${{ steps.key.outputs.key }}
+      - id: context
+        name: Verify restored OCI image integrity
+        run: |
+          echo "uri=$(python3 scripts/dependency-image.py unpack "$RUNNER_TEMP/port-deps/dependencies.tar" "$RUNNER_TEMP/port-layout")" >> "$GITHUB_OUTPUT"
+      - name: Build client and decoder, verify ELF and run probe-only under QEMU
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: ports/generated/Dockerfile
+          target: platform-export
+          build-args: DEPENDENCIES_IMAGE=prepared-dependencies
+          build-contexts: prepared-dependencies=${{ steps.context.outputs.uri }}
+          outputs: type=local,dest=out/port
+          cache-from: type=gha,scope=port-${{ matrix.platform }}
+          cache-to: type=gha,mode=max,scope=port-${{ matrix.platform }}
+      - name: Describe the exact binaries and original sources
+        run: |
+          python3 scripts/package-client-release.py . out/port/client "$GITHUB_SHA"
+          python3 - '${{ matrix.platform }}' <<'PY'
+          import hashlib,json,pathlib,sys
+          client=pathlib.Path('out/port/client');decoder=pathlib.Path('out/port/decoder')
+          digest=lambda p:hashlib.sha256(p.read_bytes()).hexdigest()
+          path=client/'client-release.json';record=json.loads(path.read_text());record['platform']=sys.argv[1];path.write_text(json.dumps(record,indent=2)+'\n')
+          sums=client/'SHA256SUMS';lines=[s for s in sums.read_text().splitlines() if not s.endswith('  client-release.json')];sums.write_text('\n'.join([*lines,digest(path)+'  client-release.json'])+'\n')
+          asset={'schema':1,'platform':sys.argv[1],'decoderRelease':'port-'+sys.argv[1]+'-'+record['buildRevision'],'decoderSha256':digest(decoder/'brotli'),'decoderLicenseSha256':digest(decoder/'LICENSE-BROTLI'),'decoderSourceSha256':digest(decoder/'BROTLI-SOURCE.txt'),'clientLicenseSha256':digest(client/'LICENSE-FPTN')}
+          (decoder/'runtime-assets.json').write_text(json.dumps(asset,indent=2)+'\n')
+          (decoder/'DECODER-SHA256SUMS').write_text(''.join(digest(p)+'  '+p.name+'\n' for p in sorted(decoder.iterdir()) if p.is_file()))
+          PY
+      - uses: actions/upload-artifact@v4
+        with:
+          name: native-${{ matrix.platform }}
+          path: out/port/
+          if-no-files-found: error
+      - name: Publish experimental target binaries
+        run: |
+          set -eu
+          tag="port-${{ matrix.platform }}-$GITHUB_SHA"
+          if ! gh release view "$tag" >/dev/null 2>&1; then
+            gh release create "$tag" --target "$GITHUB_SHA" --prerelease \
+              --title "Experimental FPTN ${{ matrix.platform }} ${GITHUB_SHA:0:7}" \
+              --notes 'Cross-built static binaries. ELF ABI, C++20 runtime and offline CLI/probe-only checked under QEMU. No hardware or live VPN test on this architecture. Client and decoder include source metadata and licenses. Installer support is published separately after these results are reviewed.'
+          fi
+          gh release upload "$tag" out/port/client/fptn-client-cli out/port/client/client-release.json \
+            out/port/client/sources.lock.json out/port/client/LICENSE-FPTN out/port/client/HELP.txt \
+            out/port/client/SHA256SUMS out/port/decoder/brotli out/port/decoder/LICENSE-BROTLI \
+            out/port/decoder/BROTLI-SOURCE.txt out/port/decoder/runtime-assets.json out/port/decoder/DECODER-SHA256SUMS --clobber
