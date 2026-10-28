@@ -88,6 +88,8 @@ COPY scripts/prepare-connect-test.py /work/prepare-connect-test.py
 COPY scripts/run-connect-test.sh /work/run-connect-test.sh
 COPY docs/tunnel-test.md /work/TUNNEL-TEST.md
 COPY scripts/prepare-native-tun.py /work/prepare-native-tun.py
+COPY scripts/prepare-native-transport.py /work/prepare-native-transport.py
+COPY src/keenetic-transport.h /work/keenetic-transport.h
 COPY scripts/prepare-server-policy.py /work/prepare-server-policy.py
 COPY scripts/check-probe-mode.sh /work/check-probe-mode.sh
 COPY src/keenetic-server-policy.h /work/keenetic-server-policy.h
@@ -96,7 +98,8 @@ COPY scripts/fptn-native-service.sh /work/fptn-native-service.sh
 COPY docs/native-interface.md /work/NATIVE-INTERFACE.md
 RUN python /work/prepare-connect-test.py /work/upstream && \
     python /work/prepare-native-tun.py /work/upstream /work/keenetic-linux-tun.h && \
-    python /work/prepare-server-policy.py /work/upstream /work/keenetic-server-policy.h
+    python /work/prepare-server-policy.py /work/upstream /work/keenetic-server-policy.h && \
+    python /work/prepare-native-transport.py /work/upstream /work/keenetic-transport.h
 RUN --mount=type=secret,id=proxy_ca \
     if [ -f /run/secrets/proxy_ca ]; then \
       export SSL_CERT_FILE=/run/secrets/proxy_ca CMAKE_TLS_CAINFO=/run/secrets/proxy_ca; \
@@ -106,7 +109,7 @@ RUN --mount=type=secret,id=proxy_ca \
       -DCMAKE_TOOLCHAIN_FILE=/build/conan_toolchain.cmake \
       -DCMAKE_BUILD_TYPE=Release -DCMAKE_EXE_LINKER_FLAGS=-static \
       -DCMAKE_COMPILE_WARNING_AS_ERROR=OFF -DCMAKE_CXX_CLANG_TIDY= \
-      -DFPTN_VERSION=0.4.0 && \
+      -DFPTN_VERSION=0.5.0 && \
     python /work/check-cross-includes.py /build/compile_commands.json && \
     cmake --build /build --target fptn-client-cli -j2
 RUN mkdir /out && \
