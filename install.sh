@@ -12,7 +12,12 @@ LAN=${2:-192.168.1.1}
 printf '%s\n' "$LAN" | awk -F. 'NF!=4 {exit 1} {for(i=1;i<=4;i++) if($i!~/^[0-9]+$/ || $i>255 || length($i)>3) exit 1}' || fail 'Некорректный IPv4 LAN.'
 [ -r /opt/etc/entware_release ] || fail 'Требуется установленный Entware.'
 value() { awk -F= -v key="$1" '$1==key {gsub(/["\047\r]/,"",$2); print $2}' /opt/etc/entware_release; }
-[ "$(value arch):$(value cpu_type):$(value float)" = mipsel:mips32r2:soft ] || fail 'Эта готовая сборка только для Entware mipsel / mips32r2 / soft-float.'
+case "$(value arch):$(value cpu_type):$(value float)" in
+  mipsel:mips32r2:soft) ;;
+  aarch64:*) [ "$(uname -m)" = aarch64 ] || fail 'Entware и ядро aarch64 должны совпадать.' ;;
+  arm:*) [ "$(uname -m)" = armv7l ] || fail 'Нужно little-endian ядро ARMv7.' ;;
+  *) fail 'Для этой архитектуры Entware готовая сборка не поддерживается.' ;;
+esac
 command -v ndmc >/dev/null 2>&1 || fail 'Требуется KeeneticOS.'
 [ -c /dev/net/tun ] || fail 'Включите компонент TUN Keenetic.'
 command -v opkg >/dev/null 2>&1 || fail 'Не найден opkg.'

@@ -43,3 +43,15 @@ class RuntimePackageTest(unittest.TestCase):
         self.assertEqual(result.returncode,0,result.stderr);self.assertEqual(result.stdout.strip(),'mipsel-mips32r2-softfloat');self.assertFalse(marker.exists())
         release.write_text('arch=mips\ncpu_type=mips32r2\nfloat=soft\n')
         self.assertNotEqual(subprocess.run(command,env={**os.environ,'FPTN_PREFIX':str(prefix)},capture_output=True).returncode,0)
+
+    def test_arm_archive_selects_platform_metadata_and_rejects_wrong_binary(self):
+        release=json.loads((self.root/'client-release.json').read_text());assets=json.loads((self.root/'runtime-assets.json').read_text())
+        platform='armv7-softfloat';release['platform']=assets['platform']=platform
+        catalog=self.root/'platform-releases.json';catalog.write_text(json.dumps({'schema':1,'platforms':{platform:{'client':release,'assets':assets}}}))
+        with (self.root/'web/SHA256SUMS').open('a') as manifest:manifest.write(hashlib.sha256(catalog.read_bytes()).hexdigest()+'  platform-releases.json\n')
+        archive=module.build(self.root,self.client,self.decoder,self.output,'a'*40,platform)
+        self.assertEqual(archive.name,'fptn-keenetic-armv7-softfloat.tar.gz')
+        with tarfile.open(archive) as tar:self.assertIn('fptn-keenetic/platform-releases.json',tar.getnames())
+        import shutil
+        shutil.rmtree(self.output/'fptn-keenetic');(self.client/'fptn-client-cli').write_bytes(b'wrong architecture')
+        with self.assertRaises(ValueError):module.build(self.root,self.client,self.decoder,self.output,'a'*40,platform)

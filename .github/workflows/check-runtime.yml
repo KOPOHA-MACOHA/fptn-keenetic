@@ -82,16 +82,29 @@ jobs:
       - name: Download the pinned client and decoder without rebuilding dependencies
         run: |
           set -eu
-          mkdir client decoder output
-          client="native-$(jq -r .buildRevision client-release.json)"
-          decoder=$(jq -r .decoderRelease runtime-assets.json)
-          for asset in fptn-client-cli sources.lock.json LICENSE-FPTN; do
-            gh release download "$client" --pattern "$asset" --dir client
+          mkdir output
+          : > output/SHA256SUMS
+          for platform in mipsel-mips32r2-softfloat $(jq -r '.platforms|keys[]' platform-releases.json); do
+            case "$platform" in mipsel-mips32r2-softfloat|aarch64|armv7-softfloat) ;; *) exit 1 ;; esac
+            stage="$RUNNER_TEMP/runtime-$platform"
+            mkdir -p "$stage/client" "$stage/decoder" "$stage/output"
+            if [ "$platform" = mipsel-mips32r2-softfloat ]; then
+              client="native-$(jq -r .buildRevision client-release.json)"
+              decoder=$(jq -r .decoderRelease runtime-assets.json)
+            else
+              client=$(jq -r --arg p "$platform" '.platforms[$p].assets.clientRelease' platform-releases.json)
+              decoder=$(jq -r --arg p "$platform" '.platforms[$p].assets.decoderRelease' platform-releases.json)
+            fi
+            for asset in fptn-client-cli sources.lock.json LICENSE-FPTN; do
+              gh release download "$client" --pattern "$asset" --dir "$stage/client"
+            done
+            for asset in brotli LICENSE-BROTLI BROTLI-SOURCE.txt; do
+              gh release download "$decoder" --pattern "$asset" --dir "$stage/decoder"
+            done
+            python3 scripts/package-runtime.py . "$stage/client" "$stage/decoder" "$stage/output" "$GITHUB_SHA" "$platform"
+            cat "$stage/output/SHA256SUMS" >> output/SHA256SUMS
+            mv "$stage/output/"*.tar.gz output/
           done
-          for asset in brotli LICENSE-BROTLI BROTLI-SOURCE.txt; do
-            gh release download "$decoder" --pattern "$asset" --dir decoder
-          done
-          python3 scripts/package-runtime.py . client decoder output "$GITHUB_SHA"
       - uses: actions/upload-artifact@v4
         with:
           name: fptn-keenetic-install
@@ -106,6 +119,6 @@ jobs:
           if ! gh release view "$tag" >/dev/null 2>&1; then
             gh release create "$tag" --target "$GITHUB_SHA" --prerelease \
               --title "FPTN Keenetic runtime ${GITHUB_SHA:0:7}" \
-              --notes 'Complete install/update package for Entware mipsel MIPS32r2 soft-float. Contains the existing verified client and Brotli decoder, panel and service. Runtime tests passed in Actions; clean installation still needs hardware validation. Run sh install.sh install inside the extracted folder. Routes, firewall and DNS remain managed by Keenetic.'
+              --notes 'Complete install/update packages for registered Entware architectures. Exact client/decoder and source metadata, panel and service are included. Runtime tests passed in Actions; foreign-architecture CLI/probes are tested under QEMU, not live ARM hardware. Run sh install.sh install inside the extracted folder. Routes and DNS stay in Keenetic; optional IPv6 NAT66 is off by default.'
           fi
           gh release upload "$tag" output/*.tar.gz output/SHA256SUMS --clobber

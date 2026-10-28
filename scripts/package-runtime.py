@@ -13,11 +13,17 @@ def digest(path):
     return hashlib.sha256(path.read_bytes()).hexdigest()
 
 
-def build(root, client, decoder, output, revision):
+def build(root, client, decoder, output, revision, platform=None):
     if not re.fullmatch('[0-9a-f]{40}', revision):
         raise ValueError('Full runtime revision required')
     release = json.loads((root/'client-release.json').read_text())
     assets = json.loads((root/'runtime-assets.json').read_text())
+    if platform and platform != release['platform']:
+        records = json.loads((root/'platform-releases.json').read_text())
+        item = records['platforms'][platform]
+        release, assets = item['client'], item['assets']
+        if release['platform'] != platform:
+            raise ValueError('Wrong target in platform catalog')
     if release['platform'] != assets['platform']:
         raise ValueError('Binary and decoder platforms differ')
     inputs = {
@@ -61,4 +67,4 @@ def build(root, client, decoder, output, revision):
 
 
 if __name__ == '__main__':
-    print(build(*(Path(p) for p in sys.argv[1:5]), sys.argv[5]))
+    print(build(*(Path(p) for p in sys.argv[1:5]), sys.argv[5], sys.argv[6] if len(sys.argv)>6 else None))

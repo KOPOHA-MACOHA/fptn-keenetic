@@ -11,7 +11,7 @@ class WanSoakTest(unittest.TestCase):
     save=test_wan_failover.WanFailoverTest.save
     def test_twenty_dhcp_reconnects_keep_one_child_and_bounded_supervisor_resources(self):
         root=self.prepare()
-        sleeper=self.bin/'sleep';sleeper.write_text('#!/usr/bin/env python3\nimport sys,time\ntime.sleep(.05 if sys.argv[1]=="1" else .02)\n');sleeper.chmod(0o700)
+        sleeper=self.bin/'sleep';sleeper.write_text('#!/usr/bin/env python3\nimport os,sys,time\nfrom pathlib import Path\nreal=(Path(os.environ["FPTN_PREFIX"])/"soak-stopping").exists()\ntime.sleep(float(sys.argv[1]) if real else (.05 if sys.argv[1]=="1" else .02))\n');sleeper.chmod(0o700)
         result=self.cmd('start');self.assertEqual(result.returncode,0,result.stdout+result.stderr)
         run=root/'var/run/fptn-keenetic';supervisor=int((run/'supervisor.pid').read_text().split()[0]);fdroot=Path('/proc')/str(supervisor)/'fd'
         initial=len(list(fdroot.iterdir()));baseline_rss=int(next(line.split()[1] for line in (fdroot.parent/'status').read_text().splitlines() if line.startswith('VmRSS:')))
@@ -24,7 +24,10 @@ class WanSoakTest(unittest.TestCase):
             self.assertLessEqual(len(list(fdroot.iterdir())),initial+4)
             rss=int(next(line.split()[1] for line in (fdroot.parent/'status').read_text().splitlines() if line.startswith('VmRSS:')))
             self.assertLessEqual(rss,baseline_rss+4096)
-        self.assertEqual(self.cmd('stop').returncode,0);self.assertFalse(run.exists())
+        # Stop grace periods are real seconds, just as in production. Only the
+        # twenty reconnect cycles are accelerated, not SIGTERM/SIGKILL deadlines.
+        (root/'soak-stopping').touch()
+        stopped=self.cmd('stop');self.assertEqual(stopped.returncode,0,stopped.stdout+stopped.stderr);self.assertFalse(run.exists())
         for record in records:
             pid,stamp,*_=record.split();stat=Path('/proc')/pid/'stat'
             if stat.exists():self.assertNotEqual(stat.read_text().rsplit(') ',1)[1].split()[19],stamp)

@@ -81,6 +81,7 @@ UPDATE_EXISTED=no
 CAPS_EXISTED=no
 IDENTITY_HELPER_EXISTED=no
 UPLINK_EXISTED=no
+PLATFORM_HELPER_EXISTED=no
 IPV6_HELPER_EXISTED=no
 HOOK_EXISTED=no
 IDENTITY_EXISTED=no
@@ -150,6 +151,8 @@ finish() {
     else rm -f "$HOOK"; fi
     if [ "$IPV6_HELPER_EXISTED" = yes ]; then cp -p "$BACKUP/ipv6.sh" /opt/libexec/fptn/ipv6.sh
     else rm -f /opt/libexec/fptn/ipv6.sh; fi
+    if [ "$PLATFORM_HELPER_EXISTED" = yes ]; then cp -p "$BACKUP/platform.sh" /opt/libexec/fptn/platform.sh
+    else rm -f /opt/libexec/fptn/platform.sh; fi
     if [ "$UPLINK_EXISTED" = yes ]; then cp -p "$BACKUP/uplink.sh" /opt/libexec/fptn/uplink.sh
     else rm -f /opt/libexec/fptn/uplink.sh; fi
     if [ "$FRESH" = yes ]; then rm -rf /opt/libexec/fptn
@@ -185,11 +188,16 @@ fetch() {
 echo 'Скачиваю панель и управляющий скрипт. Сборка зависимостей не требуется.'
 mkdir -p "$STAGE/web" "$STAGE/scripts" "$STAGE/client"
 fetch "$BASE/web/SHA256SUMS" "$STAGE/SHA256SUMS"
-for path in web/index.html web/index.cgi web/style.css web/app.js web/api.cgi scripts/fptn-native-service.sh scripts/fptn-web-auth.sh scripts/fptn-web-auth.php scripts/fptn-web-operations.php scripts/fptn-transport-plan.php scripts/fptn-web-update.sh scripts/fptn-client-capabilities.sh scripts/fptn-client-identity.sh scripts/fptn-platform.sh scripts/fptn-uplink.sh scripts/fptn-ipv6.sh runtime-assets.json client-release.json; do
+for path in web/index.html web/index.cgi web/style.css web/app.js web/api.cgi scripts/fptn-native-service.sh scripts/fptn-web-auth.sh scripts/fptn-web-auth.php scripts/fptn-web-operations.php scripts/fptn-transport-plan.php scripts/fptn-web-update.sh scripts/fptn-client-capabilities.sh scripts/fptn-client-identity.sh scripts/fptn-platform.sh scripts/fptn-uplink.sh scripts/fptn-ipv6.sh runtime-assets.json client-release.json platform-releases.json; do
   fetch "$BASE/$path" "$STAGE/$path"
 done
 (cd "$STAGE"; sha256sum -c SHA256SUMS) || fail 'Контрольные суммы не совпали.'
 PLATFORM=$(sh "$STAGE/scripts/fptn-platform.sh") || fail 'Установка на этой платформе не поддерживается.'
+if [ "$PLATFORM" != mipsel-mips32r2-softfloat ]; then
+  jq -e --arg p "$PLATFORM" '.schema==1 and (.platforms[$p]|type=="object")' "$STAGE/platform-releases.json" >/dev/null || fail 'Для этой платформы проверенный выпуск пока не опубликован.'
+  jq --arg p "$PLATFORM" '.platforms[$p].client' "$STAGE/platform-releases.json" > "$STAGE/client-release.json"
+  jq --arg p "$PLATFORM" '.platforms[$p].assets' "$STAGE/platform-releases.json" > "$STAGE/runtime-assets.json"
+fi
 [ "$(jq -r .platform "$STAGE/client-release.json")" = "$PLATFORM" ] || fail 'Бинарник предназначен для другой платформы.'
 command -v ndmc >/dev/null 2>&1 || fail 'Не найден ndmc: нужна KeeneticOS.'
 [ -c /dev/net/tun ] || fail 'Нет устройства /dev/net/tun: включите компонент TUN Keenetic.'
@@ -218,7 +226,12 @@ CLIENT_REV=$TARGET_REV
 [ -z "${FPTN_TARGET_UPSTREAM_REVISION:-}" ] || [ "$FPTN_TARGET_UPSTREAM_REVISION" = "$(printf '%s' "$TARGET" | jq -r .upstreamRevision)" ] || fail 'В каталоге другой коммит исходного FPTN.'
 CURRENT_SUM=
 if [ -f /opt/libexec/fptn/fptn-client-cli ]; then CURRENT_SUM=$(nice -n 10 sha256sum /opt/libexec/fptn/fptn-client-cli | awk '{print $1}'); fi
-CLIENT_BASE=https://github.com/KOPOHA-MACOHA/fptn-keenetic/releases/download/native-$CLIENT_REV
+CLIENT_TAG=native-$CLIENT_REV
+if [ "$PLATFORM" != mipsel-mips32r2-softfloat ]; then
+  CLIENT_TAG=port-$PLATFORM-$CLIENT_REV
+  [ "$(jq -r .clientRelease "$STAGE/runtime-assets.json")" = "$CLIENT_TAG" ] || fail 'Некорректный тег выпуска платформы.'
+fi
+CLIENT_BASE=https://github.com/KOPOHA-MACOHA/fptn-keenetic/releases/download/$CLIENT_TAG
 if [ "$CURRENT_SUM" != "$TARGET_SUM" ]; then
   CLIENT_UPDATE=yes
   mkdir -p "$STAGE/client"
@@ -236,9 +249,11 @@ printf '%s' "$TARGET" | jq -r .upstreamRevision > "$STAGE/upstream-revision"
 jq -e --arg rev "$(cat "$STAGE/upstream-revision")" '.fptn==$rev' "$STAGE/sources.lock.json" >/dev/null || fail 'Список исходников указывает другой FPTN.'
 # Bootstrap the previously tested static token decoder independently of temporary folders.
 ASSETS=$STAGE/runtime-assets.json
-jq -e --arg platform "$PLATFORM" 'def hex: type=="string" and length==64 and all(explode[]; (.>=48 and .<=57) or (.>=97 and .<=102));
- .schema==1 and .platform==$platform and (.decoderRelease|type=="string" and startswith("decoder-") and length==48 and all(explode[]; (.>=48 and .<=57) or (.>=97 and .<=122) or .==45)) and
- (.decoderSha256|hex) and (.decoderLicenseSha256|hex) and (.decoderSourceSha256|hex) and (.clientLicenseSha256|hex)' "$ASSETS" >/dev/null || fail 'Некорректное описание вспомогательных файлов.'
+jq -e --arg platform "$PLATFORM" 'def hex($n): type=="string" and length==$n and all(explode[]; (.>=48 and .<=57) or (.>=97 and .<=102));
+ .schema==1 and .platform==$platform and (.decoderRelease|type=="string" and
+   (if $platform=="mipsel-mips32r2-softfloat" then startswith("decoder-") and (.[8:]|hex(40))
+    else startswith("port-"+$platform+"-") and (.[(6+($platform|length)):]|hex(40)) end)) and
+ (.decoderSha256|hex(64)) and (.decoderLicenseSha256|hex(64)) and (.decoderSourceSha256|hex(64)) and (.clientLicenseSha256|hex(64))' "$ASSETS" >/dev/null || fail 'Некорректное описание вспомогательных файлов.'
 DECODER_BASE=https://github.com/KOPOHA-MACOHA/fptn-keenetic/releases/download/$(jq -r .decoderRelease "$ASSETS")
 if [ ! -x /opt/libexec/fptn/brotli ]; then
   [ ! -e /opt/libexec/fptn/brotli ] || fail 'Существующий Brotli не исполняется. Проверьте установку.'
@@ -286,6 +301,7 @@ if [ -f /opt/libexec/fptn/client-identity.sh ]; then IDENTITY_HELPER_EXISTED=yes
 for file in LICENSE-FPTN LICENSE-BROTLI BROTLI-SOURCE.txt .runtime-managed; do
   [ ! -f /opt/libexec/fptn/"$file" ] || cp -p /opt/libexec/fptn/"$file" "$BACKUP/$file"
 done
+if [ -f /opt/libexec/fptn/platform.sh ]; then PLATFORM_HELPER_EXISTED=yes; cp -p /opt/libexec/fptn/platform.sh "$BACKUP/platform.sh"; fi
 if [ -f /opt/libexec/fptn/uplink.sh ]; then UPLINK_EXISTED=yes; cp -p /opt/libexec/fptn/uplink.sh "$BACKUP/uplink.sh"; fi
 if [ -f /opt/libexec/fptn/ipv6.sh ]; then IPV6_HELPER_EXISTED=yes; cp -p /opt/libexec/fptn/ipv6.sh "$BACKUP/ipv6.sh"; fi
 if [ -f "$HOOK" ]; then HOOK_EXISTED=yes; cp -p "$HOOK" "$BACKUP/190-fptn-ipv6.sh"; fi
@@ -348,6 +364,9 @@ if [ -x /opt/bin/fptnctl ] && ! /opt/bin/fptnctl sync-ipv6 >/dev/null 2>&1; then
 fi
 HOOKEOF
 chmod 700 "$HOOK"
+cp "$STAGE/scripts/fptn-platform.sh" /opt/libexec/fptn/platform.sh.new
+chmod 700 /opt/libexec/fptn/platform.sh.new
+mv /opt/libexec/fptn/platform.sh.new /opt/libexec/fptn/platform.sh
 cp "$STAGE/scripts/fptn-uplink.sh" /opt/libexec/fptn/uplink.sh.new
 chmod 700 /opt/libexec/fptn/uplink.sh.new
 mv /opt/libexec/fptn/uplink.sh.new /opt/libexec/fptn/uplink.sh

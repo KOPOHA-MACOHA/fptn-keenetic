@@ -8,7 +8,7 @@ LIB=$ROOT/libexec/fptn
 validate() {
   jq -ce 'def hex($n): type=="string" and length==$n and all(explode[]; (.>=48 and .<=57) or (.>=97 and .<=102));
     def version: type=="string" and length<=32 and (split(".")|length==3 and all(.[]; length>0 and all(explode[]; .>=48 and .<=57)));
-    select(.schema==1 and .platform=="mipsel-mips32r2-softfloat" and
+    select(.schema==1 and (.platform=="mipsel-mips32r2-softfloat" or .platform=="aarch64" or .platform=="armv7-softfloat") and
       (.buildRevision|hex(40)) and (.sha256|hex(64)) and (.clientVersion|version) and
       (.upstreamRevision|hex(40)) and (.upstreamVersion|version) and (.sourceLockSha256|hex(64))) |
       {schema,platform,buildRevision,sha256,clientVersion,upstreamRevision,upstreamVersion,sourceLockSha256}' "$1"

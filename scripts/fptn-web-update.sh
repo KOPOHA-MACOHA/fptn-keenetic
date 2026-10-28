@@ -6,9 +6,15 @@ ROOT=${FPTN_PREFIX:-/opt}
 RUN=$ROOT/var/run/fptn-web
 CONF=$ROOT/etc/fptn
 LIB=$ROOT/libexec/fptn
+PLATFORM=mipsel-mips32r2-softfloat
+if [ -f "$LIB/platform.sh" ]; then PLATFORM=$(sh "$LIB/platform.sh") || exit 1; fi
 fail() { echo "$*" >&2; exit 1; }
 validate() {
-  jq -ce 'def hex($n): type=="string" and length==$n and all(explode[]; (.>=48 and .<=57) or (.>=97 and .<=102));
+  jq -ce --arg platform "$PLATFORM" 'def hex($n): type=="string" and length==$n and all(explode[]; (.>=48 and .<=57) or (.>=97 and .<=102));
+    (if has("platforms") then
+      select(.platforms|type=="object") | select(.platforms[$platform]|type=="object") |
+      . + (.platforms[$platform]|{clientRevision,clientVersion,clientSha256,upstreamRevision,upstreamVersion}) | del(.platforms)
+     else . end) |
     select(.schema==1 and (.version|type=="string") and
     (.version|split(".")|length==3 and all(.[]; length>0 and length<=4 and all(explode[]; .>=48 and .<=57))) and
     (.revision|type=="string" and length==40 and all(explode[]; (.>=48 and .<=57) or (.>=97 and .<=102))) and

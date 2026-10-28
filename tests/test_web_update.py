@@ -64,3 +64,19 @@ shutil.copyfile(root/('channel' if url.endswith('web/update.json') else 'install
         self.channel.write_text(json.dumps(self.catalog));self.check()
         data=json.loads((self.run/'update-available.json').read_text());self.assertEqual(data['clientSha256'],'f'*64);self.assertEqual(data['upstreamVersion'],'0.4.6')
         self.channel.write_text(json.dumps({**self.catalog,'clientSha256':'broken'}));self.assertNotEqual(self.call('check').returncode,0)
+
+    def test_platform_specific_client_survives_check_cache_and_apply(self):
+        lib=self.root/'libexec/fptn';lib.mkdir(parents=True)
+        (lib/'platform.sh').write_text('#!/bin/sh\necho aarch64\n')
+        self.catalog['platforms']={'aarch64':{'clientRevision':'e'*40,'clientVersion':'0.5.0','clientSha256':'f'*64,'upstreamVersion':'0.4.6','upstreamRevision':'d'*40}}
+        self.channel.write_text(json.dumps(self.catalog));self.check()
+        self.assertEqual(json.loads(self.call('status').stdout)['clientRevision'],'e'*40)
+        r=self.call('apply');self.assertEqual(r.returncode,0,r.stderr)
+        self.assertEqual((self.root/'applied').read_text().splitlines()[-1],'e'*40)
+        self.assertEqual((self.root/'client-target').read_text(),'0.5.0')
+
+    def test_missing_platform_record_does_not_cache_or_apply_mips_fallback(self):
+        lib=self.root/'libexec/fptn';lib.mkdir(parents=True);(lib/'platform.sh').write_text('#!/bin/sh\necho armv7-softfloat\n')
+        self.catalog['platforms']={'aarch64':{'clientRevision':'e'*40,'clientVersion':'0.5.0'}}
+        self.channel.write_text(json.dumps(self.catalog));self.assertNotEqual(self.call('check').returncode,0)
+        self.assertFalse((self.run/'update-available.json').exists());self.assertFalse((self.root/'applied').exists())

@@ -103,7 +103,7 @@ esac
         (lib/'brotli').write_text('dummy');(lib/'brotli').chmod(0o700)
         self.old_sums=''.join(hashlib.sha256((lib/p).read_bytes()).hexdigest()+'  '+p+'\n' for p in ['fptn-client-cli','brotli'])
         (lib/'SHA256SUMS').write_text(self.old_sums)
-        paths=['client-release.json','web/index.html','web/index.cgi','web/style.css','web/app.js','web/api.cgi','scripts/fptn-native-service.sh','scripts/fptn-web-auth.sh','scripts/fptn-web-auth.php','scripts/fptn-web-operations.php','scripts/fptn-transport-plan.php','scripts/fptn-web-update.sh','scripts/fptn-client-capabilities.sh','scripts/fptn-client-identity.sh','scripts/fptn-platform.sh','scripts/fptn-uplink.sh','scripts/fptn-ipv6.sh','runtime-assets.json']
+        paths=['client-release.json','web/index.html','web/index.cgi','web/style.css','web/app.js','web/api.cgi','scripts/fptn-native-service.sh','scripts/fptn-web-auth.sh','scripts/fptn-web-auth.php','scripts/fptn-web-operations.php','scripts/fptn-transport-plan.php','scripts/fptn-web-update.sh','scripts/fptn-client-capabilities.sh','scripts/fptn-client-identity.sh','scripts/fptn-platform.sh','scripts/fptn-uplink.sh','scripts/fptn-ipv6.sh','runtime-assets.json','platform-releases.json']
         for name in paths:
             target=self.payload/name;target.parent.mkdir(parents=True,exist_ok=True)
             target.write_text(controller('staged') if name=='scripts/fptn-native-service.sh' else (REPO/name).read_text())
@@ -334,3 +334,28 @@ sys.exit(result.returncode)
         result=self.execute();self.assertEqual(result.returncode,0,result.stdout+result.stderr)
         downloads=(self.root/'downloads').read_text()
         self.assertNotIn('raw.githubusercontent.com',downloads);self.assertNotIn('/releases/download/',downloads)
+
+    def test_arm_target_uses_its_own_pinned_client_and_decoder_release(self):
+        import json
+        # Test real dispatch and checksums with a harmless host CLI fixture.
+        self.fresh();platform='aarch64'
+        (self.root/'etc/entware_release').write_text('arch=aarch64\ncpu_type=cortex-a53\nfloat=hard\n')
+        uname=self.root/'bin/uname';uname.write_text('#!/bin/sh\necho aarch64\n');uname.chmod(0o700)
+        target={**self.target,'platform':platform}
+        assets=json.loads((self.payload/'runtime-assets.json').read_text())
+        assets.update(platform=platform,clientRelease='port-'+platform+'-'+'b'*40,decoderRelease='port-'+platform+'-'+'b'*40)
+        (self.payload/'platform-releases.json').write_text(json.dumps({'schema':1,'platforms':{platform:{'client':target,'assets':assets}}}))
+        self.refresh_manifest();result=self.execute();self.assertEqual(result.returncode,0,result.stdout+result.stderr)
+        downloads=(self.root/'downloads').read_text()
+        self.assertIn('/download/port-aarch64-'+'b'*40+'/fptn-client-cli',downloads)
+        self.assertIn('/download/port-aarch64-'+'b'*40+'/brotli',downloads)
+        self.assertNotIn('/download/native-',downloads)
+        self.assertEqual(json.loads((self.root/'etc/fptn/client-release.json').read_text()),target)
+        self.assertTrue((self.root/'libexec/fptn/platform.sh').exists())
+
+    def test_arm_with_no_published_target_never_falls_back_to_mips_binary(self):
+        (self.root/'etc/entware_release').write_text('arch=arm\ncpu_type=cortex-a9\nfloat=soft\n')
+        uname=self.root/'bin/uname';uname.write_text('#!/bin/sh\necho armv7l\n');uname.chmod(0o700)
+        (self.payload/'platform-releases.json').write_text('{"schema":1,"platforms":{}}');self.refresh_manifest()
+        result=self.execute();self.assertNotEqual(result.returncode,0)
+        self.assert_original_files();self.assertFalse(self.trace.exists());self.assertNotIn('/releases/download/',(self.root/'downloads').read_text())
