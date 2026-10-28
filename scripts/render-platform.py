@@ -13,8 +13,9 @@ text=text.replace('COPY scripts/verify-elf.py /work/verify-elf.py','COPY scripts
 text=text.replace('-march=mips32r2 -mabi=32 \\\n      -msoft-float',target['flags']).replace('qemu-mipsel',target['emulator'])
 text=text.replace('COPY src/platform-probe.cpp /work/platform-probe.cpp',f'COPY {out.as_posix()}/probe.cpp /work/platform-probe.cpp')
 text=text.replace('RUN sh /work/check-probe-mode.sh',f'RUN sed -i s/qemu-mipsel/{target["emulator"]}/g /work/check-probe-mode.sh && sh /work/check-probe-mode.sh')
-profile=(root/'profiles/mipsel-softfloat').read_text().replace('arch=mips','arch='+target['arch']).replace('mipsel_24kc_gcc-13.3.0_musl',target['toolchain']).replace('mipsel-openwrt-linux-musl',target['triple']).replace('system_processor=mips','system_processor='+target['processor'])
+profile=(root/'profiles/mipsel-softfloat').read_text().replace('\narch=mips\n','\narch='+target['arch']+'\n').replace('mipsel_24kc_gcc-13.3.0_musl',target['toolchain']).replace('mipsel-openwrt-linux-musl',target['triple']).replace('system_processor=mips','system_processor='+target['processor'])
 profile=profile.replace('["-march=mips32r2", "-mabi=32", "-msoft-float"]',json.dumps(target['flags'].split()))
+if '-mabi=32' in profile or '-march=mips' in profile or '-march=armv832' in profile:raise ValueError('MIPS flags leaked into ARM profile')
 (out/'profile').write_text(profile)
 probe=(root/'src/platform-probe.cpp').read_text();a=probe.index('#if !defined(__mips__)');b=probe.index('struct Task',a)
 probe=probe[:a]+('static_assert(sizeof(void*) == '+('8' if platform=='aarch64' else '4')+', "Target ABI");\n\n')+probe[b:]
