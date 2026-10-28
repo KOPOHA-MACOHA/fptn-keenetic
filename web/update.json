@@ -1,11 +1,34 @@
 {
   "schema": 1,
-  "version": "0.13.0",
-  "revision": "ea919dbff9779019ede9f22954890b055ff9cd7b",
-  "installerSha256": "726fd9505b8e4caaa606bbc950c5252d302e30e041daa6c0b3562576cc288afa",
-  "clientRevision": "c0386cbb73bf9ddf35e551c08d094ac0debf2466",
-  "clientVersion": "0.4.0",
-  "clientSha256": "97e04235668e7566bb916685e604151f2c928b9a565265f484cbdec69a1b05dd",
+  "version": "0.15.0",
+  "revision": "2a2936356e3acd72e9246459dd097c4f12f2113f",
+  "installerSha256": "c23cd2b729c9777f25a04448af3dd9a99aa899f6ebd840f2b865c838cf6463a2",
+  "clientRevision": "f0fe5e93b96b73f7eb1fbea0708c0d31c63a4f3c",
+  "clientVersion": "0.5.0",
+  "clientSha256": "c92e9c3cf26b70e63b9730cc626bc61ec51d75f19f72c7c0d9a8aec413670c7b",
   "upstreamVersion": "0.4.6",
-  "upstreamRevision": "a389bee62da930807c3bc85284ee4976e9c7e08f"
+  "upstreamRevision": "a389bee62da930807c3bc85284ee4976e9c7e08f",
+  "platforms": {
+    "mipsel-mips32r2-softfloat": {
+      "clientRevision": "f0fe5e93b96b73f7eb1fbea0708c0d31c63a4f3c",
+      "clientVersion": "0.5.0",
+      "clientSha256": "c92e9c3cf26b70e63b9730cc626bc61ec51d75f19f72c7c0d9a8aec413670c7b",
+      "upstreamVersion": "0.4.6",
+      "upstreamRevision": "a389bee62da930807c3bc85284ee4976e9c7e08f"
+    },
+    "aarch64": {
+      "clientRevision": "15ebc9817d8407241e421ebb9ac7a66c4069a8bd",
+      "clientVersion": "0.5.0",
+      "clientSha256": "35bb43833f5dcac669f5029a0d7fcc02688725ec2c69176858052876b9f8fb60",
+      "upstreamVersion": "0.4.6",
+      "upstreamRevision": "a389bee62da930807c3bc85284ee4976e9c7e08f"
+    },
+    "armv7-softfloat": {
+      "clientRevision": "15ebc9817d8407241e421ebb9ac7a66c4069a8bd",
+      "clientVersion": "0.5.0",
+      "clientSha256": "7f193a16a8abc2002aef94c635b99bb72e23990852b3fe66a7e5a3d832e43014",
+      "upstreamVersion": "0.4.6",
+      "upstreamRevision": "a389bee62da930807c3bc85284ee4976e9c7e08f"
+    }
+  }
 }
