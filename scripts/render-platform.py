@@ -16,6 +16,11 @@ text=text.replace('RUN sh /work/check-probe-mode.sh',f'RUN sed -i s/qemu-mipsel/
 profile=(root/'profiles/mipsel-softfloat').read_text().replace('\narch=mips\n','\narch='+target['arch']+'\n').replace('mipsel_24kc_gcc-13.3.0_musl',target['toolchain']).replace('mipsel-openwrt-linux-musl',target['triple']).replace('system_processor=mips','system_processor='+target['processor'])
 profile=profile.replace('["-march=mips32r2", "-mabi=32", "-msoft-float"]',json.dumps(target['flags'].split()))
 if '-mabi=32' in profile or '-march=mips' in profile or '-march=armv832' in profile:raise ValueError('MIPS flags leaked into ARM profile')
+# GCC 13 ARM32 loses the config->n <= SHA256_CBLOCK BSSL_CHECK across calls
+# in slhdsa/thash.cc.inc:117. Keep its diagnostic visible, demote only this
+# dependency's stringop-overflow warning, without touching crypto source/checks.
+if platform=='armv7-softfloat':
+    profile+='\nopenssl/*:tools.build:cxxflags='+json.dumps(target['flags'].split()+['-Wno-error=stringop-overflow'])+'\n'
 (out/'profile').write_text(profile)
 probe=(root/'src/platform-probe.cpp').read_text();a=probe.index('#if !defined(__mips__)');b=probe.index('struct Task',a)
 probe=probe[:a]+('static_assert(sizeof(void*) == '+('8' if platform=='aarch64' else '4')+', "Target ABI");\n\n')+probe[b:]
