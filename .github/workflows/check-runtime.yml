@@ -27,10 +27,12 @@ jobs:
       - name: Prepare PHP and lighttpd integration tests
         run: |
           sudo apt-get update -qq
-          sudo apt-get install -y -qq php-cgi lighttpd libboost-dev
+          sudo apt-get install -y -qq php-cgi lighttpd libboost-dev iproute2
           php-cgi -n -v
       - name: Verify real IPv4/IPv6 socket binding and endpoint fallback
         run: sudo --preserve-env=PATH python3 -m unittest discover -s tests -p 'test_native_transport.py' -v
+      - name: Verify WAN selection in isolated Linux network namespaces
+        run: sudo --preserve-env=PATH env FPTN_REQUIRE_NETNS=1 python3 -m unittest discover -s tests -p 'test_uplink_namespaces.py' -v
       - name: Verify isolated bootstrap on the runner with PHP and lighttpd installed
         run: python3 -m unittest discover -s tests -p 'test_bootstrap.py' -v
       - name: Verify discovery and invalidation of client capabilities

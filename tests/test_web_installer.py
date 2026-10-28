@@ -49,7 +49,7 @@ elif command=='curl':
   if 'auth-info' in url:
    with (root.parent/'trace').open('a') as f:f.write('http-auth-info\n')
   if '-K' in args:sys.stdin.read()
-  info={'uiVersion':'old' if (root/'wrong-api').exists() else '0.13.0','service':{'state':'stopped'},'busy':False,'status':'stopped','configured':True,'rootAvailable':True}
+  info={'uiVersion':'old' if (root/'wrong-api').exists() else '0.14.0','service':{'state':'stopped'},'busy':False,'status':'stopped','configured':True,'rootAvailable':True}
   text=json.dumps(info)
   if out:out.write_text(text)
   else:print(text)
@@ -103,7 +103,7 @@ esac
         (lib/'brotli').write_text('dummy');(lib/'brotli').chmod(0o700)
         self.old_sums=''.join(hashlib.sha256((lib/p).read_bytes()).hexdigest()+'  '+p+'\n' for p in ['fptn-client-cli','brotli'])
         (lib/'SHA256SUMS').write_text(self.old_sums)
-        paths=['client-release.json','web/index.html','web/index.cgi','web/style.css','web/app.js','web/api.cgi','scripts/fptn-native-service.sh','scripts/fptn-web-auth.sh','scripts/fptn-web-auth.php','scripts/fptn-web-operations.php','scripts/fptn-transport-plan.php','scripts/fptn-web-update.sh','scripts/fptn-client-capabilities.sh','scripts/fptn-client-identity.sh','scripts/fptn-platform.sh','runtime-assets.json']
+        paths=['client-release.json','web/index.html','web/index.cgi','web/style.css','web/app.js','web/api.cgi','scripts/fptn-native-service.sh','scripts/fptn-web-auth.sh','scripts/fptn-web-auth.php','scripts/fptn-web-operations.php','scripts/fptn-transport-plan.php','scripts/fptn-web-update.sh','scripts/fptn-client-capabilities.sh','scripts/fptn-client-identity.sh','scripts/fptn-platform.sh','scripts/fptn-uplink.sh','runtime-assets.json']
         for name in paths:
             target=self.payload/name;target.parent.mkdir(parents=True,exist_ok=True)
             target.write_text(controller('staged') if name=='scripts/fptn-native-service.sh' else (REPO/name).read_text())

@@ -38,8 +38,8 @@ state['mtu']=int(parts[4]);state['trace'].append(['ndmc',*sys.argv[1:]]);p.write
     def test_mismatched_selected_uplink_does_not_fall_back_to_another_interface(self):
         root=self.prepare_native_client();self.write(root,outInterface='eth3')
         try:
-            r=self.cmd('start');self.assertNotEqual(r.returncode,0);self.assertFalse((self.root/'client-args').exists());self.assertEqual(self.state()['mutations'],0)
-            self.assertTrue(any(a[-2:]==['dev','eth3'] for a in self.state()['trace'] if a[0]=='ip'))
+            r=self.cmd('start');self.assertEqual(r.returncode,0,r.stdout+r.stderr);self.assertFalse((self.root/'client-args').exists());self.assertIn('Ожидаем',r.stdout);self.assertEqual(self.state()['mutations'],0)
+            self.assertTrue((root/'var/run/fptn-keenetic/supervisor.pid').exists())
         finally:self.cmd('stop')
     def test_validation_rejects_bad_mtu_and_injected_or_recursive_interface(self):
         for values in [{'mtu':575},{'mtu':65536},{'mtu':True},{'mtu':1500.5},{'mtu':None},{'outInterface':'eth2.2;id'},{'outInterface':'-x'},{'outInterface':'opkgtun0'},{'outInterface':'x'*16}]:

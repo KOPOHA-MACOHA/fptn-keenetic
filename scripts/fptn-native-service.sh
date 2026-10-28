@@ -124,15 +124,28 @@ set_native_mtu() {
   ndmc -c "interface OpkgTun0 ip mtu $1" || return 1
   [ "$(interface_mtu)" = "$1" ] || { echo 'Keenetic не применил MTU.' >&2; return 1; }
 }
+uplink_json() {
+  HELPER=$(dirname "$SELF")/fptn-uplink.sh
+  [ -f "$HELPER" ] || HELPER=$LIB/uplink.sh
+  sh "$HELPER" "$OUT_IFACE"
+}
 resolve_uplink() {
-  if [ -n "$OUT_IFACE" ]; then
-    ip link show dev "$OUT_IFACE" >/dev/null 2>&1 || { echo "Нет исходящего интерфейса $OUT_IFACE." >&2; return 1; }
-    ROUTE=$(ip -4 route show table main default dev "$OUT_IFACE")
-  else ROUTE=$(ip -4 route show table main default); fi
-  GW=$(printf '%s\n' "$ROUTE" | awk '$1=="default" && $2=="via" {print $3; exit}')
-  IFACE=$(printf '%s\n' "$ROUTE" | awk '$1=="default" {for(i=1;i<NF;i++) if($i=="dev") {print $(i+1); exit}}')
-  [ -z "$OUT_IFACE" ] || [ "$IFACE" = "$OUT_IFACE" ] || { echo 'Нет подходящего default route выбранного интерфейса в main.' >&2; return 1; }
-  [ -n "$GW" ] && [ -n "$IFACE" ] || { echo 'Не найден IPv4-шлюз исходящего интерфейса.' >&2; return 1; }
+  UPLINK=$(uplink_json) || return 1
+  IFACE=$(printf '%s' "$UPLINK" | jq -r .interface)
+  GW=$(printf '%s' "$UPLINK" | jq -r .gateway)
+  UPLINK_SIGNATURE=$(printf '%s' "$UPLINK" | jq -r .signature)
+}
+check_uplink_change() {
+  CURRENT_UPLINK=$(uplink_json 2>/dev/null) || CURRENT_UPLINK='{}'
+  CURRENT_SIGNATURE=$(printf '%s' "$CURRENT_UPLINK" | jq -r '.signature // "offline"')
+  if [ "$CURRENT_SIGNATURE" = "$UPLINK_SIGNATURE" ]; then UPLINK_CANDIDATE=; UPLINK_OBSERVATIONS=0; return 0; fi
+  if [ "$CURRENT_SIGNATURE" = "$UPLINK_CANDIDATE" ]; then UPLINK_OBSERVATIONS=$((UPLINK_OBSERVATIONS+1))
+  else UPLINK_CANDIDATE=$CURRENT_SIGNATURE; UPLINK_OBSERVATIONS=1; fi
+  [ "$UPLINK_OBSERVATIONS" -lt 2 ] && return 0
+  UPLINK_CHANGED=yes
+  printf 'reconnecting\n' > "$RUN/phase"
+  echo 'Изменилось исходящее подключение. Переподключаем FPTN.' > "$RUN/state"
+  return 1
 }
 
 validate_server_policy() {
@@ -370,6 +383,15 @@ run_service() {
   printf '[]\n' > "$RUN/failed-servers.json"
   make_transport_plan
   while :; do
+    load_connection
+    if ! resolve_uplink; then
+      printf 'waiting-network\n' > "$RUN/phase"
+      echo 'Ожидаем исходящее подключение к интернету.' > "$RUN/state"
+      sleep 5
+      make_transport_plan
+      continue
+    fi
+    UPLINK_CHANGED=no; NETWORK_MISSING=no
     rm -f "$RUN/ready" "$RUN/active-server" "$RUN/link.json"
     printf 'starting\n' > "$RUN/phase"
     echo 'FPTN: подключение.' > "$RUN/state"
@@ -383,6 +405,18 @@ run_service() {
     else
       attempt_service
       stop_child
+      if [ "$UPLINK_CHANGED" = yes ]; then
+        printf '[]\n' > "$RUN/failed-servers.json"
+        BACKOFF=5
+        make_transport_plan
+        continue
+      fi
+      if [ "$NETWORK_MISSING" = yes ]; then
+        printf 'waiting-network\n' > "$RUN/phase"
+        echo 'Ожидаем исходящее подключение к интернету.' > "$RUN/state"
+        sleep 5
+        continue
+      fi
       if [ "$USE_PLAN" = yes ]; then
         record_auth_denials
         if [ "$ATTEMPT_STABLE" = yes ]; then FORCE_AUTO=yes; make_transport_plan; continue; fi
@@ -420,7 +454,11 @@ attempt_service() {
   ATTEMPT_SELECTED=; ATTEMPT_READY=no; ATTEMPT_STABLE=no
   load_connection
   # Re-read the uplink on every attempt: DHCP/failover can change it.
-  resolve_uplink || return 0
+  if ! resolve_uplink; then NETWORK_MISSING=yes; return 0; fi
+  if [ -z "$GW" ] && ! "$LIB/fptn-client-cli" --help | grep -q -- '--keenetic-native-transport'; then
+    echo 'Для PPPoE без шлюза нужен клиент 0.5.0.' >&2; return 0
+  fi
+  UPLINK_CANDIDATE=; UPLINK_OBSERVATIONS=0; UPLINK_TICKS=0
   if [ "$MTU" -eq 0 ]; then MTU=$(interface_mtu) || return 0
   else set_native_mtu "$MTU" || return 0; fi
   if [ "$USE_PLAN" = yes ]; then
@@ -464,6 +502,8 @@ attempt_service() {
     client_alive || { capture_selected; echo 'FPTN: клиент завершился до READY.'; return 0; }
     [ "$N" -lt "$READY_TIMEOUT" ] || { capture_selected; echo 'FPTN: превышено время выбора сервера и запуска.'; return 0; }
     trim_logs; sleep 1; N=$((N+1))
+    UPLINK_TICKS=$((UPLINK_TICKS+1))
+    if [ "$UPLINK_TICKS" -ge 6 ]; then UPLINK_TICKS=0; check_uplink_change || return 0; fi
   done
   : > "$RUN/ready"
   printf 'running\n' > "$RUN/phase"
@@ -473,6 +513,8 @@ attempt_service() {
   STABLE_N=0
   while client_alive; do
     trim_logs; sleep 2
+    UPLINK_TICKS=$((UPLINK_TICKS+2))
+    if [ "$UPLINK_TICKS" -ge 6 ]; then UPLINK_TICKS=0; check_uplink_change || return 0; fi
     if [ "$USE_PLAN" = yes ] && ! jq -e '.state=="connected"' "$RUN/link.json" >/dev/null 2>&1; then STABLE_N=0
     else STABLE_N=$((STABLE_N+1)); fi
     # Reset only after a stable minute, so rapid crash loops keep backing off.
@@ -514,6 +556,7 @@ start_service() {
   N=0
   while [ "$N" -lt "$START_TIMEOUT" ]; do
     if [ -f "$RUN/ready" ]; then status_service; return 0; fi
+    if [ "$(cat "$RUN/phase" 2>/dev/null)" = waiting-network ] && supervisor_owned; then status_service; return 0; fi
     [ -d "$RUN" ] || { show_logs; fail 'Клиент не запустился.'; }
     sleep 1; N=$((N+1))
   done
@@ -538,7 +581,7 @@ status_json() {
     SUPERVISOR=true; STATE=starting
     if [ -r "$RUN/phase" ]; then
       PHASE=$(cat "$RUN/phase")
-      case "$PHASE" in starting|selecting|retrying) STATE=$PHASE ;; esac
+      case "$PHASE" in starting|selecting|retrying|waiting-network|reconnecting) STATE=$PHASE ;; esac
     fi
     if client_alive; then
       CLIENT=true
@@ -555,6 +598,7 @@ status_json() {
   case "$STATE" in
     stopped) MESSAGE='Служба остановлена.' ;;
     running) if [ "$CONNECTED" = true ]; then MESSAGE='Туннель FPTN подключён.'; else MESSAGE='Клиент запущен; текущее состояние туннеля не подтверждено.'; fi ;;
+    waiting-network) MESSAGE='Ожидаем исходящее подключение к интернету.' ;;
     reconnecting) MESSAGE='Соединение потеряно. FPTN восстанавливает туннель.' ;;
     selecting) MESSAGE='Проверяем серверы и выбираем подключение.'; [ ! -s "$RUN/state" ] || MESSAGE=$(cat "$RUN/state") ;;
     retrying) MESSAGE='Ожидаем следующую попытку подключения.' ;;
@@ -693,7 +737,7 @@ uninstall_runtime() (
   rm -f "$CONF/autostart" "$INIT"
   for file in index.html index.cgi app.js style.css api.cgi .fptn-web-owned; do rm -f "$WEB/$file"; done
   rmdir "$WEB" 2>/dev/null || true
-  for file in fptn-client-cli brotli web-auth.sh web-auth.php web-operations.php transport-plan.php web-update.sh client-capabilities.sh client-identity.sh sources.lock.json SHA256SUMS LICENSE-FPTN LICENSE-BROTLI BROTLI-SOURCE.txt .runtime-managed; do rm -f "$LIB/$file"; done
+  for file in fptn-client-cli brotli web-auth.sh web-auth.php web-operations.php transport-plan.php web-update.sh client-capabilities.sh client-identity.sh uplink.sh sources.lock.json SHA256SUMS LICENSE-FPTN LICENSE-BROTLI BROTLI-SOURCE.txt .runtime-managed; do rm -f "$LIB/$file"; done
   rmdir "$LIB" 2>/dev/null || true
   rm -f "$ROOT/bin/fptnctl"
   echo 'Программа и панель FPTN удалены. Пакеты Entware и другие веб-панели сохранены.'
@@ -736,6 +780,7 @@ case "${1:-}" in
   get-fallback) fallback_json ;;
   validate-fallback) sh "$LIB/web-auth.sh" transport-validate ;;
   get-capabilities) capabilities_json ;;
+  get-uplink) load_connection; uplink_json ;;
   get-settings) connection_json ;;
   validate-settings) validate_connection ;;
   get-interface-mtu) interface_mtu ;;

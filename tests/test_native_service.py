@@ -121,13 +121,15 @@ int main(int argc,char**argv){
  if(!suppress || access(suppress,F_OK)) {puts("Connection #1 READY"); fflush(stdout);}
  while(!stopped) sleep(1); return 0;
 }
-'''.replace('HELP_FIXTURE',json.dumps(client_fixture.help_text())))
+'''.replace('HELP_FIXTURE',json.dumps(client_fixture.help_text()+('\n--keenetic-native-transport\n' if self.env.get('FPTN_MOCK_NATIVE_TRANSPORT') else ''))))
         subprocess.run([compiler,str(source),'-o',str(lib/'fptn-client-cli')],check=True,capture_output=True)
         (lib/'brotli').write_text('unused')
         (lib/'SHA256SUMS').write_text(''.join(hashlib.sha256((lib/f).read_bytes()).hexdigest()+'  '+f+'\n' for f in ['fptn-client-cli','brotli']))
         for key,value in {'token':'secret-token','server':'CZ','native-interface':'OpkgTun0','native-setup-complete':''}.items():
             (conf/key).write_text(value+'\n')
+        shutil.copyfile(SCRIPT.parent/'fptn-uplink.sh',lib/'uplink.sh')
         mock=(self.bin/'ip').read_text()
+        mock=mock.replace("if cmd=='ip':\n", "if cmd=='ip':\n    if 'addr' in a: done(output='2: eth2.2    inet 100.64.0.100/16 scope global eth2.2\\n')\n    if 'link' in a and a[-1]=='eth2.2': done(output='2: eth2.2: <UP,LOWER_UP> mtu 1500 state UP\\n')\n",1)
         mock=mock.replace("    if 'link' in a:\n", "    if 'link' in a and 'opkgtun0' in a: done(output='52: opkgtun0: <UP> mtu '+str(s.get('mtu',1420))+' qdisc fq_codel\\n')\n    if 'link' in a:\n",1)
         mock=mock.replace("    if a[1:3]==['route','show']:","    if a[1:3]==['route','show'] and '30091' in a:",1)
         mock=mock.replace("    mutation()\n    if a[1]=='rule':", "    if a[1:3]==['route','show']: done(output='default via 100.64.0.2 dev eth2.2\\n')\n    mutation()\n    if a[1]=='rule':")

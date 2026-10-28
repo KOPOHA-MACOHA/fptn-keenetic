@@ -1,5 +1,5 @@
 <!doctype html>
-<html lang="ru" data-ui-version="0.13.0">
+<html lang="ru" data-ui-version="0.14.0">
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
@@ -7,13 +7,13 @@
   <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self'; style-src 'self'; connect-src 'self'; img-src 'self'; object-src 'none'; base-uri 'none'; form-action 'self'; frame-src 'none'">
   <title>FPTN · Keenetic</title>
   <link rel="icon" href="data:,">
-  <link rel="stylesheet" href="style.css?v=0.13.0-8f209edfd09d">
-  <script src="app.js?v=0.13.0-ed7f5e18363e" defer></script>
+  <link rel="stylesheet" href="style.css?v=0.14.0-8f209edfd09d">
+  <script src="app.js?v=0.14.0-d3c9128ce1ca" defer></script>
 </head>
 <body>
   <div class="shell">
     <header><a class="brand" href="./"><span class="mark">F</span><span>FPTN <small>KEENETIC</small></span></a><button id="logout" class="quiet" hidden>Выйти</button></header>
-    <p id="versions" class="version-line">Панель 0.13.0 · версия клиента появится после входа</p>
+    <p id="versions" class="version-line">Панель 0.14.0 · версия клиента появится после входа</p>
     <div id="version-mismatch" class="banner error-banner" hidden><span id="version-mismatch-text"></span><button id="reload-ui" type="button">Обновить страницу</button></div>
     <section id="auth-loading" class="card login" role="status" aria-live="polite">
       <h1>FPTN</h1><p id="auth-loading-message">Проверяем сессию…</p>
@@ -93,7 +93,7 @@
               <div id="mtu-custom" hidden><label for="mtu">Значение MTU</label><input id="mtu" type="number" min="576" max="65535" step="1" value="1420"></div>
               <p class="hint">«Как в Keenetic» использует текущее значение OpkgTun0. Значение по умолчанию оригинального FPTN — 1420. Вручную можно задать 576–65535 только для интерфейса FPTN.</p>
               <label for="out-interface">Исходящий интерфейс</label><input id="out-interface" maxlength="15" autocomplete="off" spellcheck="false" placeholder="Автоматически">
-              <p class="hint">Необязательно: системное имя, например eth2.2. Пусто — обычное подключение к интернету. Для выбранного интерфейса нужен IPv4-шлюз в основной таблице маршрутизации.</p>
+              <p class="hint">Необязательно: системное имя, например eth2.2. Пусто — обычное подключение к интернету. Поддерживаются Ethernet и PPPoE без отдельного шлюза. При отсутствии выбранного подключения служба ждёт его восстановления. В автоматическом режиме следует смене WAN.</p>
             </details>
             <button id="save" class="primary wide" type="submit">Сохранить настройки</button>
             <p id="save-help" class="hint">Сохранение не запускает остановленную службу.</p>

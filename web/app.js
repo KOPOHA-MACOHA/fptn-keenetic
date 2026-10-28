@@ -1,5 +1,5 @@
 'use strict';
-const UI_VERSION = '0.13.0';
+const UI_VERSION = '0.14.0';
 const $ = id => document.getElementById(id);
 if (window.top !== window.self) { document.documentElement.replaceChildren(); throw new Error('Panel cannot be framed'); }
 let profiles={},clientCapabilities=null;
@@ -137,9 +137,9 @@ function applyStatus(data){
   $('onboarding').hidden=!needToken&&!needInterface;
   $('onboarding-message').textContent=needToken?'Добавьте токен в разделе «Сервер и токен», прочитайте серверы и сохраните настройки. Для подключения нужен штатный интерфейс FPTN.':needInterface?'Создайте интерфейс FPTN, затем нажмите «Запустить». После подключения назначьте нужные домены и CIDR этому интерфейсу в Keenetic.':'';
   $('setup-interface').hidden=!needInterface;$('setup-interface-help').hidden=!needInterface;
-  const titles={stopped:'Служба остановлена',starting:'Запускаем службу',selecting:'Выбираем сервер',retrying:'Ожидаем повторного подключения',reconnecting:'Восстанавливаем соединение',stale:'Служба требует восстановления'};
+  const titles={'waiting-network':'Ожидаем интернет',stopped:'Служба остановлена',starting:'Запускаем службу',selecting:'Выбираем сервер',retrying:'Ожидаем повторного подключения',reconnecting:'Восстанавливаем соединение',stale:'Служба требует восстановления'};
   $('status-title').textContent=service.state==='running'?(service.connected?'Туннель подключён':'Клиент запущен'):titles[service.state]||'Состояние неизвестно';
-  $('indicator').className='dot'+(service.connected?' active':['starting','selecting','retrying','reconnecting'].includes(service.state)?' busy':'');
+  $('indicator').className='dot'+(service.connected?' active':['starting','selecting','retrying','reconnecting','waiting-network'].includes(service.state)?' busy':'');
   const effective=service.effectiveConnection;$('effective-connection').textContent=effective?(service.state==='running'?'Используется: ':'Попытка: ')+(effective.bypass==='obfuscation'?'маскировка трафика':effective.bypass.replace('sni-spoofing-','')+' · SNI '+effective.sni)+(effective.mtu?' · MTU '+effective.mtu:'')+(effective.outInterface?' · '+effective.outInterface:''):'Параметры активного подключения появятся после переподключения.';
   $('status-message').textContent=service.message;$('status-text').textContent=data.status;
   $('active-server').textContent=service.selectedServer||'Нет активного сервера';
