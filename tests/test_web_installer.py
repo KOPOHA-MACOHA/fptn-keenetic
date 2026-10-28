@@ -269,6 +269,8 @@ sys.exit(result.returncode)
 
     def test_identical_binary_migrates_provenance_without_restarting_or_redownloading(self):
         import json
+        # Only provenance/UI changes, not the daemon's program.
+        (self.root/'bin/fptnctl').write_bytes((self.payload/'scripts/fptn-native-service.sh').read_bytes())
         lib=self.root/'libexec/fptn';(lib/'fptn-client-cli').write_bytes((self.payload/'client/fptn-client-cli').read_bytes())
         (lib/'sources.lock.json').write_bytes((self.payload/'client/sources.lock.json').read_bytes())
         result=self.execute();self.assertEqual(result.returncode,0,result.stdout+result.stderr)
@@ -359,3 +361,20 @@ sys.exit(result.returncode)
         (self.payload/'platform-releases.json').write_text('{"schema":1,"platforms":{}}');self.refresh_manifest()
         result=self.execute();self.assertNotEqual(result.returncode,0)
         self.assert_original_files();self.assertFalse(self.trace.exists());self.assertNotIn('/releases/download/',(self.root/'downloads').read_text())
+
+    def test_changed_supervisor_restarts_even_with_identical_client_bytes(self):
+        lib=self.root/'libexec/fptn'
+        (lib/'fptn-client-cli').write_bytes((self.payload/'client/fptn-client-cli').read_bytes())
+        (lib/'sources.lock.json').write_bytes((self.payload/'client/sources.lock.json').read_bytes())
+        result=self.execute();self.assertEqual(result.returncode,0,result.stdout+result.stderr)
+        self.assertIn('staged-stop',self.trace.read_text());self.assertIn('staged-start',self.trace.read_text())
+        self.assertNotIn('/releases/download/',(self.root/'downloads').read_text())
+
+    def test_changed_supervisor_start_failure_restores_old_service_without_binary_swap(self):
+        lib=self.root/'libexec/fptn';self.old_binary=(self.payload/'client/fptn-client-cli').read_text()
+        (lib/'fptn-client-cli').write_text(self.old_binary)
+        self.old_sums=''.join(hashlib.sha256((lib/p).read_bytes()).hexdigest()+'  '+p+'\n' for p in ['fptn-client-cli','brotli']);(lib/'SHA256SUMS').write_text(self.old_sums)
+        (self.root/'fail-new-start').touch()
+        result=self.execute();self.assertNotEqual(result.returncode,0,result.stdout+result.stderr)
+        self.assert_original_files();self.assertIn('old-start',self.trace.read_text())
+        self.assertTrue((self.root/'var/run/fptn-keenetic').exists())

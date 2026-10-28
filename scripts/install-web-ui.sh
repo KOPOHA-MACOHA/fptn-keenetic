@@ -90,6 +90,7 @@ SUMS_EXISTED=no
 ORIGIN_EXISTED=no
 META_EXISTED=no
 CLIENT_UPDATE=no
+SERVICE_UPDATE=no
 WAS_RUNNING=no
 SERVICE_STOPPED=no
 CLIENT_SWAPPED=no
@@ -277,6 +278,9 @@ CAP_CLIENT=/opt/libexec/fptn/fptn-client-cli
 sh "$STAGE/scripts/fptn-client-capabilities.sh" "$CAP_CLIENT" > "$STAGE/capabilities.json" || fail 'Не удалось определить возможности клиента. Установленные файлы не менялись.'
 jq -e --arg sum "$TARGET_SUM" --arg version "$TARGET_VERSION" '.sha256==$sum and .clientVersion==$version' "$STAGE/capabilities.json" >/dev/null || fail 'Возможности клиента не совпали с описанием сборки.'
 FPTN_CAP_CLIENT=$CAP_CLIENT sh "$STAGE/scripts/fptn-native-service.sh" get-settings >/dev/null
+# A changed supervisor must run now, even when the ELF is byte-identical.
+# UI-only/provenance-only updates keep an unchanged running service in place.
+if [ "$FRESH" = no ] && [ "$(sha256sum /opt/bin/fptnctl | awk '{print $1}')" != "$(sha256sum "$STAGE/scripts/fptn-native-service.sh" | awk '{print $1}')" ]; then SERVICE_UPDATE=yes; fi
 mkdir -p "$CONF" /opt/share /opt/var/run/fptn-web
 chmod 700 "$CONF" /opt/var/run/fptn-web
 BACKUP=$(mktemp -d "$CONF/web-install-backup.XXXXXX")
@@ -436,7 +440,7 @@ echo 'lighttpd отвечает: страница и API панели 0.15.0 п�
 if [ "$PANEL_CACHE_WARNING" = yes ]; then
   echo "Откройте свежую страницу по ссылке $ORIGIN/?v=$REV (заголовок кэша применится после перезагрузки lighttpd)."
 fi
-if [ "$CLIENT_UPDATE" = yes ]; then
+if [ "$CLIENT_UPDATE" = yes ] || [ "$SERVICE_UPDATE" = yes ]; then
   [ ! -d /opt/var/run/fptn-keenetic ] || WAS_RUNNING=yes
   # Use the verified new stop implementation, not the installed faulty one.
   if [ "$FRESH" = no ] && ! sh "$STAGE/scripts/fptn-native-service.sh" stop; then
@@ -444,6 +448,8 @@ if [ "$CLIENT_UPDATE" = yes ]; then
   fi
   SERVICE_STOPPED=yes
   CHANGED=yes
+fi
+if [ "$CLIENT_UPDATE" = yes ]; then
   cp "$STAGE/client/fptn-client-cli" /opt/libexec/fptn/fptn-client-cli.new
   chmod 700 /opt/libexec/fptn/fptn-client-cli.new
   # Arm restoration before rename so an interrupt after rename is also covered.
@@ -460,7 +466,7 @@ cp "$STAGE/sources.lock.json" /opt/libexec/fptn/sources.lock.json.new
 chmod 600 /opt/libexec/fptn/sources.lock.json.new
 mv /opt/libexec/fptn/sources.lock.json.new /opt/libexec/fptn/sources.lock.json
 (cd /opt/libexec/fptn; sha256sum fptn-client-cli brotli > SHA256SUMS.new; mv SHA256SUMS.new SHA256SUMS)
-if [ "$CLIENT_UPDATE" = yes ] && [ "$WAS_RUNNING" = yes ]; then
+if [ "$SERVICE_STOPPED" = yes ] && [ "$WAS_RUNNING" = yes ]; then
   RESTART_ATTEMPTED=yes
   /opt/bin/fptnctl start || fail 'Обновлённый клиент не запустился.'
 fi
@@ -481,4 +487,5 @@ if [ "$FRESH" = yes ]; then
 else echo 'Токен, выбранный сервер, маршруты и DNS сохранены.'; fi
 echo 'Автозапуск FPTN не включался.' 
 if [ "$CLIENT_UPDATE" = yes ]; then echo 'Бинарник обновлён; прежнее состояние службы восстановлено.'
-else echo 'Для применения параметров используйте панель; supervisor обновится при следующем запуске.'; fi
+elif [ "$SERVICE_UPDATE" = yes ]; then echo 'Supervisor обновлён; прежнее состояние службы восстановлено.'
+else echo 'Служба и бинарник не изменились; повторный запуск не требовался.'; fi

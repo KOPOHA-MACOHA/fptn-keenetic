@@ -60,3 +60,17 @@ class IPv6LifecycleTest(unittest.TestCase):
         for value in [None,'true',1,{}]:self.assertNotEqual(validate({**base,'ipv6':value}).returncode,0)
         self.assertNotEqual(validate({**base,'ipv6':True,'mtu':1279}).returncode,0)
         result=validate({**base,'ipv6':True});self.assertEqual(result.returncode,0,result.stderr);self.assertTrue(json.loads(result.stdout)['ipv6'])
+
+    def test_firmware_hook_queues_owned_supervisor_work_without_mutating_netfilter(self):
+        run=self.root/'var/run/fptn-keenetic';run.mkdir(parents=True)
+        (self.conf/'connection.json').write_text('{"ipv6":true}')
+        result=self.call('supervisor_owned() { return 0; }; sync_ipv6')
+        self.assertEqual(result.returncode,0,result.stderr);self.assertTrue((run/'ipv6-resync').exists())
+        self.assertFalse((self.root/'nat-actions').exists())
+        result=self.call('IPV6=true; restore_ipv6; restore_ipv6')
+        self.assertEqual(result.returncode,0,result.stderr)
+        self.assertEqual((self.root/'nat-actions').read_text().splitlines(),['apply'])
+        self.assertFalse((run/'ipv6-resync').exists())
+        result=self.call('supervisor_owned() { return 1; }; sync_ipv6')
+        self.assertEqual(result.returncode,0,result.stderr);self.assertFalse((run/'ipv6-resync').exists())
+        self.assertEqual((self.root/'nat-actions').read_text().splitlines(),['apply'])

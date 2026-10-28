@@ -163,9 +163,17 @@ prepare_ipv6() {
   ipv6_helper apply
 }
 sync_ipv6() {
-  if client_alive && [ -f "$CONF/connection.json" ] && jq -e '.ipv6==true' "$CONF/connection.json" >/dev/null; then
-    ipv6_helper apply
-  else ipv6_helper remove; fi
+  # The firmware hook only notifies the owner. It never competes with stop or
+  # writes iptables while NDM may still hold the netfilter lock.
+  if supervisor_owned && [ -f "$CONF/connection.json" ] && jq -e '.ipv6==true' "$CONF/connection.json" >/dev/null; then
+    : > "$RUN/ipv6-resync"
+  fi
+  return 0
+}
+restore_ipv6() {
+  [ "$IPV6" = true ] && [ -f "$RUN/ipv6-resync" ] || return 0
+  rm -f "$RUN/ipv6-resync"
+  ipv6_helper apply
 }
 uplink_json() {
   HELPER=$(dirname "$SELF")/fptn-uplink.sh
@@ -550,6 +558,12 @@ attempt_service() {
     UPLINK_TICKS=$((UPLINK_TICKS+1))
     if [ "$UPLINK_TICKS" -ge 6 ]; then UPLINK_TICKS=0; check_uplink_change || return 0; fi
   done
+  # Address assignment can itself trigger a firmware firewall rebuild before
+  # client.pid exists. Restore once at READY as well as on queued notifications.
+  if [ "$IPV6" = true ]; then
+    : > "$RUN/ipv6-resync"
+    restore_ipv6 || fail 'Не удалось восстановить IPv6 NAT FPTN.'
+  fi
   : > "$RUN/ready"
   printf 'running\n' > "$RUN/phase"
   capture_selected
@@ -557,6 +571,7 @@ attempt_service() {
   echo 'FPTN: READY получен для текущего процесса.'
   STABLE_N=0
   while client_alive; do
+    restore_ipv6 || fail 'Не удалось восстановить IPv6 NAT FPTN.'
     trim_logs; sleep 2
     UPLINK_TICKS=$((UPLINK_TICKS+2))
     if [ "$UPLINK_TICKS" -ge 6 ]; then UPLINK_TICKS=0; check_uplink_change || return 0; fi
