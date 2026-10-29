@@ -2,7 +2,7 @@
 
 | Пакет | Минимальная ISA / ABI | Проверка |
 | --- | --- | --- |
-| mipsel-mips32r2-softfloat | MIPS32r2, little-endian, o32, soft-float | Реальное подключение версии 0.4.0 на Hopper KN-3810; новая 0.5.0 — сборка, ELF и QEMU |
+| mipsel-mips32r2-softfloat | MIPS32r2, little-endian, o32, soft-float | Для клиента 0.5.0 — сборка, ELF и QEMU; не гарантия поддержки каждой модели |
 | aarch64 | ARMv8-A, little-endian, LP64 | Экспериментальная кросс-сборка; ELF и QEMU пройдены, аппаратной проверки нет |
 | armv7-softfloat | ARMv7-A, little-endian, EABI5, базовое соглашение вызова | Экспериментальная кросс-сборка; ELF и QEMU пройдены, аппаратной проверки нет |
 
