@@ -83,6 +83,9 @@ port_available() {
     case "$process" in */lighttpd) listener_pid=${process%/*} ;; *) exit 1 ;; esac
     case "$listener_pid" in ''|*[!0-9]*) exit 1 ;; esac
     [ "$(readlink "/proc/$listener_pid/exe" 2>/dev/null)" = "$(readlink -f "$(command -v lighttpd)")" ] || exit 1
+    tr '\000' '\n' < "/proc/$listener_pid/cmdline" | awk -v main="$MAIN" '
+      ($0==main && previous=="-f") || $0=="-f" main {owned=1}
+      {previous=$0} END {exit !owned}' || exit 1
   done
 }
 select_port() {

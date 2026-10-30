@@ -7,6 +7,7 @@ import select
 import shutil
 import signal
 import subprocess
+import sys
 import tempfile
 import time
 import unittest
@@ -24,14 +25,16 @@ class PortSelectionTest(unittest.TestCase):
         self.env={**os.environ,'PATH':str(self.bin)+':'+os.environ['PATH'],'LISTENERS_FILE':str(self.listeners)}
         text=(ROOT/'scripts/install-web-ui.sh').read_text();text=text[text.index('valid_port() {'):text.index('INIT=\n')]
         self.script=self.root/'test.sh'
-        self.script.write_text('set -eu\nfail() { echo "$*" >&2; exit 1; }\nCONF='+str(self.conf)+'\nWEB='+str(self.web)+'\nFRAGMENT='+str(self.fragment)+'\nPORT=${1:-}\n'+text+'\nselect_port\nprintf "SELECTED=%s\\n" "$PORT"\n')
+        self.script.write_text('set -eu\nfail() { echo "$*" >&2; exit 1; }\nCONF='+str(self.conf)+'\nWEB='+str(self.web)+'\nFRAGMENT='+str(self.fragment)+'\nMAIN='+str(self.root/'lighttpd.conf')+'\nPORT=${1:-}\n'+text+'\nselect_port\nprintf "SELECTED=%s\\n" "$PORT"\n')
     def occupied(self,*ports):
         self.listeners.write_text(''.join('tcp6 0 0 :::'+str(p)+' :::* LISTEN 123/foreign\n' for p in ports))
     def run_plain(self,port='',**env):
         return subprocess.run(['sh',str(self.script),port],env={**self.env,**env},capture_output=True,text=True,timeout=5,start_new_session=True)
-    def interactive(self,answers,port=''):
+    def interactive(self,answers,port='',pipe=False):
         pid,fd=pty.fork()
-        if pid==0:os.execvpe('sh',['sh',str(self.script),port],self.env)
+        if pid==0:
+            if pipe:os.execvpe('sh',['sh','-c','cat "$1" | sh -s -- "$2"','fptn',str(self.script),port],self.env)
+            os.execvpe('sh',['sh',str(self.script),port],self.env)
         out=b'';sent=0;deadline=time.monotonic()+6
         try:
             while time.monotonic()<deadline:
@@ -62,6 +65,11 @@ class PortSelectionTest(unittest.TestCase):
         self.occupied(65535)
         code,out=self.interactive(['0','-1','0001','1;id','65536','65535','2345'])
         self.assertEqual(code,0,out);self.assertNotIn('Enter — 65536',out);self.assertIn('SELECTED=2345',out)
+    def test_port_prompt_reads_tty_when_script_arrives_over_a_pipe(self):
+        self.occupied(1111)
+        code,out=self.interactive(['','2345'],pipe=True)
+        self.assertEqual(code,0,out);self.assertIn('SELECTED=2345',out)
+
     def test_headless_requires_explicit_port_and_rejects_conflict(self):
         self.assertNotEqual(self.run_plain().returncode,0)
         self.assertEqual(self.run_plain('3333').returncode,0)
@@ -72,14 +80,35 @@ class PortSelectionTest(unittest.TestCase):
         self.assertEqual(result.returncode,0,result.stderr);self.assertIn('SELECTED=3456',result.stdout)
         self.assertNotIn('Enter',result.stdout)
         self.occupied(3456);self.assertNotEqual(self.run_plain(FPTN_OPERATION_ID='a'*32).returncode,0)
+    def test_actual_cgi_accepts_custom_port_and_canonical_http_port_80(self):
+        root=self.root/'api';conf=root/'etc/fptn';conf.mkdir(parents=True)
+        lib=root/'libexec/fptn';lib.mkdir(parents=True)
+        (lib/'web-auth.sh').write_text('#!/bin/sh\necho \'{"configured":false,"rootAvailable":true}\'\n')
+        def request(host,origin):
+            env={**os.environ,'FPTN_PREFIX':str(root),'REQUEST_METHOD':'GET','QUERY_STRING':'auth-info','HTTP_HOST':host,'HTTP_ORIGIN':origin}
+            r=subprocess.run(['sh',str(ROOT/'web/api.cgi')],env=env,capture_output=True,text=True,timeout=5)
+            self.assertEqual(r.returncode,0,r.stderr)
+            return r.stdout.splitlines()[0]
+        (conf/'web-origin').write_text('http://192.168.1.1:80\n')
+        for host,origin in [('192.168.1.1','http://192.168.1.1'),('192.168.1.1:80','http://192.168.1.1:80')]:
+            self.assertIn('200 OK',request(host,origin))
+        self.assertIn('403 Forbidden',request('192.168.1.1:81','http://192.168.1.1'))
+        self.assertIn('403 Forbidden',request('192.168.1.1','http://evil.example'))
+        (conf/'web-origin').write_text('http://192.168.1.1:3456\n')
+        self.assertIn('200 OK',request('192.168.1.1:3456','http://192.168.1.1:3456'))
+        self.assertIn('403 Forbidden',request('192.168.1.1','http://192.168.1.1'))
+
     def test_own_listener_requires_matching_origin_fragment_and_executable(self):
-        daemon=subprocess.Popen(['sleep','20']);self.addCleanup(lambda: (daemon.terminate(),daemon.wait()))
-        (self.bin/'lighttpd').symlink_to(shutil.which('sleep'))
+        daemon=subprocess.Popen([sys.executable,'-c','import time;time.sleep(20)','-f',str(self.root/'lighttpd.conf')]);self.addCleanup(lambda: (daemon.terminate(),daemon.wait()))
+        (self.bin/'lighttpd').symlink_to(sys.executable)
         (self.conf/'web-origin').write_text('http://192.168.4.1:3456\n')
         (self.web/'.fptn-web-owned').touch()
         self.fragment.write_text('# Managed by fptn-web-ui\n$SERVER["socket"] == "192.168.4.1:3456" {\n}\n')
         self.listeners.write_text('tcp 0 0 192.168.4.1:3456 0.0.0.0:* LISTEN '+str(daemon.pid)+'/lighttpd\n')
         result=self.run_plain('3456');self.assertEqual(result.returncode,0,result.stderr)
+        original=self.script.read_text();self.script.write_text(original.replace(str(self.root/'lighttpd.conf'),str(self.root/'other.conf')))
+        self.assertNotEqual(self.run_plain('3456').returncode,0)
+        self.script.write_text(original)
         self.fragment.write_text('# Managed by fptn-web-ui\n$SERVER["socket"] == "192.168.4.1:1111" {\n}\n')
         self.assertNotEqual(self.run_plain('3456').returncode,0)
         self.occupied(3456);self.assertNotEqual(self.run_plain('3456').returncode,0)

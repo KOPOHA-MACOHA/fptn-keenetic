@@ -166,8 +166,18 @@ error() { respond "$1" "$(jq -n --arg error "$2" '{error:$error}')"; }
 # Validate the target before accepting credentials, including login requests.
 [ -r "$CONF/web-origin" ] || error '503 Service Unavailable' 'Панель не настроена.'
 ORIGIN=$(cat "$CONF/web-origin")
-[ "${HTTP_HOST:-}" = "${ORIGIN#http://}" ] || error '403 Forbidden' 'Неверный адрес панели.'
-[ -z "${HTTP_ORIGIN:-}" ] || [ "$HTTP_ORIGIN" = "$ORIGIN" ] || error '403 Forbidden' 'Запрос с другого сайта запрещён.'
+EXPECTED_HOST=${ORIGIN#http://}
+REQUEST_HOST=${HTTP_HOST:-}
+REQUEST_ORIGIN=${HTTP_ORIGIN:-}
+# Browsers omit the default HTTP port in Host/Origin, even for a URL with :80.
+case "$EXPECTED_HOST" in *:80)
+  EXPECTED_HOST=${EXPECTED_HOST%:80}
+  [ "$REQUEST_HOST" != "$EXPECTED_HOST:80" ] || REQUEST_HOST=$EXPECTED_HOST
+  [ "$REQUEST_ORIGIN" != "http://$EXPECTED_HOST:80" ] || REQUEST_ORIGIN=http://$EXPECTED_HOST
+  ORIGIN=http://$EXPECTED_HOST
+esac
+[ "$REQUEST_HOST" = "$EXPECTED_HOST" ] || error '403 Forbidden' 'Неверный адрес панели.'
+[ -z "$REQUEST_ORIGIN" ] || [ "$REQUEST_ORIGIN" = "$ORIGIN" ] || error '403 Forbidden' 'Запрос с другого сайта запрещён.'
 if [ "${QUERY_STRING:-}" = auth-info ] && [ "${REQUEST_METHOD:-}" = GET ]; then
   INFO=$(sh "$LIB/web-auth.sh" info) || error '503 Service Unavailable' 'Не удалось проверить настройки входа.'
   respond '200 OK' "$(printf '%s' "$INFO" | jq '. + {uiVersion:"0.16.0"}')"
