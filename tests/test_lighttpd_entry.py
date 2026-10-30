@@ -58,11 +58,11 @@ setenv.add-environment = ( "FPTN_PREFIX" => "{root}" )
                     self.assertIsNotNone(response,(root/'console.log').read_text())
                     with response:
                         body=response.read().decode();self.assertEqual(response.status,200)
-                        self.assertIn('data-ui-version="0.15.0"',body)
+                        self.assertIn('data-ui-version="0.16.0"',body)
                         self.assertIn('no-store',response.headers.get('Cache-Control',''))
                     import json
                     with opener.open(origin+'/api.cgi?auth-info',timeout=5) as response:
-                        info=json.load(response);self.assertFalse(info['configured']);self.assertEqual(info['uiVersion'],'0.15.0')
+                        info=json.load(response);self.assertFalse(info['configured']);self.assertEqual(info['uiVersion'],'0.16.0')
                     with self.assertRaises(urllib.error.HTTPError) as error:opener.open(origin+'/api.cgi?status',timeout=5)
                     self.assertEqual(error.exception.code,401)
                 finally:

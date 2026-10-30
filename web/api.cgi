@@ -170,7 +170,7 @@ ORIGIN=$(cat "$CONF/web-origin")
 [ -z "${HTTP_ORIGIN:-}" ] || [ "$HTTP_ORIGIN" = "$ORIGIN" ] || error '403 Forbidden' 'Запрос с другого сайта запрещён.'
 if [ "${QUERY_STRING:-}" = auth-info ] && [ "${REQUEST_METHOD:-}" = GET ]; then
   INFO=$(sh "$LIB/web-auth.sh" info) || error '503 Service Unavailable' 'Не удалось проверить настройки входа.'
-  respond '200 OK' "$(printf '%s' "$INFO" | jq '. + {uiVersion:"0.15.0"}')"
+  respond '200 OK' "$(printf '%s' "$INFO" | jq '. + {uiVersion:"0.16.0"}')"
 fi
 case "${QUERY_STRING:-}:${REQUEST_METHOD:-}" in login:POST|setup:POST)
   [ "${CONTENT_TYPE:-}" = application/json ] || error '415 Unsupported Media Type' 'Ожидается JSON.'
@@ -231,7 +231,9 @@ case "${REQUEST_METHOD:-}" in
         fi
         CONFIGURED=false; [ ! -s "$CONF/token" ] || [ ! -s "$CONF/server" ] || CONFIGURED=true
         INTERFACE_READY=false
-        if [ "$(cat "$CONF/native-interface" 2>/dev/null)" = OpkgTun0 ] && [ -f "$CONF/native-setup-complete" ] && ip link show dev opkgtun0 >/dev/null 2>&1; then INTERFACE_READY=true; fi
+        NATIVE=$(printf '%s' "$SERVICE" | jq -r '.nativeInterface // ""')
+        if [ -n "$NATIVE" ] && [ -f "$CONF/native-setup-complete" ] && ip link show dev "$(printf '%s' "$NATIVE" | tr 'A-Z' 'a-z')" >/dev/null 2>&1; then INTERFACE_READY=true; fi
+        INTERFACE_NEEDS_SAVE=false; [ ! -f "$CONF/native-setup-unsaved" ] || INTERFACE_NEEDS_SAVE=true
         AUTOSTART=false; [ ! -f "$CONF/autostart" ] || AUTOSTART=true
         OP_STATE=$(sh "$LIB/web-auth.sh" op-state) || error '500 Internal Server Error' 'Не удалось проверить операцию.'
         BUSY=$(printf '%s' "$OP_STATE" | jq -r .busy)
@@ -239,8 +241,8 @@ case "${REQUEST_METHOD:-}" in
         IDENTITY=$(sh "$LIB/client-identity.sh" inspect 2>/dev/null) || IDENTITY='{}'
         RESULT='null'; [ ! -r "$RUN/result.json" ] || RESULT=$(cat "$RUN/result.json")
         respond '200 OK' "$(jq -n --arg status "$TEXT" --arg rss "${RSS:-0}" --arg operation "$OPERATION" \
-          --argjson configured "$CONFIGURED" --argjson interfaceReady "$INTERFACE_READY" --argjson identity "$IDENTITY" --argjson operationState "$OP_STATE" --argjson autostart "$AUTOSTART" --argjson service "$SERVICE" --argjson report "$REPORT" --argjson meta "$META" --argjson busy "$BUSY" --argjson result "$RESULT" \
-          '{configured:$configured,interfaceReady:$interfaceReady,operationState:$operationState,autostart:$autostart,status:$status,service:$service,report:$report,uiVersion:"0.15.0",clientVersion:($identity.clientVersion // $meta.clientVersion // "неизвестна"),clientIdentityVerified:($identity.clientIdentityVerified//false),clientBuildRevision:$identity.clientBuildRevision,clientSha256:$identity.clientSha256,upstreamVersion:$identity.upstreamVersion,upstreamRevision:$identity.upstreamRevision,revision:($meta.revision // ""),operation:$operation,rssKiB:($rss|tonumber),busy:$busy,result:$result}')"
+          --argjson interfaceNeedsSave "$INTERFACE_NEEDS_SAVE" --argjson configured "$CONFIGURED" --argjson interfaceReady "$INTERFACE_READY" --argjson identity "$IDENTITY" --argjson operationState "$OP_STATE" --argjson autostart "$AUTOSTART" --argjson service "$SERVICE" --argjson report "$REPORT" --argjson meta "$META" --argjson busy "$BUSY" --argjson result "$RESULT" \
+          '{interfaceNeedsSave:$interfaceNeedsSave,configured:$configured,interfaceReady:$interfaceReady,operationState:$operationState,autostart:$autostart,status:$status,service:$service,report:$report,uiVersion:"0.16.0",clientVersion:($identity.clientVersion // $meta.clientVersion // "неизвестна"),clientIdentityVerified:($identity.clientIdentityVerified//false),clientBuildRevision:$identity.clientBuildRevision,clientSha256:$identity.clientSha256,upstreamVersion:$identity.upstreamVersion,upstreamRevision:$identity.upstreamRevision,revision:($meta.revision // ""),operation:$operation,rssKiB:($rss|tonumber),busy:$busy,result:$result}')"
         ;;
       updates)
         UPDATE=$(sh "$LIB/web-update.sh" status) || error '500 Internal Server Error' 'Не удалось прочитать обновление.'

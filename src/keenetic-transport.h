@@ -17,7 +17,7 @@ namespace fptn::keenetic {
 // Set once, before worker threads start. Empty preserves legacy test behavior.
 inline std::string transport_interface;
 inline void ConfigureTransport(const std::string& name) {
-  if (name.empty() || name.size() >= IFNAMSIZ || name == "opkgtun0" ||
+  if (name.empty() || name.size() >= IFNAMSIZ || name.rfind("opkgtun", 0) == 0 ||
       name.front() == '-' || name.find_first_not_of(
           "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789_.-") != std::string::npos)
     throw std::runtime_error("Invalid FPTN uplink interface");

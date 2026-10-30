@@ -1,5 +1,5 @@
 'use strict';
-const UI_VERSION = '0.15.0';
+const UI_VERSION = '0.16.0';
 const $ = id => document.getElementById(id);
 if (window.top !== window.self) { document.documentElement.replaceChildren(); throw new Error('Panel cannot be framed'); }
 let profiles={},clientCapabilities=null;
@@ -55,8 +55,8 @@ function setControls(){
   $('check-update').disabled=busy||!known;
   $('install-update').disabled=busy||!known||dirty||!updateInfo?.available;
   $('account-save').disabled=busy||!known||!accountData;
-  $('autostart-toggle').disabled=busy||!known||lastData?.configured===false||lastData?.interfaceReady===false;
-  $('setup-interface').disabled=busy||!known||Boolean(service?.supervisorAlive);
+  $('autostart-toggle').disabled=busy||!known||lastData?.configured===false||lastData?.interfaceReady===false||(!lastData?.autostart&&lastData?.interfaceNeedsSave===true);
+  $('setup-interface').disabled=busy||!known||(Boolean(service?.supervisorAlive)&&!lastData?.interfaceNeedsSave);
   $('start').disabled=busy||!known||!service.canStart||lastData?.configured===false||lastData?.interfaceReady===false;
   $('stop').disabled=busy||!known||!service.canStop;
   $('restart').disabled=busy||!known||!service.canRestart;
@@ -133,10 +133,12 @@ function applyStatus(data){
   $('autostart-state').textContent=data.autostart?'Автозапуск включён':'Автозапуск выключен';
   $('autostart-toggle').textContent=data.autostart?'Выключить автозапуск':'Включить автозапуск';
   const service=data.service;
-  const needToken=data.configured===false,needInterface=data.interfaceReady===false;
-  $('onboarding').hidden=!needToken&&!needInterface;
-  $('onboarding-message').textContent=needToken?'Добавьте токен в разделе «Сервер и токен», прочитайте серверы и сохраните настройки. Для подключения нужен штатный интерфейс FPTN.':needInterface?'Создайте интерфейс FPTN, затем нажмите «Запустить». После подключения назначьте нужные домены и CIDR этому интерфейсу в Keenetic.':'';
-  $('setup-interface').hidden=!needInterface;$('setup-interface-help').hidden=!needInterface;
+  $('native-interface-name').textContent=data.service?.nativeInterface||'OpkgTun (ещё не создан)';
+  const needToken=data.configured===false,needInterface=data.interfaceReady===false,needSave=data.interfaceNeedsSave===true;
+  $('onboarding').hidden=!needToken&&!needInterface&&!needSave;
+  $('onboarding-message').textContent=needToken?'Добавьте токен в разделе «Сервер и токен», прочитайте серверы и сохраните настройки. Для подключения нужен штатный интерфейс FPTN.':needInterface?'Создайте интерфейс FPTN, затем нажмите «Запустить». После подключения назначьте нужные домены и CIDR этому интерфейсу в Keenetic.':needSave?'Интерфейс создан. Сохраните конфигурацию Keenetic, чтобы он восстановился после перезагрузки.':'';
+  $('setup-interface').hidden=!needInterface&&!needSave;$('setup-interface-help').hidden=!needInterface&&!needSave;
+  $('setup-interface').textContent=needSave?'Сохранить конфигурацию Keenetic':'Создать интерфейс и сохранить';
   const titles={'waiting-network':'Ожидаем интернет',stopped:'Служба остановлена',starting:'Запускаем службу',selecting:'Выбираем сервер',retrying:'Ожидаем повторного подключения',reconnecting:'Восстанавливаем соединение',stale:'Служба требует восстановления'};
   $('status-title').textContent=service.state==='running'?(service.connected?'Туннель подключён':'Клиент запущен'):titles[service.state]||'Состояние неизвестно';
   $('indicator').className='dot'+(service.connected?' active':['starting','selecting','retrying','reconnecting','waiting-network'].includes(service.state)?' busy':'');

@@ -33,6 +33,13 @@ class IPv6LifecycleTest(unittest.TestCase):
         result=self.call('IPV6=false; MTU=1420; prepare_ipv6');self.assertEqual(result.returncode,0,result.stderr)
         self.assertFalse(json.loads((self.root/'ipv6-state.json').read_text())['address']);self.assertFalse((self.conf/'ipv6-address-owned').exists())
         for line in (self.root/'trace').read_text().splitlines():self.assertTrue(line.startswith('interface OpkgTun0 '))
+    def test_nonzero_interface_receives_only_its_own_ipv6_address(self):
+        (self.conf/'native-interface').write_text('OpkgTun7\n')
+        ip=self.root/'bin/ip';ip.write_text(ip.read_text().replace('opkgtun0','opkgtun7'))
+        result=self.call('IPV6=true; MTU=1420; prepare_ipv6');self.assertEqual(result.returncode,0,result.stderr)
+        self.assertTrue((self.conf/'ipv6-address-owned').exists())
+        self.assertIn('interface OpkgTun7 ipv6 address', (self.root/'trace').read_text())
+
     def test_preexisting_address_is_not_removed_as_owned(self):
         self.state['address']=True;self.save()
         self.assertEqual(self.call('IPV6=true; MTU=1420; prepare_ipv6').returncode,0)

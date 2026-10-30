@@ -1,5 +1,5 @@
 #!/bin/sh
-# FPTN transport only. KeeneticOS owns OpkgTun0, routes, DNS and firewall.
+# FPTN transport only. KeeneticOS owns the selected OpkgTun, routes, DNS and firewall.
 set -eu
 export LC_ALL=C LANG=C
 umask 077
@@ -13,6 +13,16 @@ UPSTREAM_LOG=/var/log/fptn/fptn-client-cli.log
 [ "$ROOT" = /opt ] || UPSTREAM_LOG=$ROOT/var/log/fptn/fptn-client-cli.log
 fail() { echo "FPTN: $*" >&2; exit 1; }
 need_root() { [ "$(id -u)" = 0 ] || fail 'Нужен root.'; }
+native_name_valid() {
+  case "$1" in OpkgTun*) suffix=${1#OpkgTun} ;; *) return 1 ;; esac
+  case "$suffix" in ''|*[!0-9]*|0?*) return 1 ;; esac
+  [ "${#suffix}" -le 8 ]
+}
+NATIVE=$(cat "$CONF/native-interface" 2>/dev/null || true)
+if [ -n "$NATIVE" ]; then native_name_valid "$NATIVE" || fail 'Повреждено имя собственного интерфейса FPTN.'; fi
+TUN=$(printf '%s' "$NATIVE" | tr 'A-Z' 'a-z')
+require_native() { [ -n "$NATIVE" ] && [ -f "$CONF/native-interface" ] || fail 'Сначала создайте собственный интерфейс FPTN.'; }
+
 proc_start() {
   [ -r "/proc/$1/stat" ] || return 1
   awk '{sub(/^.*\) /, ""); print $20}' "/proc/$1/stat"
@@ -83,7 +93,7 @@ validate_connection() {
     ($mtu|type=="number" and floor==. and (.==0 or (.>=576 and .<=65535))) and
     ((if has("ipv6") then .ipv6 else false end)|type=="boolean") and
     ($iface|type=="string" and length<=15 and all(explode[]; (.>=48 and .<=57) or (.>=65 and .<=90) or (.>=97 and .<=122) or .==45 or .==46 or .==95))' >/dev/null || fail 'Проверьте MTU и имя исходящего интерфейса.'
-  case "$OUT_IFACE" in -*) fail 'Неверное имя интерфейса.' ;; opkgtun0) fail 'Сам туннель FPTN не может быть исходящим интерфейсом.' ;; esac
+  case "$OUT_IFACE" in -*) fail 'Неверное имя интерфейса.' ;; opkgtun*) fail 'Сам туннель FPTN не может быть исходящим интерфейсом.' ;; esac
   if [ "$IPV6" = true ]; then
     [ "$MTU" -eq 0 ] || [ "$MTU" -ge 1280 ] || fail 'Для IPv6 MTU должен быть не меньше 1280.'
   fi
@@ -115,19 +125,20 @@ load_connection() {
   IPV6=$(printf '%s' "$SETTINGS" | jq -r '.ipv6 // false')
 }
 interface_mtu() {
-  VALUE=$(ip -o link show dev opkgtun0 | awk '{for(i=1;i<NF;i++) if($i=="mtu") {print $(i+1); exit}}')
-  case "$VALUE" in ''|*[!0-9]*) echo 'Не удалось прочитать MTU OpkgTun0.' >&2; return 1 ;; esac
+  require_native
+  VALUE=$(ip -o link show dev "$TUN" | awk '{for(i=1;i<NF;i++) if($i=="mtu") {print $(i+1); exit}}')
+  case "$VALUE" in ''|*[!0-9]*) echo "Не удалось прочитать MTU $NATIVE." >&2; return 1 ;; esac
   [ "$VALUE" -ge 576 ] && [ "$VALUE" -le 65535 ] || return 1
   printf '%s\n' "$VALUE"
 }
 set_native_mtu() {
   case "${1:-}" in ''|*[!0-9]*) return 1 ;; esac
   [ "${#1}" -le 5 ] && [ "$1" -ge 576 ] && [ "$1" -le 65535 ] || return 1
-  [ -f "$CONF/native-interface" ] && [ "$(cat "$CONF/native-interface")" = OpkgTun0 ] || { echo 'OpkgTun0 не принадлежит FPTN.' >&2; return 1; }
+  require_native
   CURRENT_MTU=$(interface_mtu) || return 1
   [ "$CURRENT_MTU" != "$1" ] || return 0
   # Change only this owned interface's MTU through the firmware API.
-  ndmc -c "interface OpkgTun0 ip mtu $1" || return 1
+  ndmc -c "interface $NATIVE ip mtu $1" || return 1
   [ "$(interface_mtu)" = "$1" ] || { echo 'Keenetic не применил MTU.' >&2; return 1; }
 }
 ipv6_helper() {
@@ -138,26 +149,26 @@ ipv6_helper() {
   sh "$HELPER" "$1"
 }
 ipv6_address_present() {
-  ip -6 -o addr show dev opkgtun0 | awk '$3=="inet6" && $4=="fd42:6670:746e::1/128" {found=1} END{exit !found}'
+  ip -6 -o addr show dev "$TUN" | awk '$3=="inet6" && $4=="fd42:6670:746e::1/128" {found=1} END{exit !found}'
 }
 prepare_ipv6() {
   if [ "$IPV6" != true ]; then
     ipv6_helper remove || return 1
     if [ -f "$CONF/ipv6-address-owned" ]; then
-      if ipv6_address_present; then ndmc -c 'interface OpkgTun0 no ipv6 address fd42:6670:746e::1/128' || return 1; fi
+      if ipv6_address_present; then ndmc -c "interface $NATIVE no ipv6 address fd42:6670:746e::1/128" || return 1; fi
       rm -f "$CONF/ipv6-address-owned"
     fi
     return 0
   fi
-  [ "$(cat "$CONF/native-interface" 2>/dev/null)" = OpkgTun0 ] || return 1
+  require_native
   [ "$MTU" -ge 1280 ] || { echo 'IPv6 требует MTU от 1280.' >&2; return 1; }
   ipv6_helper check || return 1
   if ! ipv6_address_present; then
-    if ip -6 -o addr show | awk '$3=="inet6" {split($4,a,"/");if(a[1]=="fd42:6670:746e::1" && $2!="opkgtun0")found=1} END{exit !found}'; then
+    if ip -6 -o addr show | awk -v own="$TUN" '$3=="inet6" {split($4,a,"/");if(a[1]=="fd42:6670:746e::1" && $2!=own)found=1} END{exit !found}'; then
       echo 'IPv6-адрес FPTN уже используется другим интерфейсом.' >&2; return 1
     fi
     : > "$CONF/ipv6-address-owned"
-    ndmc -c 'interface OpkgTun0 ipv6 address fd42:6670:746e::1/128' || return 1
+    ndmc -c "interface $NATIVE ipv6 address fd42:6670:746e::1/128" || return 1
     ipv6_address_present || { echo 'Keenetic не применил IPv6-адрес FPTN.' >&2; return 1; }
   fi
   ipv6_helper apply
@@ -344,32 +355,78 @@ printf 'Выбран сервер: %s\n' "$FPTN_SERVER"
   unset TOKEN FPTN_ACCESS_TOKEN
   echo 'Токен и сервер сохранены. CIDR и домены задаются в интерфейсе Keenetic.'
 }
-setup_interface() {
+# Inventory must be readable; a failed query is not evidence of a free name.
+select_native() {
+  if [ -n "$NATIVE" ]; then printf '%s\n' "$NATIVE"; return; fi
+  INVENTORY=$(ndmc -c 'show interface') || fail 'Не удалось прочитать интерфейсы Keenetic.'
+  printf '%s\n' "$INVENTORY" | grep -Eq '^[[:space:]]*id:' || fail 'Неизвестный формат списка интерфейсов Keenetic.'
+  INDEX=0
+  while [ "$INDEX" -le 65535 ]; do
+    CANDIDATE=OpkgTun$INDEX
+    if ! printf '%s\n' "$INVENTORY" | awk -v id="$CANDIDATE" '$1=="id:" && $2==id {found=1} END {exit !found}' &&
+       ! ip link show dev "opkgtun$INDEX" >/dev/null 2>&1; then
+      printf '%s\n' "$CANDIDATE"; return
+    fi
+    INDEX=$((INDEX+1))
+  done
+  fail 'Нет свободного номера OpkgTun.'
+}
+setup_interface() (
   [ ! -d "$RUN" ] || fail 'Сначала остановите FPTN.'
   command -v ndmc >/dev/null 2>&1 || fail 'Нет ndmc.'
   mkdir -p "$CONF"
-  if ndmc -c 'show interface OpkgTun0' >/dev/null 2>&1; then
-    [ "$(cat "$CONF/native-interface" 2>/dev/null)" = OpkgTun0 ] || fail 'OpkgTun0 уже существует и не принадлежит FPTN.'
-    if [ -f "$CONF/native-setup-complete" ]; then
-      echo 'OpkgTun0 уже настроен; настройки Keenetic сохранены без изменений.'
-      return 0
+  # Also serializes command-line setup, independently of the web operation lock.
+  mkdir "$CONF/native-setup-lock" 2>/dev/null || fail 'Настройка интерфейса уже выполняется.'
+  CREATED=no; COMPLETE=no
+  cleanup_native() {
+    if [ "$CREATED" = yes ] && [ "$COMPLETE" = no ]; then
+      if ndmc -c "no interface $NATIVE"; then
+        rm -f "$CONF/native-interface" "$CONF/native-setup-complete" "$CONF/native-setup-unsaved" "$CONF/native-creation-owner"
+      else echo "Не удалось удалить незавершённый $NATIVE; маркер владения сохранён." >&2; fi
     fi
-  else
-    ndmc -c 'interface OpkgTun0'
-    printf 'OpkgTun0\n' > "$CONF/native-interface"
+    rmdir "$CONF/native-setup-lock"
+  }
+  trap cleanup_native EXIT
+  trap 'exit 1' INT TERM HUP
+  if [ -n "$NATIVE" ] && [ -f "$CONF/native-setup-complete" ]; then
+    ndmc -c "show interface $NATIVE" >/dev/null || fail "Сохранённый $NATIVE отсутствует; новый номер автоматически не назначается."
+    echo "$NATIVE уже настроен; настройки Keenetic сохранены без изменений."
+    COMPLETE=yes; return 0
   fi
-  ndmc -c 'interface OpkgTun0 description FPTN'
-  ndmc -c 'interface OpkgTun0 security-level public'
-  ndmc -c 'interface OpkgTun0 ip address 10.0.0.1 255.255.255.255'
-  ndmc -c 'interface OpkgTun0 ip mtu 1420'
-  ndmc -c 'interface OpkgTun0 ip tcp adjust-mss pmtu'
-  ndmc -c 'interface OpkgTun0 no ip global'
-  ndmc -c 'interface OpkgTun0 up'
+  NATIVE=$(select_native)
+  TUN=$(printf '%s' "$NATIVE" | tr 'A-Z' 'a-z')
+  if [ ! -s "$CONF/native-interface" ]; then
+    # Recheck both namespaces immediately before the creation command.
+    if ndmc -c "show interface $NATIVE" >/dev/null 2>&1 || ip link show dev "$TUN" >/dev/null 2>&1; then
+      fail "$NATIVE успел занять другой сервис. Повторите установку."
+    fi
+    if [ "$NATIVE" != OpkgTun0 ]; then
+      CAPABILITIES=$(capabilities_json) || fail 'Не удалось проверить поддержку интерфейсов клиентом.'
+      printf '%s' "$CAPABILITIES" | jq -e '.nativeInterfaceSelection==true' >/dev/null || fail 'Для свободного OpkgTun нужен новый клиент с поддержкой OpkgTunN.'
+    fi
+    # Do not claim/delete a firmware object when creation itself fails.
+    ndmc -c "interface $NATIVE" || fail "Прошивка не создала $NATIVE. Чужие интерфейсы не изменялись."
+    CREATED=yes
+    if [ -n "${FPTN_INTERFACE_TRANSACTION:-}" ]; then
+      printf '%s:%s\n' "$NATIVE" "$FPTN_INTERFACE_TRANSACTION" > "$CONF/native-creation-owner"
+    fi
+    printf '%s\n' "$NATIVE" > "$CONF/native-interface.new"
+    mv "$CONF/native-interface.new" "$CONF/native-interface"
+  fi
+  ndmc -c "interface $NATIVE description FPTN"
+  ndmc -c "interface $NATIVE security-level public"
+  ndmc -c "interface $NATIVE ip address 10.0.0.1 255.255.255.255"
+  ndmc -c "interface $NATIVE ip mtu 1420"
+  ndmc -c "interface $NATIVE ip tcp adjust-mss pmtu"
+  ndmc -c "interface $NATIVE no ip global"
+  ndmc -c "interface $NATIVE up"
   : > "$CONF/native-setup-complete"
-  echo 'OpkgTun0 создан. Общий выход в интернет не переключался.'
-  echo 'Первый тест: выберите FPTN/OpkgTun0 на странице маршрутизации Keenetic.'
+  : > "$CONF/native-setup-unsaved"
+  COMPLETE=yes
+  echo "$NATIVE создан. Общий выход в интернет не переключался."
+  echo "Выберите FPTN/$NATIVE на странице маршрутизации Keenetic."
   echo 'Конфигурация пока не записана в startup-config. После проверки: ndmc -c "system configuration save".'
-}
+)
 install_native() {
   [ ! -d "$RUN" ] || fail 'Сначала остановите старую службу командой fptnctl stop.'
   SOURCE=$(readlink -f "${1:-/opt/tmp/fptn-native-client}")
@@ -525,7 +582,7 @@ attempt_service() {
   set -- --keenetic-connect --keenetic-native \
     --access-token "$TOKEN" --preferred-server "$SERVER" \
     --out-network-interface "$IFACE" --gateway-ip "$GW" \
-    --tun-interface-name opkgtun0 --tun-interface-ip 10.0.0.1 --tun-interface-ipv6 fd42:6670:746e::1 --mtu-size "$MTU" \
+    --tun-interface-name "$TUN" --tun-interface-ip 10.0.0.1 --tun-interface-ipv6 fd42:6670:746e::1 --mtu-size "$MTU" \
     --sni "$SNI" --bypass-method "$BYPASS" --connection-strategy "$STRATEGY" \
     --enable-split-tunnel false --enable-ad-block false --blacklist-domains ''
   READY_TIMEOUT=60
@@ -603,8 +660,9 @@ start_service() {
     "$LIB/fptn-client-cli" --help | grep -q -- '--keenetic-probe-only' || fail 'Для резервного подбора нужен клиент 0.4.0.'
     START_TIMEOUT=$((START_TIMEOUT+240))
   fi
+  require_native
   [ -f "$CONF/native-setup-complete" ] || fail 'Сначала fptnctl setup-interface.'
-  if [ "${1:-}" != boot ]; then ip link show dev opkgtun0 >/dev/null 2>&1 || fail 'Keenetic не создал opkgtun0.'; fi
+  if [ "${1:-}" != boot ]; then ip link show dev "$TUN" >/dev/null 2>&1 || fail "Keenetic не создал $TUN."; fi
   mkdir -p "$ROOT/var/run"
   if [ "${1:-}" = boot ] && alive "$RUN/supervisor.pid"; then return 0; fi
   mkdir "$RUN" 2>/dev/null || fail 'Уже запущено или осталось состояние: status / recover.'
@@ -629,7 +687,7 @@ status_service() {
       echo 'FPTN native: клиент запущен, READY получен при старте.'
       printf 'Сервер: '
       if [ -s "$RUN/active-server" ]; then cat "$RUN/active-server"; else cat "$CONF/server"; fi
-      echo 'Интерфейс: OpkgTun0 / opkgtun0. CIDR, домены, маршруты и firewall — в Keenetic.'
+      echo "Интерфейс: $NATIVE / $TUN. CIDR, домены, маршруты и firewall — в Keenetic."
     elif [ -f "$RUN/state" ]; then cat "$RUN/state"
     else echo 'FPTN: запуск или остановка.'; fi
   elif [ -d "$RUN" ]; then echo 'FPTN: остаточное состояние, требуется recover.'; return 1
@@ -670,9 +728,9 @@ status_json() {
   if [ "$CLIENT" = true ] && [ -f "$RUN/effective-connection.json" ]; then EFFECTIVE=$(cat "$RUN/effective-connection.json"); fi
   CAN_START=false
   if [ "$STATE" = stopped ] && [ -s "$CONF/token" ] && [ -s "$CONF/server" ] && [ -f "$CONF/native-setup-complete" ]; then CAN_START=true; fi
-  jq -n --arg state "$STATE" --arg message "$MESSAGE" --arg server "$ACTIVE" \
+  jq -n --arg nativeInterface "$NATIVE" --arg state "$STATE" --arg message "$MESSAGE" --arg server "$ACTIVE" \
     --argjson effective "$EFFECTIVE" --argjson supervisor "$SUPERVISOR" --argjson client "$CLIENT" --argjson connected "$CONNECTED" --argjson canStart "$CAN_START" \
-    '{effectiveConnection:$effective,state:$state,message:$message,selectedServer:$server,supervisorAlive:$supervisor,clientAlive:$client,connected:$connected,canStart:$canStart,canStop:$supervisor,canRestart:$supervisor}'
+    '{nativeInterface:$nativeInterface,effectiveConnection:$effective,state:$state,message:$message,selectedServer:$server,supervisorAlive:$supervisor,clientAlive:$client,connected:$connected,canStart:$canStart,canStop:$supervisor,canRestart:$supervisor}'
 }
 check_servers() (
   "$LIB/fptn-client-cli" --help | grep -q -- '--keenetic-probe-only' || fail 'Для проверки нужен клиент 0.4.0.'
@@ -688,7 +746,7 @@ check_servers() (
   nice -n 10 timeout -s TERM 600 "$LIB/fptn-client-cli" --keenetic-connect --keenetic-native \
     --keenetic-probe-only --keenetic-probe-report "$CHECK_RUN/server-checks.json" \
     --keenetic-server-policy "$CHECK_TMP/policy.json" --access-token "$TOKEN" \
-    --out-network-interface "$IFACE" --gateway-ip "$GW" --tun-interface-name opkgtun0 \
+    --out-network-interface "$IFACE" --gateway-ip "$GW" --tun-interface-name "${TUN:-opkgtun0}" \
     --bypass-method "$BYPASS" --connection-strategy "$STRATEGY" --sni "$SNI" \
     --enable-split-tunnel false --enable-ad-block false --blacklist-domains ''
 )
@@ -706,18 +764,20 @@ stop_service() {
     kill -TERM "$PID" 2>/dev/null || true
   fi
   # Also handle an orphaned client or an old supervisor stuck in its EXIT trap.
-  if alive "$RUN/client.pid"; then
-    client_alive || fail 'PID клиента не соответствует FPTN; остановка отменена.'
+  if client_alive; then
     kill -TERM "$PID" 2>/dev/null || true
+  elif alive "$RUN/client.pid"; then
+    fail 'PID клиента не соответствует FPTN; остановка отменена.'
   fi
   N=0
   while [ "$N" -lt 10 ]; do
     if ! alive "$RUN/supervisor.pid" && ! alive "$RUN/client.pid"; then break; fi
     sleep 1; N=$((N+1))
   done
-  if alive "$RUN/client.pid"; then
-    client_alive || fail 'Изменилась идентичность клиента; PID не трогаю.'
+  if client_alive; then
     kill -KILL "$PID" 2>/dev/null || true
+  elif alive "$RUN/client.pid"; then
+    fail 'Изменилась идентичность клиента; PID не трогаю.'
   fi
   N=0
   while alive "$RUN/client.pid" && [ "$N" -lt 3 ]; do sleep 1; N=$((N+1)); done
@@ -753,7 +813,7 @@ show_logs() {
   fi
 }
 uninstall_runtime() (
-  # Keep credentials and all firmware configuration, including routes using OpkgTun0.
+  # Keep credentials and all firmware configuration, including routes using the owned OpkgTun.
   [ -f "$LIB/.runtime-managed" ] || fail 'Удаление поддерживается после обновления до 0.13.0.'
   WEB=$ROOT/share/fptn-web
   FRAGMENT=$ROOT/etc/lighttpd/conf.d/95-fptn.conf
@@ -810,7 +870,7 @@ uninstall_runtime() (
   rm -f "$ROOT/bin/fptnctl"
   echo 'Программа и панель FPTN удалены. Пакеты Entware и другие веб-панели сохранены.'
   echo 'Токен, вход, настройки и резервные копии оставлены в /opt/etc/fptn. Повторная установка использует их.'
-  echo 'Интерфейс OpkgTun0 и маршруты Keenetic оставлены: удалить или переназначить их можно в Keenetic.'
+  echo "Интерфейс $NATIVE и маршруты Keenetic оставлены: удалить или переназначить их можно в Keenetic."
 )
 
 set_autostart() {
@@ -818,7 +878,7 @@ set_autostart() {
   if [ -e "$INIT" ]; then grep -Fq '# Managed by fptn-native' "$INIT" || fail 'S90fptn занят чужим скриптом.'; fi
   mkdir -p "$ROOT/etc/init.d" "$CONF"
   if [ "$1" = enable ]; then
-    [ -f "$CONF/native-setup-complete" ] || fail 'Сначала настройте и сохраните интерфейс Keenetic.'
+    [ -f "$CONF/native-setup-complete" ] && [ ! -f "$CONF/native-setup-unsaved" ] || fail 'Сначала сохраните конфигурацию интерфейса Keenetic в панели.'
     cat > "$INIT.new" <<'INITEOF'
 #!/bin/sh
 # Managed by fptn-native
@@ -861,7 +921,13 @@ case "${1:-}" in
   check-servers) check_servers ;;
   install) install_native "${2:-/opt/tmp/fptn-native-client}" ;;
   setup-interface) setup_interface ;;
-  setup-interface-save) setup_interface; ndmc -c 'system configuration save' ;;
+  setup-interface-save)
+    if [ ! -f "$CONF/native-setup-complete" ]; then setup_interface; fi
+    NATIVE=$(cat "$CONF/native-interface" 2>/dev/null || true)
+    native_name_valid "$NATIVE" || fail 'Не определён собственный интерфейс FPTN.'
+    ndmc -c "show interface $NATIVE" >/dev/null || fail 'Интерфейс FPTN не найден.'
+    ndmc -c 'system configuration save'
+    rm -f "$CONF/native-setup-unsaved" ;;
   uninstall) uninstall_runtime ;;
   configure) mkdir -p "$CONF"; chmod 700 "$CONF"; configure ;;
   start) start_service ;;

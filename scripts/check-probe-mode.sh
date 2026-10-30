@@ -12,7 +12,7 @@ if LC_ALL=C LANG=C timeout 45 qemu-mipsel /out/fptn-client-cli \
   --keenetic-connect --keenetic-native --keenetic-probe-only \
   --keenetic-server-policy /tmp/offline-policy.json --keenetic-probe-report /tmp/offline-report.json \
   --access-token "$(cat /tmp/offline-token)" --out-network-interface lo \
-  --gateway-ip 127.0.0.1 --gateway-ipv6 ::1 --tun-interface-name opkgtun0 \
+  --gateway-ip 127.0.0.1 --gateway-ipv6 ::1 --tun-interface-name opkgtun7 \
   --bypass-method obfuscation --enable-ad-block false --blacklist-domains '' > /out/PROBE-CHECK.txt 2>&1; then
   cat /out/PROBE-CHECK.txt
 else

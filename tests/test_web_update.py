@@ -29,7 +29,7 @@ shutil.copyfile(root/('channel' if url.endswith('web/update.json') else 'install
     def test_fixed_channel_installer_hash_and_arguments(self):
         self.check();info=json.loads(self.call('status').stdout);self.assertTrue(info['available'])
         r=self.call('apply');self.assertEqual(r.returncode,0,r.stderr)
-        self.assertEqual((self.root/'applied').read_text().splitlines(),['install','a'*40,'192.168.1.1','c'*40])
+        self.assertEqual((self.root/'applied').read_text().splitlines(),['install','a'*40,'192.168.1.1','c'*40,'1111'])
         self.assertEqual((self.root/'client-target').read_text(),'0.4.0')
         self.assertEqual((self.root/'urls').read_text().splitlines(),['https://raw.githubusercontent.com/KOPOHA-MACOHA/fptn-keenetic/main/web/update.json','https://raw.githubusercontent.com/KOPOHA-MACOHA/fptn-keenetic/'+'a'*40+'/scripts/install-web-ui.sh'])
     def test_corrupt_installer_never_executes(self):
@@ -72,8 +72,13 @@ shutil.copyfile(root/('channel' if url.endswith('web/update.json') else 'install
         self.channel.write_text(json.dumps(self.catalog));self.check()
         self.assertEqual(json.loads(self.call('status').stdout)['clientRevision'],'e'*40)
         r=self.call('apply');self.assertEqual(r.returncode,0,r.stderr)
-        self.assertEqual((self.root/'applied').read_text().splitlines()[-1],'e'*40)
+        self.assertEqual((self.root/'applied').read_text().splitlines()[-2],'e'*40)
         self.assertEqual((self.root/'client-target').read_text(),'0.5.0')
+
+    def test_custom_port_and_lan_are_preserved_by_background_update(self):
+        (self.conf/'web-origin').write_text('http://192.168.4.1:3456\n')
+        self.check();result=self.call('apply');self.assertEqual(result.returncode,0,result.stderr)
+        self.assertEqual((self.root/'applied').read_text().splitlines()[2:],['192.168.4.1','c'*40,'3456'])
 
     def test_missing_platform_record_does_not_cache_or_apply_mips_fallback(self):
         lib=self.root/'libexec/fptn';lib.mkdir(parents=True);(lib/'platform.sh').write_text('#!/bin/sh\necho armv7-softfloat\n')

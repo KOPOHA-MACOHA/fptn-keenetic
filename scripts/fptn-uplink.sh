@@ -2,7 +2,7 @@
 # Read-only native uplink discovery. No probe packets, policy rules or route writes.
 set -eu
 SELECTED=${1:-}
-case "$SELECTED" in *[!a-zA-Z0-9_.-]*|-*|opkgtun0) echo 'Некорректный исходящий интерфейс.' >&2; exit 1 ;; esac
+case "$SELECTED" in *[!a-zA-Z0-9_.-]*|-*|opkgtun*) echo 'Некорректный исходящий интерфейс.' >&2; exit 1 ;; esac
 [ "${#SELECTED}" -le 15 ] || exit 1
 ROUTES=$(ip -4 route show table main default)
 CANDIDATES=$(printf '%s\n' "$ROUTES" | awk -v selected="$SELECTED" '
@@ -15,7 +15,7 @@ CANDIDATES=$(printf '%s\n' "$ROUTES" | awk -v selected="$SELECTED" '
       if($i=="metric") {metric=$(i+1);if(metric!~/^[0-9]+$/)usable=0}
       if($i=="linkdown" || $i=="dead" || $i=="nexthop")usable=0
     }
-    if(usable && iface!="" && iface!="opkgtun0" && iface!~/[^a-zA-Z0-9_.-]/ && length(iface)<=15 && (selected=="" || iface==selected)) {
+    if(usable && iface!="" && iface!~/^opkgtun/ && iface!~/[^a-zA-Z0-9_.-]/ && length(iface)<=15 && (selected=="" || iface==selected)) {
       n++;m[n]=metric;row[n]=iface "|" gateway "|" source
     }
   }

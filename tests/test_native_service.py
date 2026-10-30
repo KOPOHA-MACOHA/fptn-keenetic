@@ -21,6 +21,9 @@ class NativeServiceTest(unittest.TestCase):
 
     def test_autostart_owned_init_persists_without_starting_or_network_changes(self):
         root=self.prepare_native_client()
+        (root/'etc/fptn/native-setup-unsaved').touch()
+        self.assertNotEqual(self.cmd('enable').returncode,0)
+        (root/'etc/fptn/native-setup-unsaved').unlink()
         result=self.cmd('enable');self.assertEqual(result.returncode,0,result.stderr)
         init=root/'etc/init.d/S90fptn'
         self.assertTrue(init.exists()); self.assertTrue((root/'etc/fptn/autostart').exists())
@@ -62,7 +65,9 @@ class NativeServiceTest(unittest.TestCase):
 
     def test_interface_setup_refuses_foreign_and_preserves_existing_user_config(self):
         ndmc=self.bin/'ndmc'; created=self.root/'created'; trace=self.root/'ndmc-trace'
+        (self.bin/'ip').write_text('#!/bin/sh\nexit 1\n')
         ndmc.write_text(f'''#!/bin/sh
+if [ \"$*\" = '-c show interface' ]; then echo 'id: GigabitEthernet0'; [ ! -f '{created}' ] || echo 'id: OpkgTun0'; exit 0; fi
 if [ "$*" = '-c show interface OpkgTun0' ]; then [ -f '{created}' ]; exit $?; fi
 printf '%s\\n' "$*" >> '{trace}'
 touch '{created}'
@@ -75,9 +80,20 @@ touch '{created}'
         self.assertNotIn('ip route default',commands)
         again=self.cmd('setup-interface'); self.assertEqual(again.returncode,0,again.stderr)
         self.assertEqual(trace.read_text(),commands)
-        (self.root/'opt/etc/fptn/native-interface').unlink()
+        (self.root/'opt/etc/fptn/native-interface').write_text('OpkgTun00\n')
         refused=self.cmd('setup-interface'); self.assertNotEqual(refused.returncode,0)
         self.assertEqual(trace.read_text(),commands)
+
+    def test_nonzero_owned_interface_is_passed_to_client_and_status(self):
+        root=self.prepare_native_client();(root/'etc/fptn/native-interface').write_text('OpkgTun7\n')
+        self.env['FPTN_EXPECT_TUN']='opkgtun7'
+        ip=self.bin/'ip';ip.write_text(ip.read_text().replace('opkgtun0','opkgtun7'))
+        try:
+            result=self.cmd('start');self.assertEqual(result.returncode,0,result.stdout+result.stderr)
+            self.assertIn('OpkgTun7 / opkgtun7',result.stdout)
+            self.assertEqual(json.loads(self.cmd('status-json').stdout)['nativeInterface'],'OpkgTun7')
+            self.assertEqual(self.state()['mutations'],0)
+        finally:self.cmd('stop')
 
     def prepare_native_client(self):
         compiler=shutil.which('cc')
@@ -98,7 +114,7 @@ int main(int argc,char**argv){
  if(argc==2 && !strcmp(argv[1],"--version")){puts("0.4.0");return 0;}
  int native=0,name=0; for(int i=1;i<argc;i++){
   if(!strcmp(argv[i],"--keenetic-native")) native=1;
-  if(!strcmp(argv[i],"opkgtun0")) name=1;
+  if(!strcmp(argv[i],getenv("FPTN_EXPECT_TUN") ? getenv("FPTN_EXPECT_TUN") : "opkgtun0")) name=1;
  }
  if(!native || !name) return 3;
  char *record=getenv("FPTN_MOCK_ARGS");

@@ -23,9 +23,17 @@ elif command=='php-cgi':
  elif os.environ.get('FPTN_AUTH_ACTION')=='op-reserve':
   lock=root/'var/run/fptn-web/action';lock.mkdir();(lock/'action').write_text('update\n');print(json.dumps({'id':'a'*32}))
  else:print(json.dumps({'configured':True,'mode':'panel','rootAvailable':True}))
-elif command=='ndmc':sys.exit(0 if (root/'foreign-interface').exists() else 1)
+elif command=='ndmc':
+ if args[-1].startswith('no interface '):
+  with (root/'deleted-interfaces').open('a') as f:f.write(args[-1]+'\n')
+  sys.exit(0)
+ sys.exit(0 if (root/'foreign-interface').exists() else 1)
 elif command=='ip':print('    inet 192.168.1.1/24 scope global br0')
-elif command=='netstat':print('Active Internet connections (only servers)')
+elif command=='netstat':
+ count=root/'netstat-count';n=int(count.read_text())+1 if count.exists() else 1;count.write_text(str(n))
+ if (root/'fail-netstat').exists():sys.exit(1)
+ print('Active Internet connections (only servers)')
+ if (root/'port-race').exists() and n>=2:print('tcp6 0 0 :::1111 :::* LISTEN 123/other')
 elif command=='lighttpd':
  if '-p' in args:print('server.modules = ( "mod_cgi" )')
 elif command=='curl':
@@ -49,7 +57,7 @@ elif command=='curl':
   if 'auth-info' in url:
    with (root.parent/'trace').open('a') as f:f.write('http-auth-info\n')
   if '-K' in args:sys.stdin.read()
-  info={'uiVersion':'old' if (root/'wrong-api').exists() else '0.15.0','service':{'state':'stopped'},'busy':False,'status':'stopped','configured':True,'rootAvailable':True}
+  info={'uiVersion':'old' if (root/'wrong-api').exists() else '0.16.0','service':{'state':'stopped'},'busy':False,'status':'stopped','configured':True,'rootAvailable':True}
   text=json.dumps(info)
   if out:out.write_text(text)
   else:print(text)
@@ -70,10 +78,12 @@ class WebInstallerTest(unittest.TestCase):
         for name in ['bin','libexec/fptn','etc/fptn','etc/lighttpd/conf.d','etc/init.d','share/fptn-web','var/run/fptn-keenetic']:
             (self.root/name).mkdir(parents=True,exist_ok=True)
         self.trace=self.base/'trace'
-        self.env={**os.environ,'FPTN_PREFIX':str(self.root),'FPTN_TEST_TRACE':str(self.trace)}
+        self.env={**os.environ,'FPTN_PREFIX':str(self.root),'FPTN_TEST_TRACE':str(self.trace),'FPTN_INSTALL_PORT':'1111'}
         for name in ['id','ndmc','ip','netstat','lighttpd','curl','php-cgi','date','sleep']:
             path=self.root/'bin'/name;path.write_text(MOCK);path.chmod(0o700)
         (self.root/'etc/fptn/web-auth.json').write_text('{"username":"admin","hash":"test"}')
+        (self.root/'etc/fptn/native-interface').write_text('OpkgTun0\n')
+        (self.root/'etc/fptn/native-setup-complete').touch()
         for key in ['token','server']:(self.root/'etc/fptn'/key).write_text('dummy\n')
         (self.root/'etc/lighttpd/lighttpd.conf').write_text('original main')
         (self.root/'etc/lighttpd/conf.d/95-fptn.conf').write_text('# Managed by fptn-web-ui\noriginal fragment\n')
@@ -89,6 +99,7 @@ if [ -f "$FPTN_PREFIX/false-failed-restart" ]; then exit 1; fi
         def controller(label):return '''#!/bin/sh
 echo LABEL-$1 >> "$FPTN_TEST_TRACE"
 case "$1" in
+ setup-interface) if [ -f "$FPTN_PREFIX/foreign-interface" ]; then echo 'Нет свободного OpkgTun' >&2; exit 1; fi; printf 'OpkgTun0\n' > "$FPTN_PREFIX/etc/fptn/native-interface"; touch "$FPTN_PREFIX/etc/fptn/native-setup-complete"; printf 'OpkgTun0:%s\\n' "$FPTN_INTERFACE_TRANSACTION" > "$FPTN_PREFIX/etc/fptn/native-creation-owner" ;;
  get-fallback) echo '{"enabled":false,"profiles":[],"domains":[],"budget":60}' ;;
  get-settings) echo '{"bypass":"obfuscation","strategy":"dual-rolling-tunnel","sni":"google.com"}' ;;
  stop) [ ! -f "$FPTN_PREFIX/fail-stop" ] || exit 1; rm -rf "$FPTN_PREFIX/var/run/fptn-keenetic" ;;
@@ -297,6 +308,8 @@ sys.exit(result.returncode)
         self.assertIn('old-start',self.trace.read_text());self.assertTrue((self.root/'var/run/fptn-keenetic').exists())
 
     def fresh(self):
+        (self.root/'etc/fptn/native-interface').unlink(missing_ok=True)
+        (self.root/'etc/fptn/native-setup-complete').unlink(missing_ok=True)
         for file in ['bin/fptnctl','etc/lighttpd/conf.d/95-fptn.conf','etc/fptn/token','etc/fptn/server']:(self.root/file).unlink()
         for directory in ['libexec/fptn','share/fptn-web','var/run/fptn-keenetic']:shutil.rmtree(self.root/directory)
 
@@ -317,6 +330,35 @@ sys.exit(result.returncode)
         self.assertTrue((self.root/'etc/fptn/web-auth.json').exists())
         self.assertEqual((self.root/'etc/lighttpd/lighttpd.conf').read_text(),'original main')
 
+    def test_saved_custom_port_is_retained_by_the_real_update_transaction(self):
+        self.env.pop('FPTN_INSTALL_PORT')
+        (self.root/'etc/fptn/web-origin').write_text('http://192.168.1.1:3456\n')
+        result=self.execute();self.assertEqual(result.returncode,0,result.stdout+result.stderr)
+        self.assertEqual((self.root/'etc/fptn/web-origin').read_text(),'http://192.168.1.1:3456\n')
+        self.assertIn('192.168.1.1:3456', (self.root/'etc/lighttpd/conf.d/95-fptn.conf').read_text())
+        self.assertIn(':3456/',result.stdout)
+
+    def test_port_race_and_missing_listener_inventory_do_not_change_installed_files(self):
+        for flag in ['port-race','fail-netstat']:
+            with self.subTest(flag=flag):
+                (self.root/flag).touch();result=self.execute();self.assertNotEqual(result.returncode,0)
+                self.assert_original_files()
+                trace=self.trace.read_text() if self.trace.exists() else ''
+                self.assertNotIn('stop',trace);self.assertNotIn('lighttpd-restart',trace)
+                self.trace.unlink(missing_ok=True)
+                (self.root/flag).unlink();(self.root/'netstat-count').unlink(missing_ok=True)
+
+    def test_failure_after_creating_an_interface_rolls_back_only_that_object(self):
+        self.fresh()
+        text=self.installer.read_text();needle=" || fail 'Не удалось создать собственный интерфейс FPTN.'"
+        self.assertIn(needle,text);self.installer.write_text(text.replace(needle,needle+"\n  fail 'injected after interface creation'"))
+        result=self.execute();self.assertNotEqual(result.returncode,0,result.stderr)
+        self.assertEqual((self.root/'deleted-interfaces').read_text(),'no interface OpkgTun0\n')
+        self.assertFalse((self.root/'etc/fptn/native-interface').exists())
+        self.assertFalse((self.root/'etc/fptn/native-setup-complete').exists())
+        self.assertFalse((self.root/'libexec/fptn').exists())
+        self.assertTrue((self.root/'etc/fptn/web-auth.json').exists())
+
     def test_wrong_platform_rejected_before_execution_or_live_changes(self):
         (self.root/'etc/entware_release').write_text('arch=aarch64\ncpu_type=cortex-a53\nfloat=hard\n')
         result=self.execute();self.assertNotEqual(result.returncode,0)
@@ -324,7 +366,7 @@ sys.exit(result.returncode)
 
     def test_foreign_tun_refused_on_clean_install(self):
         self.fresh();(self.root/'foreign-interface').touch();result=self.execute();self.assertNotEqual(result.returncode,0)
-        self.assertIn('OpkgTun0',result.stderr);self.assertFalse(self.trace.exists());self.assertFalse((self.root/'libexec/fptn').exists())
+        self.assertIn('OpkgTun',result.stderr);self.assertFalse((self.root/'libexec/fptn').exists())
 
     def test_corrupt_decoder_refused_before_changing_clean_install(self):
         self.fresh();(self.payload/'client/brotli').write_text('wrong bytes')

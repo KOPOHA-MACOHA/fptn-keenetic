@@ -30,7 +30,13 @@ class LinuxTunDevice {
 
   bool Open(const std::string& name) {
     // Native mode attaches to Keenetic-owned persistent TUN. Never rename it.
-    if (name == "opkgtun0") return OpenExisting(name);
+    if (name.rfind("opkgtun", 0) == 0) {
+      const auto suffix = name.substr(7);
+      if (name.size() >= IFNAMSIZ || suffix.empty() ||
+          suffix.find_first_not_of("0123456789") != std::string::npos ||
+          (suffix.size() > 1 && suffix.front() == '0')) return false;
+      return OpenExisting(name);
+    }
     tun_ = std::make_unique<tuntap::tun>();
     tun_->name(name);
     name_ = tun_->name();
@@ -84,7 +90,7 @@ class LinuxTunDevice {
     if (native_fd_ >= 0) {
       struct ifreq req {};
       if (!Query(SIOCGIFMTU, req) || req.ifr_mtu != mtu)
-        throw std::runtime_error("Configure OpkgTun0 MTU in KeeneticOS before starting FPTN");
+        throw std::runtime_error("Configure the FPTN OpkgTun MTU in KeeneticOS before starting FPTN");
       return;
     }
     tun_->mtu(mtu);

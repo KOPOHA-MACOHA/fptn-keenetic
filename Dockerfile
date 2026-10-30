@@ -109,7 +109,7 @@ RUN --mount=type=secret,id=proxy_ca \
       -DCMAKE_TOOLCHAIN_FILE=/build/conan_toolchain.cmake \
       -DCMAKE_BUILD_TYPE=Release -DCMAKE_EXE_LINKER_FLAGS=-static \
       -DCMAKE_COMPILE_WARNING_AS_ERROR=OFF -DCMAKE_CXX_CLANG_TIDY= \
-      -DFPTN_VERSION=0.5.0 && \
+      -DFPTN_VERSION=0.6.0 && \
     python /work/check-cross-includes.py /build/compile_commands.json && \
     cmake --build /build --target fptn-client-cli -j2
 RUN mkdir /out && \
@@ -125,7 +125,7 @@ RUN mkdir /out && \
     grep -q 'Connection requires --keenetic-connect' /out/GUARD.txt && \
     if timeout 60 qemu-mipsel /out/fptn-client-cli --keenetic-connect --keenetic-native \
       --access-token test --tun-interface-name fptn0 --enable-ad-block false --blacklist-domains '' > /out/NATIVE-GUARD.txt 2>&1; then exit 1; fi && \
-    grep -q 'Native mode requires opkgtun0' /out/NATIVE-GUARD.txt && \
+    grep -q 'Native mode requires opkgtunN' /out/NATIVE-GUARD.txt && \
     cp /work/sources.lock.json /out/ && \
     cp /work/upstream/LICENSE /out/LICENSE-FPTN && \
     cp /work/run-connect-test.sh /work/TUNNEL-TEST.md /out/ && \

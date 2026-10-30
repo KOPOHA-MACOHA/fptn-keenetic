@@ -68,7 +68,7 @@ if action=='check-ipv6':sys.exit(1 if (root/'nat-unavailable').exists() else 0)
 if action=='get-interface-mtu':print((root/'interface-mtu').read_text() if (root/'interface-mtu').exists() else '1420');sys.exit(0)
 if action=='set-interface-mtu':(root/'interface-mtu').write_text(sys.argv[2]);sys.exit(0)
 if action=='status-json':
-    live=run.exists();print(json.dumps({'state':'running' if live else 'stopped','message':'Туннель подключён' if live else 'Служба остановлена','selectedServer':'CZ' if live else '', 'connected':live,'supervisorAlive':live,'clientAlive':live,'canStart':not live,'canStop':live,'canRestart':live}));sys.exit(0)
+    live=run.exists();print(json.dumps({'nativeInterface':(conf/'native-interface').read_text().strip() if (conf/'native-interface').exists() else '', 'state':'running' if live else 'stopped','message':'Туннель подключён' if live else 'Служба остановлена','selectedServer':'CZ' if live else '', 'connected':live,'supervisorAlive':live,'clientAlive':live,'canStart':not live,'canStop':live,'canRestart':live}));sys.exit(0)
 with (root/'trace').open('a') as f: f.write(action+'\\n')
 if action=='status':
     print('FPTN native: клиент запущен, READY получен при старте.' if run.exists() else 'FPTN: остановлен. Автозапуск выключен.')
@@ -239,7 +239,7 @@ else: sys.exit(2)
     def test_status_exposes_explicit_state_and_versions(self):
         (self.conf/'web-meta.json').write_text(json.dumps({'clientVersion':'0.4.0','revision':'abc'}))
         status,data=self.request()
-        self.assertEqual(status,200);self.assertEqual(data['uiVersion'],'0.15.0')
+        self.assertEqual(status,200);self.assertEqual(data['uiVersion'],'0.16.0')
         self.assertEqual(data['clientVersion'],'0.4.0')
         self.assertTrue(data['service']['canStart']);self.assertFalse(data['service']['canStop'])
         self.client_run.mkdir()
@@ -260,8 +260,8 @@ else: sys.exit(2)
     def test_entry_page_is_not_cached_and_assets_are_versioned(self):
         page=subprocess.run(['sh',str(ROOT/'web/index.cgi')],capture_output=True,check=True).stdout.decode()
         self.assertIn('Cache-Control: no-store',page)
-        self.assertIn('data-ui-version="0.15.0"',page)
-        self.assertIn('app.js?v=0.15.0',page)
+        self.assertIn('data-ui-version="0.16.0"',page)
+        self.assertIn('app.js?v=0.16.0',page)
 
     def test_failed_save_restores_previous_actual_firmware_mtu(self):
         old=self.settings();(self.conf/'connection.json').write_text(json.dumps(old))

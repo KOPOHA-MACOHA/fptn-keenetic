@@ -7,7 +7,7 @@ export PATH
 umask 077
 fail() { echo "ОШИБКА: $*" >&2; exit 1; }
 [ "$(id -u)" = 0 ] || fail 'Запустите от root.'
-[ "${1:-}" = install ] || fail 'Использование: sh install-web-ui.sh install UI_COMMIT [LAN_IP] [CLIENT_COMMIT]'
+[ "${1:-}" = install ] || fail 'Использование: sh install-web-ui.sh install UI_COMMIT [LAN_IP] [CLIENT_COMMIT] [PORT]'
 REV=${2:-}
 case "$REV" in *[!a-f0-9]*|'') fail 'Нужен полный SHA коммита.' ;; esac
 [ "${#REV}" -eq 40 ] || fail 'Нужен полный SHA коммита.'
@@ -18,8 +18,8 @@ case "$CLIENT_REV" in *[!a-f0-9]*|'') fail 'Некорректный SHA бин�
 fi
 LAN=${3:-192.168.1.1}
 printf '%s\n' "$LAN" | awk -F. 'NF!=4 {exit 1} {for(i=1;i<=4;i++) if($i!~/^[0-9]+$/ || $i>255 || length($i)>3) exit 1}' || fail 'Некорректный IPv4 LAN.'
-PORT=1111
-ORIGIN=http://$LAN:$PORT
+PORT=${5:-${FPTN_INSTALL_PORT:-}}
+ORIGIN=
 CONF=/opt/etc/fptn
 WEB=/opt/share/fptn-web
 FRAGMENT=/opt/etc/lighttpd/conf.d/95-fptn.conf
@@ -58,9 +58,66 @@ if [ -e "$FRAGMENT" ]; then
 fi
 if [ -e "$HOOK" ]; then grep -Fq '# Managed by fptn IPv6' "$HOOK" || fail 'IPv6 hook занят другим приложением.'; fi
 [ ! -d "$WEB" ] || [ -f "$WEB/.fptn-web-owned" ] || fail 'Каталог панели уже занят чужими файлами.'
-if netstat -lnt 2>/dev/null | awk -v port="$PORT" '$4 ~ (":" port "$") {found=1} END {exit !found}'; then
-  [ -f "$FRAGMENT" ] && [ -f "$WEB/.fptn-web-owned" ] || fail 'Порт 1111 занят. Изменений нет.'
+valid_port() {
+  case "$1" in ''|*[!0-9]*|0*) return 1 ;; esac
+  [ "${#1}" -le 5 ] && [ "$1" -ge 1 ] && [ "$1" -le 65535 ]
+}
+SAVED_PORT=
+if [ -f "$CONF/web-origin" ]; then
+  SAVED_ORIGIN=$(cat "$CONF/web-origin")
+  SAVED_ENDPOINT=${SAVED_ORIGIN#http://}
+  SAVED_PORT=${SAVED_ENDPOINT##*:}
+  SAVED_LAN=${SAVED_ENDPOINT%:*}
+  valid_port "$SAVED_PORT" && [ "$SAVED_ORIGIN" = "http://$SAVED_LAN:$SAVED_PORT" ] || fail 'Повреждён сохранённый адрес панели.'
 fi
+# A listener is ours only if its PID belongs to lighttpd and both the managed
+# socket fragment and the saved origin identify precisely this endpoint.
+port_available() {
+  LISTENERS=$(netstat -lntp 2>/dev/null) || fail 'Не удалось проверить TCP-порты.'
+  MATCHES=$(printf '%s\n' "$LISTENERS" | awk -v port="$1" '$1~/^tcp/ && $4 ~ (":" port "$") {print $4 " " $NF}')
+  [ -n "$MATCHES" ] || return 0
+  [ "$1" = "$SAVED_PORT" ] && [ -f "$WEB/.fptn-web-owned" ] && [ -f "$FRAGMENT" ] || return 1
+  grep -Fq '$SERVER["socket"] == "'"$SAVED_LAN:$SAVED_PORT"'" {' "$FRAGMENT" || return 1
+  printf '%s\n' "$MATCHES" | while read -r endpoint process; do
+    [ "$endpoint" = "$SAVED_LAN:$SAVED_PORT" ] || exit 1
+    case "$process" in */lighttpd) listener_pid=${process%/*} ;; *) exit 1 ;; esac
+    case "$listener_pid" in ''|*[!0-9]*) exit 1 ;; esac
+    [ "$(readlink "/proc/$listener_pid/exe" 2>/dev/null)" = "$(readlink -f "$(command -v lighttpd)")" ] || exit 1
+  done
+}
+select_port() {
+  # Web operations never read a terminal; regular updates preserve their port.
+  if [ -n "$PORT" ]; then
+    valid_port "$PORT" || fail 'TCP-порт должен быть целым числом от 1 до 65535.'
+    port_available "$PORT" || fail "TCP-порт $PORT занят другим сервисом. Изменений нет."
+    return
+  fi
+  if [ -n "${FPTN_OPERATION_ID:-}" ]; then
+    [ -n "$SAVED_PORT" ] || fail 'Не найден сохранённый порт панели.'
+    PORT=$SAVED_PORT
+    port_available "$PORT" || fail "Сохранённый TCP-порт $PORT занят другим сервисом."
+    return
+  fi
+  if ! ( : < /dev/tty ) 2>/dev/null; then
+    [ -n "$SAVED_PORT" ] || fail 'Нет терминала. Передайте порт явно: sh install.sh install LAN_IP PORT.'
+    PORT=$SAVED_PORT
+    port_available "$PORT" || fail "TCP-порт $PORT занят. Передайте другой порт явно."
+    return
+  fi
+  exec 3<> /dev/tty
+  PROPOSED=${SAVED_PORT:-1111}
+  while :; do
+    printf 'TCP-порт панели [Enter — %s]: ' "$PROPOSED" >&3
+    IFS= read -r ANSWER <&3 || fail 'Ввод порта прерван.'
+    PORT=${ANSWER:-$PROPOSED}
+    if ! valid_port "$PORT"; then echo 'Введите целый порт от 1 до 65535.' >&3; continue; fi
+    if port_available "$PORT"; then break; fi
+    echo "TCP-порт $PORT занят. Сервис на нём не изменялся." >&3
+    if [ "$PORT" -lt 65535 ]; then PROPOSED=$((PORT+1))
+    else PROPOSED=1111; echo 'Достигнут конец диапазона. Выберите другой порт.' >&3; fi
+  done
+  exec 3>&-
+}
 INIT=
 for candidate in /opt/etc/init.d/S*lighttpd; do
   [ -x "$candidate" ] || continue
@@ -98,6 +155,7 @@ RESTART_ATTEMPTED=no
 INSTALL_LOCK=no
 DECODER_NEW=no
 LICENSES_NEW=no
+INTERFACE_NEW=no
 finish() {
   trap ':' INT TERM HUP
   RESTORE_SAFE=yes
@@ -110,6 +168,12 @@ finish() {
       fi
     fi
     if [ "$RESTORE_SAFE" = yes ]; then
+    if [ "$INTERFACE_NEW" = yes ] && [ -s "$CONF/native-interface" ]; then
+      NEW_NATIVE=$(cat "$CONF/native-interface")
+      # The service validated and created this name during this transaction only.
+      if [ "$(cat "$CONF/native-creation-owner" 2>/dev/null)" = "$NEW_NATIVE:$FPTN_OPERATION_ID" ] && ndmc -c "no interface $NEW_NATIVE"; then rm -f "$CONF/native-interface" "$CONF/native-setup-complete" "$CONF/native-setup-unsaved" "$CONF/native-creation-owner"
+      else echo "Не удалось удалить созданный $NEW_NATIVE; маркер владения сохранён." >&2; fi
+    fi
     if [ "$CLIENT_SWAPPED" = yes ] && [ "$FRESH" = no ]; then
       cp -p "$BACKUP/fptn-client-cli" /opt/libexec/fptn/fptn-client-cli.restore
       mv /opt/libexec/fptn/fptn-client-cli.restore /opt/libexec/fptn/fptn-client-cli
@@ -202,9 +266,6 @@ fi
 [ "$(jq -r .platform "$STAGE/client-release.json")" = "$PLATFORM" ] || fail 'Бинарник предназначен для другой платформы.'
 command -v ndmc >/dev/null 2>&1 || fail 'Не найден ndmc: нужна KeeneticOS.'
 [ -c /dev/net/tun ] || fail 'Нет устройства /dev/net/tun: включите компонент TUN Keenetic.'
-if [ "$FRESH" = yes ] && ndmc -c 'show interface OpkgTun0' >/dev/null 2>&1; then
-  [ "$(cat "$CONF/native-interface" 2>/dev/null)" = OpkgTun0 ] || fail 'OpkgTun0 занят другим сервисом. Установка ничего не меняет.'
-fi
 sh -n "$STAGE/scripts/fptn-web-auth.sh"
 # Reuse the PHP runtime already used by nfqws. Credentials are created in the browser.
 sh "$STAGE/scripts/fptn-web-auth.sh" info >/dev/null || fail 'Не удалось запустить PHP панели. Файлы не менялись.'
@@ -212,7 +273,7 @@ sh -n "$STAGE/web/api.cgi"
 sh -n "$STAGE/web/index.cgi"
 # Exercise the real entry file before any installed file or process is changed.
 sh "$STAGE/web/index.cgi" > "$STAGE/entry-check" || fail 'Стартовый CGI не смог прочитать страницу. Установленные файлы не менялись.'
-grep -Fq 'data-ui-version="0.15.0"' "$STAGE/entry-check" || fail 'Стартовый CGI не выдал HTML панели. Установленные файлы не менялись.' 
+grep -Fq 'data-ui-version="0.16.0"' "$STAGE/entry-check" || fail 'Стартовый CGI не выдал HTML панели. Установленные файлы не менялись.' 
 sh -n "$STAGE/scripts/fptn-native-service.sh"
 TARGET=$(sh "$STAGE/scripts/fptn-client-identity.sh" validate "$STAGE/client-release.json") || fail 'Некорректное описание сборки клиента.'
 TARGET_REV=$(printf '%s' "$TARGET" | jq -r .buildRevision)
@@ -277,6 +338,11 @@ CAP_CLIENT=/opt/libexec/fptn/fptn-client-cli
 [ "$CLIENT_UPDATE" = no ] || CAP_CLIENT=$STAGE/client/fptn-client-cli
 sh "$STAGE/scripts/fptn-client-capabilities.sh" "$CAP_CLIENT" > "$STAGE/capabilities.json" || fail 'Не удалось определить возможности клиента. Установленные файлы не менялись.'
 jq -e --arg sum "$TARGET_SUM" --arg version "$TARGET_VERSION" '.sha256==$sum and .clientVersion==$version' "$STAGE/capabilities.json" >/dev/null || fail 'Возможности клиента не совпали с описанием сборки.'
+if [ -s "$CONF/native-interface" ] && [ "$(cat "$CONF/native-interface")" != OpkgTun0 ]; then
+  jq -e '.nativeInterfaceSelection==true' "$STAGE/capabilities.json" >/dev/null || fail 'Клиент выпуска не поддерживает сохранённый OpkgTun. Откат на несовместимый клиент запрещён.'
+fi
+select_port
+ORIGIN=http://$LAN:$PORT
 FPTN_CAP_CLIENT=$CAP_CLIENT sh "$STAGE/scripts/fptn-native-service.sh" get-settings >/dev/null
 # A changed supervisor must run now, even when the ELF is byte-identical.
 # UI-only/provenance-only updates keep an unchanged running service in place.
@@ -322,6 +388,8 @@ else
   export FPTN_OPERATION_ID
 fi
 printf '%s\n' "$BACKUP" > /opt/var/run/fptn-web/action/install-backup
+# A different process may have taken the chosen port while files downloaded.
+port_available "$PORT" || fail "TCP-порт $PORT успел занять другой сервис. Установленные файлы не менялись."
 CHANGED=yes
 mkdir -p "$WEB" /opt/libexec/fptn /opt/bin
 chmod 700 /opt/libexec/fptn
@@ -381,7 +449,7 @@ if [ "$FRESH" = yes ]; then
 fi
 printf '%s\n' "$ORIGIN" > "$CONF/web-origin"
 CLIENT_VERSION=$(jq -r '.clientVersion // "неизвестна"' "$CONF/web-meta.json" 2>/dev/null || echo неизвестна)
-jq -n --arg version "$CLIENT_VERSION" --arg revision "$REV" '{uiVersion:"0.15.0",clientVersion:$version,revision:$revision}' > "$CONF/web-meta.json.new"
+jq -n --arg version "$CLIENT_VERSION" --arg revision "$REV" '{uiVersion:"0.16.0",clientVersion:$version,revision:$revision}' > "$CONF/web-meta.json.new"
 mv "$CONF/web-meta.json.new" "$CONF/web-meta.json"
 cat > "$FRAGMENT" <<EOF
 # Managed by fptn-web-ui. Credentials live outside the document root.
@@ -408,7 +476,7 @@ check_panel() {
   PANEL_ERROR='Страница панели не отвечает.'
   curl --noproxy '*' -fsS -D "$STAGE/headers" --connect-timeout 1 --max-time 2 "$ORIGIN/" -o "$STAGE/page" 2>/dev/null || return 1
   PANEL_ERROR='На порту открылась другая версия панели.'
-  grep -Fq 'data-ui-version="0.15.0"' "$STAGE/page" || return 1
+  grep -Fq 'data-ui-version="0.16.0"' "$STAGE/page" || return 1
   PANEL_CACHE_WARNING=no
   grep -iq '^Cache-Control:.*no-store' "$STAGE/headers" || PANEL_CACHE_WARNING=yes
   PANEL_ERROR='Не прошла проверка ограничения доступа к API.'
@@ -416,7 +484,7 @@ check_panel() {
   [ "$CODE" = 401 ] || return 1
   PANEL_ERROR='API настройки входа не готово или отвечает другой версией.'
   curl --noproxy '*' -fsS --connect-timeout 1 --max-time 2 "$ORIGIN/api.cgi?auth-info" -o "$STAGE/auth-info.json" 2>/dev/null || return 1
-  jq -e '.uiVersion=="0.15.0" and (.configured|type=="boolean") and (.rootAvailable|type=="boolean")' "$STAGE/auth-info.json" >/dev/null 2>&1 || return 1
+  jq -e '.uiVersion=="0.16.0" and (.configured|type=="boolean") and (.rootAvailable|type=="boolean")' "$STAGE/auth-info.json" >/dev/null 2>&1 || return 1
   return 0
 }
 # rc.func may report failed before the daemon becomes visible. Decide from the
@@ -436,7 +504,7 @@ until check_panel; do
   fi
   sleep 1
 done
-echo 'lighttpd отвечает: страница и API панели 0.15.0 проверены.'
+echo 'lighttpd отвечает: страница и API панели 0.16.0 проверены.'
 if [ "$PANEL_CACHE_WARNING" = yes ]; then
   echo "Откройте свежую страницу по ссылке $ORIGIN/?v=$REV (заголовок кэша применится после перезагрузки lighttpd)."
 fi
@@ -466,6 +534,11 @@ cp "$STAGE/sources.lock.json" /opt/libexec/fptn/sources.lock.json.new
 chmod 600 /opt/libexec/fptn/sources.lock.json.new
 mv /opt/libexec/fptn/sources.lock.json.new /opt/libexec/fptn/sources.lock.json
 (cd /opt/libexec/fptn; sha256sum fptn-client-cli brotli > SHA256SUMS.new; mv SHA256SUMS.new SHA256SUMS)
+if [ ! -s "$CONF/native-interface" ]; then
+  # Mark before setup: an interruption after creation must still be rolled back.
+  INTERFACE_NEW=yes
+  FPTN_INTERFACE_TRANSACTION=$FPTN_OPERATION_ID /opt/bin/fptnctl setup-interface || fail 'Не удалось создать собственный интерфейс FPTN.'
+fi
 if [ "$SERVICE_STOPPED" = yes ] && [ "$WAS_RUNNING" = yes ]; then
   RESTART_ATTEMPTED=yes
   /opt/bin/fptnctl start || fail 'Обновлённый клиент не запустился.'
@@ -473,17 +546,20 @@ fi
 printf '%s\n' "$TARGET" > "$CONF/client-release.json.new"
 chmod 600 "$CONF/client-release.json.new"
 mv "$CONF/client-release.json.new" "$CONF/client-release.json"
-printf '%s' "$TARGET" | jq --arg revision "$REV" '. + {uiVersion:"0.15.0",revision:$revision,clientRevision:.buildRevision,clientSha256:.sha256}' > "$CONF/web-meta.json.new"
+printf '%s' "$TARGET" | jq --arg revision "$REV" '. + {uiVersion:"0.16.0",revision:$revision,clientRevision:.buildRevision,clientSha256:.sha256}' > "$CONF/web-meta.json.new"
 mv "$CONF/web-meta.json.new" "$CONF/web-meta.json"
 : > /opt/libexec/fptn/.runtime-managed
 DONE=yes
+if [ "$INTERFACE_NEW" = yes ] && [ "$(cat "$CONF/native-creation-owner" 2>/dev/null)" = "$(cat "$CONF/native-interface" 2>/dev/null):$FPTN_OPERATION_ID" ]; then
+  rm -f "$CONF/native-creation-owner"
+fi
 echo
-echo "Панель 0.15.0: $ORIGIN/?v=$REV"
+echo "Панель 0.16.0: $ORIGIN/?v=$REV"
 rm -f "$CONF/web-key"
 echo 'Откройте панель: создайте логин и пароль или войдите через root Entware.'
 echo 'Пароль в терминале не нужен. Существующие настройки входа сохраняются.'
 if [ "$FRESH" = yes ]; then
-  echo 'В браузере вставьте токен, выберите сервер и сохраните настройки. Затем создайте интерфейс кнопкой в панели и запустите FPTN.'
+  echo 'В браузере вставьте токен, выберите сервер и сохраните настройки. Интерфейс уже создан; запустите FPTN после сохранения настроек.'
 else echo 'Токен, выбранный сервер, маршруты и DNS сохранены.'; fi
 echo 'Автозапуск FPTN не включался.' 
 if [ "$CLIENT_UPDATE" = yes ]; then echo 'Бинарник обновлён; прежнее состояние службы восстановлено.'

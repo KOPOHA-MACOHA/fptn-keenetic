@@ -36,7 +36,7 @@ extern "C" int __wrap_socket(int,int,int) noexcept {return 11;}
 extern "C" int __wrap_fcntl(int,int,...) {return 0;}
 extern "C" int __wrap_ioctl(int fd,unsigned long request,...) noexcept {
  va_list ap; va_start(ap,request); auto* r=va_arg(ap,ifreq*); va_end(ap);
- assert(std::string(r->ifr_name)=="opkgtun0");
+ assert(std::string(r->ifr_name)=="opkgtun7");
  if(request==TUNSETIFF) {assert(fd==10); ++attaches;
    if(fail_attach){errno=EPERM; return -1;}
    if(multiqueue && !(r->ifr_flags&IFF_MULTI_QUEUE)){errno=EINVAL; return -1;}
@@ -53,17 +53,20 @@ extern "C" ssize_t __wrap_read(int fd,void* buffer,size_t size) {assert(fd==10 &
 extern "C" ssize_t __wrap_write(int fd,const void*,size_t size) {assert(fd==10); return size;}
 int main(){
  using fptn::common::network::LinuxTunDevice;
- {exists=false; LinuxTunDevice d; assert(!d.Open("opkgtun0")); assert(opens==0); exists=true;}
- {LinuxTunDevice d; assert(d.Open("opkgtun0")); assert(tuntap::creations==0);
-  assert(d.GetName()=="opkgtun0"); assert(d.ConfigureIPv4("10.0.0.1",32));
+ for(const char* bad:{"opkgtun", "opkgtun00", "opkgtun-1", "opkgtun1x", "opkgtun123456789"}) {
+  LinuxTunDevice d; assert(!d.Open(bad)); assert(tuntap::creations==0);
+ }
+ {exists=false; LinuxTunDevice d; assert(!d.Open("opkgtun7")); assert(opens==0); exists=true;}
+ {LinuxTunDevice d; assert(d.Open("opkgtun7")); assert(tuntap::creations==0);
+  assert(d.GetName()=="opkgtun7"); assert(d.ConfigureIPv4("10.0.0.1",32));
   assert(!d.ConfigureIPv4("10.0.0.2",32)); assert(!d.ConfigureIPv4("10.0.0.1",24));
   assert(d.ConfigureIPv6("fd00::1",126)); d.SetNonBlocking(true); d.SetMTU(1420); assert(d.BringUp());
   bool thrown=false; try{d.SetMTU(1280);}catch(const std::runtime_error&){thrown=true;} assert(thrown);
   char b[8]; assert(d.Read(b,8)==4); assert(d.Write(b,4)==4); d.Close(); assert(closes==1);
  } assert(closes==1);
- {fail_attach=true; LinuxTunDevice d; assert(!d.Open("opkgtun0")); fail_attach=false;} assert(closes==2);
- {attaches=0; replaced=true; LinuxTunDevice d; assert(!d.Open("opkgtun0")); replaced=false;} assert(closes==3);
- {attaches=0; multiqueue=true; LinuxTunDevice d; assert(d.Open("opkgtun0")); assert(attaches==2); multiqueue=false;} assert(closes==4);
+ {fail_attach=true; LinuxTunDevice d; assert(!d.Open("opkgtun7")); fail_attach=false;} assert(closes==2);
+ {attaches=0; replaced=true; LinuxTunDevice d; assert(!d.Open("opkgtun7")); replaced=false;} assert(closes==3);
+ {attaches=0; multiqueue=true; LinuxTunDevice d; assert(d.Open("opkgtun7")); assert(attaches==2); multiqueue=false;} assert(closes==4);
  {LinuxTunDevice d; assert(d.Open("fptn0")); assert(tuntap::creations==1); d.Close();}
  puts("native TUN attach/close/validation/packets: PASS");
 }

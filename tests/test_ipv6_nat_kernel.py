@@ -19,17 +19,17 @@ class IPv6NatKernelTest(unittest.TestCase):
         def run(ns,args,**kwargs):return subprocess.run(['ip','netns','exec',ns,*args],**kwargs)
         def table(*args):return run(router,['ip6tables','-w','5','-t','nat',*args],capture_output=True,text=True,check=True)
         ip(router,'link','add','lan0','type','veth','peer','name','c0');ip(router,'link','set','c0','netns',client)
-        ip(router,'link','add','opkgtun0','type','veth','peer','name','s0');ip(router,'link','set','s0','netns',server)
+        ip(router,'link','add','opkgtun7','type','veth','peer','name','s0');ip(router,'link','set','s0','netns',server)
         for ns in names:ip(ns,'link','set','lo','up')
-        for ns,iface,addr in [(client,'c0','fd10::2/64'),(router,'lan0','fd10::1/64'),(router,'opkgtun0','fd42:6670:746e::1/128'),(server,'s0','2001:db8:1::2/64')]:
+        for ns,iface,addr in [(client,'c0','fd10::2/64'),(router,'lan0','fd10::1/64'),(router,'opkgtun7','fd42:6670:746e::1/128'),(server,'s0','2001:db8:1::2/64')]:
             ip(ns,'link','set',iface,'up');ip(ns,'-6','addr','add',addr,'dev',iface,'nodad')
         ip(client,'-6','route','add','default','via','fd10::1','dev','c0')
-        ip(router,'-6','route','add','2001:db8:1::2/128','dev','opkgtun0')
+        ip(router,'-6','route','add','2001:db8:1::2/128','dev','opkgtun7')
         ip(server,'-6','route','add','fd42:6670:746e::1/128','dev','s0')
         run(router,['sysctl','-q','-w','net.ipv6.conf.all.forwarding=1'],capture_output=True,check=True)
         table('-N','UNRELATED6');table('-A','POSTROUTING','-j','UNRELATED6')
         with tempfile.TemporaryDirectory() as directory:
-            root=Path(directory);conf=root/'etc/fptn';conf.mkdir(parents=True);(conf/'native-interface').write_text('OpkgTun0\n')
+            root=Path(directory);conf=root/'etc/fptn';conf.mkdir(parents=True);(conf/'native-interface').write_text('OpkgTun7\n')
             env={**os.environ,'FPTN_PREFIX':str(root)}
             def helper(action,success=True):
                 result=run(router,['sh',str(ROOT/'scripts/fptn-ipv6.sh'),action],env=env,capture_output=True,text=True,timeout=20)
@@ -54,7 +54,7 @@ while True:
             response=run(client,request,capture_output=True,text=True,timeout=5);self.assertEqual(response.returncode,0,response.stderr)
             self.assertEqual((root/'peers').read_text().strip(),'fd42:6670:746e::1')
             # Model a firmware rebuild of the owned chain; ownership survives and is restored.
-            table('-D','POSTROUTING','-o','opkgtun0','-j','FPTN_KN_6');table('-F','FPTN_KN_6');table('-X','FPTN_KN_6')
+            table('-D','POSTROUTING','-o','opkgtun7','-j','FPTN_KN_6');table('-F','FPTN_KN_6');table('-X','FPTN_KN_6')
             helper('apply');self.assertEqual(run(client,request,capture_output=True,timeout=5).returncode,0)
             helper('remove');helper('remove')
             remaining=table('-S').stdout;self.assertNotIn('FPTN_KN_6',remaining);self.assertIn('UNRELATED6',remaining)

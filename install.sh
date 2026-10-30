@@ -7,8 +7,17 @@ PATH=/opt/sbin:/opt/bin:/opt/usr/bin:/usr/sbin:/usr/bin:/sbin:/bin
 export PATH
 fail() { echo "FPTN: $*" >&2; exit 1; }
 [ "$(id -u)" = 0 ] || fail 'Запустите от root Entware.'
-[ "${1:-install}" = install ] || fail 'Использование: sh install.sh install [LAN_IP]'
-LAN=${2:-192.168.1.1}
+[ "${1:-install}" = install ] || fail 'Использование: sh install.sh install [LAN_IP] [PORT]'
+LAN=${2:-}
+if [ -z "$LAN" ] && [ -r /opt/etc/fptn/web-origin ]; then
+  LAN=$(cat /opt/etc/fptn/web-origin); LAN=${LAN#http://}; LAN=${LAN%:*}
+fi
+LAN=${LAN:-192.168.1.1}
+PORT=${3:-}
+if [ -n "$PORT" ]; then
+  case "$PORT" in *[!0-9]*|0*) fail 'TCP-порт должен быть от 1 до 65535.' ;; esac
+  [ "${#PORT}" -le 5 ] && [ "$PORT" -ge 1 ] && [ "$PORT" -le 65535 ] || fail 'TCP-порт должен быть от 1 до 65535.'
+fi
 printf '%s\n' "$LAN" | awk -F. 'NF!=4 {exit 1} {for(i=1;i<=4;i++) if($i!~/^[0-9]+$/ || $i>255 || length($i)>3) exit 1}' || fail 'Некорректный IPv4 LAN.'
 [ -r /opt/etc/entware_release ] || fail 'Требуется установленный Entware.'
 value() { awk -F= -v key="$1" '$1==key {gsub(/["\047\r]/,"",$2); print $2}' /opt/etc/entware_release; }
@@ -43,13 +52,18 @@ if [ -n "$PACKAGES" ]; then
 fi
 if [ "$NEW_HTTP" = yes ]; then
   # A newly installed Entware lighttpd otherwise defaults to :80, occupied by Keenetic.
-  # Keep its unused primary listener private; FPTN gets its own LAN :1111 socket.
+  # Keep its unused primary listener private; FPTN gets its own LAN socket.
   BASE_FRAGMENT=/opt/etc/lighttpd/conf.d/05-fptn-bootstrap.conf
   [ ! -e "$BASE_FRAGMENT" ] || fail 'Фрагмент начальной настройки lighttpd уже существует.'
-  if netstat -lnt 2>/dev/null | awk '$4 ~ /:1110$/ {found=1} END {exit !found}'; then fail 'Порт 1110 занят: lighttpd не перенастраивался.'; fi
+  TCP_LISTENERS=$(netstat -lnt 2>/dev/null) || fail 'Не удалось проверить TCP-порты.'
+  BASE_PORT=1110
+  while [ "$BASE_PORT" = "${PORT:-1111}" ] || printf '%s\n' "$TCP_LISTENERS" | awk -v port="$BASE_PORT" '$4 ~ (":" port "$") {found=1} END {exit !found}'; do
+    BASE_PORT=$((BASE_PORT+1))
+    [ "$BASE_PORT" -le 65535 ] || fail 'Нет свободного порта для служебного listener lighttpd.'
+  done
   [ -f /opt/etc/lighttpd/lighttpd.conf ] || fail 'Пакет lighttpd не создал основной конфиг.'
   mkdir -p /opt/etc/lighttpd/conf.d
-  printf '%s\n' '# Initial Entware lighttpd listener, created by FPTN bootstrap.' 'server.bind := "127.0.0.1"' 'server.port := 1110' > "$BASE_FRAGMENT"
+  printf '%s\n' '# Initial Entware lighttpd listener, created by FPTN bootstrap.' 'server.bind := "127.0.0.1"' "server.port := $BASE_PORT" > "$BASE_FRAGMENT"
   if ! lighttpd -tt -f /opt/etc/lighttpd/lighttpd.conf; then
     rm -f "$BASE_FRAGMENT"
     fail 'Не удалось подготовить новый lighttpd. Его основной конфиг не менялся.'
@@ -62,7 +76,7 @@ if [ -f "$BUNDLE/release-revision" ] && [ -f "$BUNDLE/scripts/install-web-ui.sh"
   case "$REV" in *[!a-f0-9]*|'') fail 'Некорректная версия пакета.' ;; esac
   [ "${#REV}" -eq 40 ] || fail 'Нужен полный SHA пакета.'
   (cd "$BUNDLE"; sha256sum -c SHA256SUMS) || fail 'Пакет повреждён.'
-  FPTN_PAYLOAD_DIR=$BUNDLE sh "$BUNDLE/scripts/install-web-ui.sh" install "$REV" "$LAN"
+  FPTN_PAYLOAD_DIR=$BUNDLE sh "$BUNDLE/scripts/install-web-ui.sh" install "$REV" "$LAN" "" "$PORT"
   exit 0
 fi
 mkdir -p /opt/tmp
@@ -78,4 +92,4 @@ SUM=$(jq -r .installerSha256 "$STAGE/channel.json")
 curl --proto '=https' --proto-redir '=https' -fLsS --connect-timeout 15 --max-time 60 \
   "https://raw.githubusercontent.com/KOPOHA-MACOHA/fptn-keenetic/$REV/scripts/install-web-ui.sh" -o "$STAGE/install-web-ui.sh"
 printf '%s  %s\n' "$SUM" "$STAGE/install-web-ui.sh" | sha256sum -c - || fail 'Контрольная сумма установщика не совпала.'
-sh "$STAGE/install-web-ui.sh" install "$REV" "$LAN"
+sh "$STAGE/install-web-ui.sh" install "$REV" "$LAN" "" "$PORT"

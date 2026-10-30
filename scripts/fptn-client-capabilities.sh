@@ -62,7 +62,9 @@ VERSION=$(head -c 129 "$TMP/version")
 printf '%s\n' "$VERSION" | awk 'NR!=1 || $0 !~ /^[0-9]+\.[0-9]+\.[0-9]+([a-zA-Z0-9.+-]*)$/ {exit 1}' || fail 'Неизвестный формат версии клиента.'
 SUM=$(nice -n 10 sha256sum "$CLIENT" | awk '{print $1}')
 [ "$(fingerprint)" = "$KEY" ] || fail 'Клиент заменился во время проверки; повторите запрос.'
-jq -n --arg key "$KEY" --arg version "$VERSION" --arg sum "$SUM" --argjson methods "$METHODS" --argjson strategies "$STRATEGIES" \
-  '{schema:1,fingerprint:$key,clientVersion:$version,sha256:$sum,methods:$methods,strategies:$strategies}' > "$TMP/capabilities.json"
+NATIVE_SELECTION=false
+grep -Fq "OpkgTunN" "$TMP/help" && NATIVE_SELECTION=true
+jq -n --argjson nativeInterfaceSelection "$NATIVE_SELECTION" --arg key "$KEY" --arg version "$VERSION" --arg sum "$SUM" --argjson methods "$METHODS" --argjson strategies "$STRATEGIES" \
+  '{schema:1,nativeInterfaceSelection:$nativeInterfaceSelection,fingerprint:$key,clientVersion:$version,sha256:$sum,methods:$methods,strategies:$strategies}' > "$TMP/capabilities.json"
 mv "$TMP/capabilities.json" "$CACHE/current.json"
 jq 'del(.fingerprint)' "$CACHE/current.json"

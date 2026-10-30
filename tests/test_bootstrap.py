@@ -50,6 +50,14 @@ class BootstrapTest(unittest.TestCase):
         p=self.root/'bin/php-cgi';p.write_text(MOCK);p.chmod(0o700)
         result=self.execute();self.assertEqual(result.returncode,0,result.stdout+result.stderr)
         self.assertFalse((self.root/'opkg.log').exists())
+    def test_explicit_port_is_forwarded_and_invalid_port_does_not_install_packages(self):
+        result=subprocess.run(['sh',str(self.script),'install','192.168.1.1','3456'],env=self.env,text=True,capture_output=True,timeout=10)
+        self.assertEqual(result.returncode,0,result.stderr)
+        self.assertEqual((self.root/'invoked').read_text().strip(),'install '+'a'*40+' 192.168.1.1  3456')
+        (self.root/'invoked').unlink();(self.root/'opkg.log').unlink(missing_ok=True)
+        result=subprocess.run(['sh',str(self.script),'install','192.168.1.1','65536'],env=self.env,text=True,capture_output=True,timeout=10)
+        self.assertNotEqual(result.returncode,0);self.assertFalse((self.root/'opkg.log').exists());self.assertFalse((self.root/'invoked').exists())
+
     def test_bad_platform_never_installs_or_executes_anything(self):
         (self.root/'etc/entware_release').write_text('arch=mips\ncpu_type=mips32r2\nfloat=soft\n')
         result=self.execute();self.assertNotEqual(result.returncode,0)

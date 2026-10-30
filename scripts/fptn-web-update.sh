@@ -74,8 +74,8 @@ case "${1:-}" in
   printf '%s  %s\n' "$SUM" "$TEMP/install.sh" | sha256sum -c - || fail 'Не совпала контрольная сумма установщика.'
   sh -n "$TEMP/install.sh"
   ORIGIN=$(cat "$CONF/web-origin")
-  LAN=${ORIGIN#http://}; LAN=${LAN%:1111}
-  sh "$TEMP/install.sh" install "$REV" "$LAN" "$CLIENT_REV"
+  LAN=${ORIGIN#http://}; PORT=${LAN##*:}; LAN=${LAN%:*}
+  sh "$TEMP/install.sh" install "$REV" "$LAN" "$CLIENT_REV" "$PORT"
   ;;
  *) fail 'Неизвестная команда обновления.' ;;
 esac
