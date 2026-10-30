@@ -60,8 +60,12 @@ jobs:
         with:
           path: ${{ runner.temp }}/port-deps/dependencies.tar
           key: port-dependencies-v1-${{ steps.key.outputs.key }}
-      - name: Prepare dependencies only on missing immutable snapshot
+      - name: Restore persistent dependency release when the Actions cache is missing
+        id: release-dependencies
         if: steps.restore.outputs.cache-hit != 'true'
+        run: python3 scripts/arm-dependency-release.py restore '${{ matrix.platform }}' '${{ steps.key.outputs.key }}' "$RUNNER_TEMP/port-deps/dependencies.tar"
+      - name: Prepare dependencies only when both stores are missing
+        if: steps.restore.outputs.cache-hit != 'true' && steps.release-dependencies.outputs.restored != 'true'
         uses: docker/build-push-action@v6
         with:
           context: .
@@ -71,15 +75,18 @@ jobs:
           sbom: false
           outputs: type=oci,dest=${{ runner.temp }}/port-deps/dependencies.tar
           cache-from: type=gha,scope=port-${{ matrix.platform }}
+      - id: context
+        name: Verify restored OCI image integrity
+        run: |
+          uri=$(python3 scripts/dependency-image.py unpack "$RUNNER_TEMP/port-deps/dependencies.tar" "$RUNNER_TEMP/port-layout")
+          echo "uri=$uri" >> "$GITHUB_OUTPUT"
       - if: steps.restore.outputs.cache-hit != 'true'
         uses: actions/cache/save@v4
         with:
           path: ${{ runner.temp }}/port-deps/dependencies.tar
           key: port-dependencies-v1-${{ steps.key.outputs.key }}
-      - id: context
-        name: Verify restored OCI image integrity
-        run: |
-          echo "uri=$(python3 scripts/dependency-image.py unpack "$RUNNER_TEMP/port-deps/dependencies.tar" "$RUNNER_TEMP/port-layout")" >> "$GITHUB_OUTPUT"
+      - name: Preserve the verified image outside the disposable Actions cache
+        run: python3 scripts/arm-dependency-release.py publish '${{ matrix.platform }}' '${{ steps.key.outputs.key }}' "$RUNNER_TEMP/port-deps/dependencies.tar"
       - name: Build client and decoder, verify ELF and run probe-only under QEMU
         uses: docker/build-push-action@v6
         with:

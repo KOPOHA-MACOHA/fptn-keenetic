@@ -1,0 +1,78 @@
+name: Preserve and verify ARM dependency images
+on:
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/arm-dependency-cache.yml'
+      - 'scripts/arm-dependency-release.py'
+      - 'tests/test_arm_dependency_release.py'
+  workflow_dispatch:
+permissions:
+  contents: read
+concurrency:
+  group: arm-dependency-preservation-${{ github.ref }}
+  cancel-in-progress: false
+jobs:
+  preserve:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    strategy:
+      fail-fast: false
+      matrix:
+        platform: [aarch64, armv7-softfloat]
+    permissions:
+      contents: write
+    env:
+      GH_TOKEN: ${{ github.token }}
+      GH_REPO: ${{ github.repository }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - name: Verify persistent-cache behavior without network or compilation
+        run: python3 -m unittest discover -s tests -p test_arm_dependency_release.py -v
+      - name: Calculate the unchanged dependency key
+        id: key
+        run: |
+          python3 scripts/render-platform.py . '${{ matrix.platform }}' ports/generated
+          echo "key=$(python3 scripts/platform-dependency-key.py ports/generated)" >> "$GITHUB_OUTPUT"
+          mkdir -p "$RUNNER_TEMP/port-deps"
+      - name: Require the already prepared archive; never rebuild dependencies here
+        uses: actions/cache/restore@v4
+        with:
+          path: ${{ runner.temp }}/port-deps/dependencies.tar
+          key: port-dependencies-v1-${{ steps.key.outputs.key }}
+          fail-on-cache-miss: true
+      - name: Verify OCI members, configuration and all layer hashes
+        run: python3 scripts/dependency-image.py unpack "$RUNNER_TEMP/port-deps/dependencies.tar" "$RUNNER_TEMP/verified-oci"
+      - name: Publish the existing archive without overwriting an earlier snapshot
+        run: python3 scripts/arm-dependency-release.py publish '${{ matrix.platform }}' '${{ steps.key.outputs.key }}' "$RUNNER_TEMP/port-deps/dependencies.tar"
+  verify-fresh-runner:
+    needs: preserve
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    strategy:
+      fail-fast: false
+      matrix:
+        platform: [aarch64, armv7-softfloat]
+    env:
+      GH_TOKEN: ${{ github.token }}
+      GH_REPO: ${{ github.repository }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - name: Calculate the same SDK and ABI input key
+        id: key
+        run: |
+          python3 scripts/render-platform.py . '${{ matrix.platform }}' ports/generated
+          echo "key=$(python3 scripts/platform-dependency-key.py ports/generated)" >> "$GITHUB_OUTPUT"
+      - name: Restore only from Releases on a fresh runner, without Actions cache or Conan
+        id: restored
+        run: python3 scripts/arm-dependency-release.py restore '${{ matrix.platform }}' '${{ steps.key.outputs.key }}' "$RUNNER_TEMP/restored/dependencies.tar"
+      - name: Require the persistent copy and verify the complete OCI image
+        env:
+          RESTORED: ${{ steps.restored.outputs.restored }}
+        run: |
+          test "$RESTORED" = true
+          python3 scripts/dependency-image.py unpack "$RUNNER_TEMP/restored/dependencies.tar" "$RUNNER_TEMP/restored/oci"
