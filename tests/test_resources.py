@@ -25,7 +25,7 @@ class ResourceTests(unittest.TestCase):
         (bindir/'id').chmod(0o700)
         self.env = {**os.environ, 'PATH':str(bindir)+':'+os.environ['PATH']}
 
-    def fixture(self, restart=False):
+    def fixture(self, restart=False, invalid_idle=False):
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
             proc, run = root/'proc', root/'run'
@@ -38,7 +38,8 @@ class ResourceTests(unittest.TestCase):
                 (frame/'sys/kernel/random/boot_id').write_text('boot\n')
                 (frame/'uptime').write_text(f'{10+i*2}.0 0\n')
                 # 100 total ticks per frame; guest ticks must never be counted twice.
-                (frame/'stat').write_text(f'cpu {20+i*20} 0 0 {80+i*80} 0 0 0 0 90000 90000\n')
+                idle = 70 if invalid_idle and i == 1 else 80+i*80
+                (frame/'stat').write_text(f'cpu {20+i*20} 0 0 {idle} 0 0 0 0 90000 90000\n')
                 (frame/'meminfo').write_text(f'MemAvailable: {50000-i*100} kB\n')
                 for pid, start, ticks in [(123, 91, i*5), (456, 92, i)]:
                     path = frame/str(pid);path.mkdir()
@@ -71,6 +72,12 @@ printf '%s\\n' "$step" > '{root}/step'
         self.assertIn('client: CPU 5.0% / пик 5.0%; максимум RSS 18020 КиБ; процессов 1',out)
         self.assertIn('supervisor: CPU 1.0% / пик 1.0%',out)
         self.assertIn('минимум MemAvailable 49800 КиБ',out)
+
+    def test_backwards_idle_counter_rebaselines_process_cpu(self):
+        out=self.fixture(invalid_idle=True)
+        self.assertIn('client: CPU н/д;',out)
+        # The second valid interval has 190 system ticks and 5 client ticks.
+        self.assertIn('client: CPU 2.6% / пик 2.6%',out)
 
     def test_recycled_pid_is_not_measured_and_first_interval_is_skipped(self):
         out=self.fixture(restart=True)

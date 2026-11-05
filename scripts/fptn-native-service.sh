@@ -996,7 +996,11 @@ resource_report() {
         if(now<=previousTime)exit 1
         previousTime=now; elapsed=now-started
         cpu(); dt=total-oldtotal; di=idle-oldidle; oldtotal=total; oldidle=idle
-        if(dt<=0 || di<0 || di>dt)continue
+        if(dt<=0 || di<0 || di>dt){
+          # Linux iowait may move backwards. Rebaseline process counters too,
+          # otherwise their next delta would span two system CPU intervals.
+          dt=0;process("client");process("supervisor");continue
+        }
         busy=100*(dt-di)/dt; allbusy+=dt-di; allticks+=dt;if(busy>allpeak)allpeak=busy
         memory();if(available>=0 && (!haveavail || available<minavail)){minavail=available;haveavail=1}
         printf "[РЕСУРСЫ] %.1f с: общий CPU %.1f%%; MemAvailable %d КиБ.\n",elapsed,busy,available
