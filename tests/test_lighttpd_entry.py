@@ -34,7 +34,7 @@ class LighttpdEntryTest(unittest.TestCase):
             origin=f'http://127.0.0.1:{port}';(conf/'web-origin').write_text(origin+'\n')
             source=(ROOT/'scripts/install-web-ui.sh').read_text()
             fragment=source.split('cat > "$FRAGMENT" <<EOF\n',1)[1].split('\nEOF',1)[0]
-            for key,value in {'$SETENV_MODULE':'','$CGI_MODULE':'','$LAN':'127.0.0.1','$PORT':str(port),'$WEB':str(web),'\\$SERVER':'$SERVER'}.items():fragment=fragment.replace(key,value)
+            for key,value in {'$SETENV_MODULE':'','$CGI_MODULE':'','$LAN':'127.0.0.1','$PORT':str(port),'$WEB':str(web),'\\$SERVER':'$SERVER','\\$HTTP':'$HTTP'}.items():fragment=fragment.replace(key,value)
             configuration=root/'lighttpd.conf'
             configuration.write_text(f'''server.modules = ( "mod_indexfile", "mod_setenv", "mod_cgi", "mod_staticfile" )
 mimetype.assign = ( ".html" => "text/html", ".css" => "text/css", ".js" => "text/javascript" )
@@ -58,11 +58,14 @@ setenv.add-environment = ( "FPTN_PREFIX" => "{root}" )
                     self.assertIsNotNone(response,(root/'console.log').read_text())
                     with response:
                         body=response.read().decode();self.assertEqual(response.status,200)
-                        self.assertIn('data-ui-version="0.17.0"',body)
+                        self.assertIn('data-ui-version="0.18.0"',body)
                         self.assertIn('no-store',response.headers.get('Cache-Control',''))
                     import json
+                    with opener.open(origin+'/favicon.svg',timeout=5) as icon:
+                        self.assertEqual(icon.headers.get_content_type(),'image/svg+xml')
+                        self.assertIn(b'<svg',icon.read())
                     with opener.open(origin+'/api.cgi?auth-info',timeout=5) as response:
-                        info=json.load(response);self.assertFalse(info['configured']);self.assertEqual(info['uiVersion'],'0.17.0')
+                        info=json.load(response);self.assertFalse(info['configured']);self.assertEqual(info['uiVersion'],'0.18.0')
                     with self.assertRaises(urllib.error.HTTPError) as error:opener.open(origin+'/api.cgi?status',timeout=5)
                     self.assertEqual(error.exception.code,401)
                 finally:

@@ -905,7 +905,7 @@ uninstall_runtime() (
     fi
   fi
   rm -f "$CONF/autostart" "$INIT"
-  for file in index.html index.cgi app.js style.css api.cgi .fptn-web-owned; do rm -f "$WEB/$file"; done
+  for file in index.html index.cgi app.js style.css api.cgi favicon.svg .fptn-web-owned; do rm -f "$WEB/$file"; done
   rmdir "$WEB" 2>/dev/null || true
   for file in fptn-client-cli brotli web-auth.sh web-auth.php web-operations.php transport-plan.php web-update.sh client-capabilities.sh client-identity.sh platform.sh uplink.sh ipv6.sh web-port.sh sources.lock.json SHA256SUMS LICENSE-FPTN LICENSE-BROTLI BROTLI-SOURCE.txt .runtime-managed; do rm -f "$LIB/$file"; done
   rmdir "$LIB" 2>/dev/null || true

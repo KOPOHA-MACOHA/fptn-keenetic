@@ -1,11 +1,12 @@
 'use strict';
-const UI_VERSION = '0.17.0';
+const UI_VERSION = '0.18.0';
 const $ = id => document.getElementById(id);
 if (window.top !== window.self) { document.documentElement.replaceChildren(); throw new Error('Panel cannot be framed'); }
 let profiles={},clientCapabilities=null;
 const browserLabels={chrome:'Chrome',firefox:'Firefox',yandex:'Yandex',safari:'Safari'};
 const strategyLabels={'rolling-tunnel':'Скользящий туннель','dual-rolling-tunnel':'Двойной скользящий туннель','triple-rolling-tunnel':'Тройной скользящий туннель'};
-let updateInfo=null;
+let updateInfo=null,updateWatch=null;
+let activeTab='status';
 let authConfigured=true,authMode='panel',accountData=null,accountPending=false;
 let key=sessionStorage.getItem('fptn-ui-session')||'';
 let sessionReady=false;
@@ -25,7 +26,7 @@ async function showLogin(){
   try{await loadAuthInfo();$('auth-loading').hidden=true;$('login').hidden=false;}
   catch(error){showAuthError(error);}
 }
-function loggedOut(){key='';previewToken='';sessionStorage.removeItem('fptn-ui-session');accountData=null;for(const id of ['account-current-password','account-password','account-confirm','account-root-password'])$(id).value='';$('token').value='';$('logs').textContent='';loaded=false;lastData=null;showLogin();}
+function loggedOut(){if(updateWatch&&!updateWatch.finished)finishUpdate(false,'Сессия завершена. Перезагрузите панель и войдите снова, чтобы проверить результат.');key='';previewToken='';sessionStorage.removeItem('fptn-ui-session');accountData=null;for(const id of ['account-current-password','account-password','account-confirm','account-root-password'])$(id).value='';$('token').value='';$('logs').textContent='';loaded=false;lastData=null;showLogin();}
 async function initializePanel(){
   showAuthLoading();
   if(!key){await showLogin();return;}
@@ -37,7 +38,7 @@ async function api(query,body){
   const response=await fetch('api.cgi'+(query?'?'+query:''),{method:body?'POST':'GET',cache:'no-store',credentials:'omit',headers:{Authorization:'Bearer '+key,...(body?{'Content-Type':'application/json'}:{})},...(body?{body:JSON.stringify(body)}:{})});
   let data;try{data=await response.json();}catch{throw new Error('Не удалось прочитать ответ панели. Обновите страницу.');}
   if(response.status===401){loggedOut();throw new Error(data.error||'Войдите по логину и паролю.');}
-  if(!response.ok)throw new Error(data.error||'Ошибка запроса');return data;
+  if(!response.ok){const error=new Error(data.error||'Ошибка запроса');error.status=response.status;throw error;}return data;
 }
 function collectSettings(){return {server:$('server').value,token:$('token').value.trim(),connection:{health:{enabled:$('health-enabled').checked,interval:Number($('health-interval').value),timeout:Number($('health-timeout').value),failures:Number($('health-failures').value)},ipv6:$('ipv6').checked,mtu:$('mtu-mode').value==='custom'?Number($('mtu').value):0,outInterface:$('out-interface').value.trim(),strategy:$('strategy').value,bypass:$('mode').value==='obfuscation'?'obfuscation':$('profile').value,sni:$('sni').value.trim()||'google.com'},fallback:$('fallback-enabled').checked?{enabled:$('fallback-enabled').checked,profiles:[...new Set(fallbackProfiles.map(id=>$(id).value).filter(Boolean))],domains:$('fallback-domains').value.split(/\r?\n/).map(s=>s.trim()).filter(Boolean),budget:Number($('fallback-budget').value)}:{...savedFallback,enabled:false},policy:{mode:$('selection-mode').value,favorites:[...favorites].sort(),excluded:[...excluded].sort()}};}
 function updateDirty(){
@@ -50,7 +51,7 @@ function updateDirty(){
   setControls();
 }
 function setControls(){
-  const busy=pending||lastBusy||accountPending;const service=lastData?.service;const known=Boolean(service)&&!versionMismatch;
+  const busy=pending||lastBusy||accountPending||Boolean(updateWatch&&!updateWatch.finished);const service=lastData?.service;const known=Boolean(service)&&!versionMismatch;
   $('recover-operation').disabled=pending||versionMismatch||!lastData?.operationState?.canRecover;
   $('check-update').disabled=busy||!known;
   $('install-update').disabled=busy||!known||dirty||!updateInfo?.available;
@@ -131,7 +132,7 @@ function setFallbackProfiles(selected){
 function showMtu(){const custom=$('mtu-mode').value==='custom';$('mtu-custom').hidden=!custom;$('mtu').disabled=!custom;}
 function showSni(){$('sni-fields').hidden=$('mode').value!=='sni';}
 async function loadSettings(){
-  const data=await api('settings');$('token-summary').textContent=data.configured===false?'Добавить токен FPTN':'Заменить токен';$('token-help').textContent=data.configured===false?'Вставьте токен из приложения FPTN. Он останется только на роутере.':'Текущий токен сохранён на роутере и не возвращается в браузер.';if(data.configured===false)$('token-details').open=true;renderCapabilities(data.capabilities);const policy=data.policy||{mode:'manual',favorites:[],excluded:[]};favorites=new Set(policy.favorites);excluded=new Set(policy.excluded);$('selection-mode').value=policy.mode;fillServers(data.servers,data.server);
+  const data=await api('settings');$('token-summary').textContent=data.configured===false?'Добавить токен FPTN':'Заменить токен';$('token-help').textContent=data.configured===false?'Вставьте токен из приложения FPTN. Он останется только на роутере.':'Текущий токен сохранён на роутере и не возвращается в браузер.';if(data.configured===false)selectTab('settings');renderCapabilities(data.capabilities);const policy=data.policy||{mode:'manual',favorites:[],excluded:[]};favorites=new Set(policy.favorites);excluded=new Set(policy.excluded);$('selection-mode').value=policy.mode;fillServers(data.servers,data.server);
   $('mtu-mode').value=data.connection.mtu>0?'custom':'auto';$('mtu').value=String(data.connection.mtu||data.interfaceMtu||1420);$('mtu-auto-option').textContent='Как в Keenetic'+(data.interfaceMtu?' ('+data.interfaceMtu+')':'');showMtu();$('out-interface').value=data.connection.outInterface||'';
   const health=data.connection.health||{enabled:false,interval:60,timeout:5,failures:3};
   $('health-enabled').checked=health.enabled;$('health-interval').value=String(health.interval);$('health-timeout').value=String(health.timeout);$('health-failures').value=String(health.failures);
@@ -175,15 +176,17 @@ function applyStatus(data){
   $('memory').textContent=data.rssKiB?'ОЗУ '+(data.rssKiB/1024).toFixed(1)+' МиБ':'';
   $('recover-operation').hidden=!data.operationState?.stale;
   const operations={'setup-interface':'Создание интерфейса FPTN',recover:'Восстановление управления',start:'Запуск клиента',stop:'Остановка клиента',restart:'Переподключение',save:'Применение настроек',check:'Проверка входа на серверы','change-port':'Смена порта панели','check-update':'Проверка обновлений',update:'Установка обновления'};
-  $('operation').hidden=!data.busy;$('operation').textContent=(operations[data.operation]||'Выполнение операции')+'…';
+  if(data.busy&&data.operation==='check-update')$('update-status').textContent='Проверяем наличие обновлений…';
+  $('operation').hidden=!data.busy||['update','check-update'].includes(data.operation);$('operation').textContent=(operations[data.operation]||'Выполнение операции')+'…';
   if(data.operationState?.stale)$('operation').textContent=data.operationState.message;
+  observeUpdate(data);
   updateHealth();updateDirty();
 }
-function showOffline(error){lastData=null;$('status-title').textContent='Нет связи с панелью';$('status-message').textContent=error.message;$('indicator').className='dot';setControls();}
+function showOffline(error){if(updateWatch&&!updateWatch.finished)renderUpdate('Панель временно недоступна. Ожидаем восстановления связи…');lastData=null;$('status-title').textContent='Нет связи с панелью';$('status-message').textContent=error.message;$('indicator').className='dot';setControls();}
 async function poll(){
   if(!key||!sessionReady||polling)return;polling=true;
   try{const data=await api('status');const finished=(lastBusy||pending)&&!data.busy&&data.result;lastBusy=data.busy;applyStatus(data);
-    if(finished){pending=false;notice(data.result.message,!data.result.ok);if(data.result.ok&&data.result.action==='save')await loadSettings();if(['check-update','update'].includes(data.result.action))await loadUpdates();}
+    if(finished){pending=false;notice(data.result.message,!data.result.ok);if(data.result.ok&&data.result.action==='save')await loadSettings();if(data.result.action==='check-update'||(data.result.action==='update'&&!data.result.ok))await loadUpdates();}
     setControls();
   }catch(error){if(key)showOffline(error);}finally{polling=false;}
 }
@@ -255,13 +258,90 @@ $('browser').addEventListener('change',()=>{fillProfiles();updateDirty();});$('m
 $('mtu-mode').addEventListener('change',()=>{showMtu();updateDirty();});
 for(const id of ['server','strategy','profile','sni','token','mtu','out-interface','ipv6'])$(id).addEventListener('input',updateDirty);
 for(const id of ['server','strategy','profile','sni','mtu','out-interface'])$(id).addEventListener('change',updateDirty);
+for(const id of ['health-enabled','health-interval','health-timeout','health-failures'])$(id).addEventListener('change',updateDirty);
 $('fallback-enabled').addEventListener('change',()=>{$('fallback-fields').hidden=!$('fallback-enabled').checked;updateDirty();});
 for(const id of fallbackProfiles)$(id).addEventListener('change',updateDirty);
 for(const id of ['fallback-domains','fallback-budget'])$(id).addEventListener('change',updateDirty);
 $('fallback-domains').addEventListener('input',updateDirty);
 $('setup-interface').addEventListener('click',()=>command({action:'setup-interface'}));
 $('preview').addEventListener('click',async()=>{const token=$('token').value.trim();if(!token){notice('Вставьте новый токен.',true);return;}$('preview').disabled=true;try{const data=await api('',{action:'preview',token});fillServers(data.servers,$('server').value);previewToken=token;loaded=true;updateDirty();$('settings-error').hidden=true;notice('Серверы прочитаны. Примените настройки.');}catch(error){notice(error.message,true);}finally{setControls();}});
-async function command(body){if(pending||versionMismatch||(lastBusy&&!(body.action==='recover'&&lastData?.operationState?.canRecover)))return;pending=true;setControls();try{await api('',body);notice('Операция запущена. Состояние обновляется автоматически.');await poll();}catch(error){pending=false;setControls();notice(error.message,true);}}
+
+function selectTab(name){
+  activeTab=name;
+  for(const tab of ['status','settings','system','logs']){
+    $('view-'+tab).hidden=tab!==name;$('tab-'+tab).classList.toggle('active',tab===name);
+    $('tab-'+tab).setAttribute('aria-current',tab===name?'page':'false');
+  }
+}
+function renderUpdate(message){
+  $('update-modal').hidden=false;$('panel-shell').inert=true;
+  $('update-message').textContent=message;
+  $('update-progress').hidden=Boolean(updateWatch?.finished);
+  $('update-reload').hidden=!(updateWatch?.finished||updateWatch?.uncertain);$('update-close').hidden=!updateWatch?.finished;
+}
+function beginUpdate(target){
+  if(updateWatch&&!updateWatch.finished)return;
+  updateWatch={revision:target?.revision||null,version:target?.version||'',accepted:false,uncertain:false,seenBusy:false,finished:false};
+  $('update-title').textContent='Обновление FPTN'+(updateWatch.version?' до '+updateWatch.version:'');
+  $('update-detail').textContent='Панель заблокирована на время установки. При перезапуске веб-сервера связь может временно пропасть.';
+  renderUpdate('Отправляем запрос на обновление…');$('update-dialog').focus();
+}
+function finishUpdate(ok,message){
+  if(!updateWatch)return;
+  updateWatch.finished=true;updateWatch.ok=ok;pending=false;
+  $('update-title').textContent=ok?'Обновление установлено':'Обновление не завершено';
+  $('update-detail').textContent=ok?'Перезагрузите панель, чтобы открыть новую версию интерфейса.':'Если операция была прервана, используйте «Восстановить управление» после закрытия окна.';
+  renderUpdate(message);$('update-reload').focus();
+}
+function observeUpdate(data){
+  if(data.busy&&data.operation==='update'){
+    if(!updateWatch||updateWatch.finished)beginUpdate(updateInfo);
+    updateWatch.accepted=true;updateWatch.uncertain=false;updateWatch.seenBusy=true;
+    renderUpdate(updateWatch.revision&&data.revision===updateWatch.revision?'Файлы панели обновлены. Завершаем установку и проверку службы…':'Выполняются загрузка, проверка и установка обновления…');
+    if(data.operationState?.stale)finishUpdate(false,data.operationState.message||'Операция прервана. Требуется восстановление управления.');
+    return;
+  }
+  if(!updateWatch||updateWatch.finished||data.busy)return;
+  if(!updateWatch.accepted){
+    if(updateWatch.uncertain&&updateWatch.revision&&data.revision===updateWatch.revision&&data.result?.action==='update'&&data.result.ok===true)finishUpdate(true,data.result.message||'Новая версия установлена.');
+    return;
+  }
+  const result=data.result;
+  if(result?.ok===false){finishUpdate(false,result.message||'Установка завершилась ошибкой.');return;}
+  if(result?.action==='update'&&result.ok===true){
+    if(updateWatch.revision&&data.revision!==updateWatch.revision){finishUpdate(false,'Операция завершилась, но ожидаемая версия не подтверждена. Перезагрузите панель и проверьте версию.');return;}
+    finishUpdate(true,result.message||'Новая версия установлена.');
+  }else renderUpdate('Ожидаем подтверждения результата установки…');
+}
+for(const name of ['status','settings','system','logs'])$('tab-'+name).addEventListener('click',()=>selectTab(name));
+$('update-reload').addEventListener('click',()=>{window.location.href='/?v='+Date.now();});
+$('update-close').addEventListener('click',()=>{
+  if(!updateWatch?.finished)return;
+  $('update-modal').hidden=true;$('panel-shell').inert=false;updateWatch=null;setControls();$('check-update').focus();
+});
+$('update-dialog').addEventListener('keydown',event=>{
+  if(event.key==='Escape'){event.preventDefault();if(updateWatch?.finished)$('update-close').click();}
+  if(event.key==='Tab'){
+    const buttons=[$('update-reload'),$('update-close')].filter(el=>!el.hidden&&!el.disabled);
+    if(!buttons.length){event.preventDefault();$('update-dialog').focus();return;}
+    if(event.shiftKey&&document.activeElement===buttons[0]){event.preventDefault();buttons.at(-1).focus();}
+    else if(!event.shiftKey&&document.activeElement===buttons.at(-1)){event.preventDefault();buttons[0].focus();}
+  }
+});
+
+async function command(body){
+  if(pending||versionMismatch||(updateWatch&&!updateWatch.finished)||(lastBusy&&!(body.action==='recover'&&lastData?.operationState?.canRecover)))return;
+  if(body.action==='update')beginUpdate(updateInfo);
+  pending=true;setControls();
+  try{await api('',body);if(body.action==='update'&&!updateWatch?.finished){updateWatch.accepted=true;renderUpdate('Запрос принят. Ожидаем завершения установки…');}else if(body.action!=='check-update')notice('Операция запущена. Состояние обновляется автоматически.');await poll();}
+  catch(error){
+    if(body.action==='update'&&updateWatch&&!updateWatch.finished){
+      if(error.status){finishUpdate(false,error.message);}
+      else{updateWatch.uncertain=true;renderUpdate('Ответ не получен. Запрос мог быть принят — ожидаем состояния панели…');}
+    }else{pending=false;notice(error.message,true);}
+    setControls();
+  }
+}
 document.querySelectorAll('[data-command]').forEach(button=>button.addEventListener('click',()=>command({action:button.dataset.command})));
 $('recover-operation').addEventListener('click',()=>command({action:'recover'}));
 $('autostart-toggle').addEventListener('click',()=>command({action:lastData?.autostart?'disable':'enable'}));
@@ -274,7 +354,7 @@ $('download-diagnostics').addEventListener('click',async()=>{try{const data=awai
 $('refresh-logs').addEventListener('click',async()=>{try{$('logs').textContent=(await api('logs')).log||'Журнал пока пуст.';}catch(error){notice(error.message,true);}});
 document.addEventListener('visibilitychange',()=>{if(!document.hidden)poll();});setInterval(()=>{if(!document.hidden)poll();},5000);
 $('auth-retry').addEventListener('click',initializePanel);
-fillProfiles();setControls();initializePanel();
+selectTab('status');fillProfiles();setControls();initializePanel();
 
 async function loadUpdates(){
   updateInfo=await api('updates');

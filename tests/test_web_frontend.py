@@ -30,7 +30,7 @@ const document={hidden:false,documentElement:new Element('root'),getElementById:
  throw new Error('Unexpected selector '+selector);
 }};
 const settings={capabilities:{schema:1,clientVersion:'0.4.0',methods:['obfuscation','sni-spoofing-chrome-149','sni-spoofing-chrome-150','sni-spoofing-firefox-151','sni-spoofing-yandex-26-4','sni-spoofing-safari-26-5','sni-spoofing-edge-151'],strategies:['rolling-tunnel','dual-rolling-tunnel','triple-rolling-tunnel','quad-rolling-tunnel']},server:'CZ',servers:['CZ','DE'],connection:{bypass:'obfuscation',strategy:'dual-rolling-tunnel',sni:'google.com'},policy:{mode:'manual',favorites:[],excluded:[]}};
-const stopped={status:'FPTN остановлен',uiVersion:'0.17.0',clientVersion:'0.4.0',upstreamVersion:'0.4.6',clientBuildRevision:'a'.repeat(40),revision:'1234567890',busy:false,report:null,service:{state:'stopped',message:'Служба остановлена',selectedServer:'',connected:false,supervisorAlive:false,canStart:true,canStop:false,canRestart:false}};
+const stopped={status:'FPTN остановлен',uiVersion:'0.18.0',clientVersion:'0.4.0',upstreamVersion:'0.4.6',clientBuildRevision:'a'.repeat(40),revision:'1234567890',busy:false,report:null,service:{state:'stopped',message:'Служба остановлена',selectedServer:'',connected:false,supervisorAlive:false,canStart:true,canStop:false,canRestart:false}};
 const win={location:{href:''}};win.top=win;win.self=win;
 let authState={configured:false,mode:null,rootAvailable:true};const requests=[];
 const context={console,document,window:win,Option:class{constructor(text,value){this.text=text;this.value=value;}},sessionStorage:{getItem(){return '';},setItem(){},removeItem(){}},setInterval(){},setTimeout(){return 1;},clearTimeout(){},fetch:async(url,options={})=>{
@@ -56,7 +56,7 @@ const run=code=>vm.runInContext(code,context);
  const unconfigured={...stopped,configured:false,interfaceReady:false};context.data=unconfigured;run('applyStatus(data)');
  assert(!elements.onboarding.hidden&&!elements['setup-interface'].hidden&&elements.start.disabled&&elements['check-servers'].disabled);
  const savedServers=settings.servers,savedServer=settings.server;settings.configured=false;settings.servers=[];settings.server='';await run('loadSettings()');
- assert(elements['token-details'].open&&elements['token-summary'].textContent.includes('Добавить'));assert(elements['server-list'].children.length===0);
+ assert(!elements['token-details'].hidden&&elements['token-summary'].textContent.includes('Добавить'));assert(elements['server-list'].children.length===0);
  settings.configured=true;settings.servers=savedServers;settings.server=savedServer;context.data={...stopped,configured:true,interfaceReady:true};run('applyStatus(data)');await run('loadSettings()');
  assert(elements.onboarding.hidden&&elements['setup-interface'].hidden&&!elements.start.disabled);
 
@@ -155,7 +155,7 @@ class FrontendTest(unittest.TestCase):
         sh=shutil.which('sh')
         result=subprocess.run([sh,str(ROOT/'web/index.cgi')],env={**os.environ,'PATH':'','SCRIPT_FILENAME':'/wrong/inherited/path'},capture_output=True,text=True)
         self.assertEqual(result.returncode,0,result.stderr)
-        self.assertIn('data-ui-version="0.17.0"',result.stdout)
+        self.assertIn('data-ui-version="0.18.0"',result.stdout)
         self.assertIn('Cache-Control: no-store',result.stdout)
 
     def test_real_ui_status_buttons_roles_drafts_and_versions(self):
@@ -166,6 +166,49 @@ class FrontendTest(unittest.TestCase):
             script=Path(folder)/'test.js';script.write_text(NODE)
             result=subprocess.run([node,str(script),str(ROOT/'web/index.html'),str(ROOT/'web/app.js')],capture_output=True,text=True,timeout=10)
             self.assertEqual(result.returncode,0,result.stdout+result.stderr)
+
+    def test_update_modal_blocks_until_result_and_handles_disconnect_rollback_and_ambiguity(self):
+        node=shutil.which('node')
+        if not node:self.skipTest('node unavailable')
+        import tempfile
+        harness=NODE.split('(async()=>{',1)[0]
+        scenario=r'''
+const base={...stopped,configured:true,interfaceReady:true,revision:'a'.repeat(40)};
+run("beginUpdate({revision:'c'.repeat(40),version:'0.19.0'})");
+assert(!elements['update-modal'].hidden&&elements['panel-shell'].inert);
+assert(elements['update-reload'].hidden&&elements['update-close'].hidden);
+context.data={...base,busy:true,operation:'update'};run('applyStatus(data)');
+run('showOffline(new Error("network"))');assert(elements['panel-shell'].inert&&elements['update-close'].hidden);
+assert(elements['update-message'].textContent.includes('недоступна'));
+context.data={...base,revision:'c'.repeat(40),uiVersion:'0.19.0',result:{ok:true,action:'update',message:'installed'}};run('applyStatus(data)');
+assert(!elements['update-reload'].hidden&&elements['update-progress'].hidden);
+assert(elements['update-title'].textContent==='Обновление установлено');assert(elements['panel-shell'].inert);
+elements['update-close'].dispatch('click');assert(!elements['panel-shell'].inert);
+run("beginUpdate({revision:'c'.repeat(40)});updateWatch.accepted=true");
+context.data={...base,result:{ok:false,message:'rolled back'}};run('applyStatus(data)');
+assert(elements['update-title'].textContent==='Обновление не завершено');assert(elements['update-message'].textContent==='rolled back');
+elements['update-close'].dispatch('click');
+run("beginUpdate({revision:'c'.repeat(40)});updateWatch.uncertain=true;renderUpdate('unknown')");
+context.data={...base,result:{ok:false,message:'old result'}};run('applyStatus(data)');
+assert(!run('updateWatch.finished')&&elements['panel-shell'].inert&&elements['update-close'].hidden&&!elements['update-reload'].hidden);
+context.data={...base,busy:true,operation:'update',operationState:{stale:true,canRecover:true,message:'interrupted'}};run('applyStatus(data)');
+assert(run('updateWatch.finished')&&!elements['update-close'].hidden);
+console.log('Update modal: confirmed completion, rollback, interruption and uncertain POST: PASS');
+'''
+        with tempfile.TemporaryDirectory() as folder:
+            script=Path(folder)/'modal.js';script.write_text(harness+scenario)
+            result=subprocess.run([node,str(script),str(ROOT/'web/index.html'),str(ROOT/'web/app.js')],capture_output=True,text=True,timeout=10)
+            self.assertEqual(result.returncode,0,result.stdout+result.stderr)
+
+    def test_navigation_token_favicon_and_update_controls_have_expected_locations(self):
+        html=(ROOT/'web/index.html').read_text()
+        self.assertLess(html.index('id="updates"'),html.index('class="tabs"'))
+        self.assertLess(html.index('id="token-details"'),html.index('id="selection-mode"'))
+        self.assertNotIn('<details id="token-details"',html)
+        self.assertGreater(html.index('class="routing footer-info"'),html.index('id="view-logs"'))
+        self.assertIn('favicon.svg?v=',html)
+        import xml.etree.ElementTree as ET
+        self.assertEqual(ET.fromstring((ROOT/'web/favicon.svg').read_text()).tag,'{http://www.w3.org/2000/svg}svg')
 
     def test_startup_session_never_flashes_login_and_preserves_key_on_network_error(self):
         node=shutil.which('node')
