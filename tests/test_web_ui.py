@@ -120,6 +120,14 @@ else: sys.exit(2)
         return self.request(body={'action': 'save', 'server': self.names[0],
                                   'token': '', 'connection': self.settings(), **overrides})
 
+    def test_status_text_and_buttons_use_same_structured_snapshot(self):
+        status, data = self.request()
+        self.assertEqual(status, 200)
+        self.assertIn(data['service']['message'], data['status'])
+        self.assertIn('Автозапуск выключен.', data['status'])
+        trace = self.root/'trace'
+        self.assertNotIn('status', trace.read_text().splitlines() if trace.exists() else [])
+
     def test_port_transition_requires_authentication_same_origin_and_new_endpoint_confirmation(self):
         state=self.conf/'web-port-change';state.mkdir()
         info={'id':'a'*32,'oldOrigin':'http://192.168.1.1:1111','newOrigin':'http://192.168.1.1:2222','deadline':int(time.time())+120}
@@ -272,7 +280,7 @@ else: sys.exit(2)
     def test_status_exposes_explicit_state_and_versions(self):
         (self.conf/'web-meta.json').write_text(json.dumps({'clientVersion':'0.4.0','revision':'abc'}))
         status,data=self.request()
-        self.assertEqual(status,200);self.assertEqual(data['uiVersion'],'0.18.0')
+        self.assertEqual(status,200);self.assertEqual(data['uiVersion'],'0.18.1')
         self.assertEqual(data['clientVersion'],'0.4.0')
         self.assertTrue(data['service']['canStart']);self.assertFalse(data['service']['canStop'])
         self.client_run.mkdir()
@@ -293,8 +301,8 @@ else: sys.exit(2)
     def test_entry_page_is_not_cached_and_assets_are_versioned(self):
         page=subprocess.run(['sh',str(ROOT/'web/index.cgi')],capture_output=True,check=True).stdout.decode()
         self.assertIn('Cache-Control: no-store',page)
-        self.assertIn('data-ui-version="0.18.0"',page)
-        self.assertIn('app.js?v=0.18.0',page)
+        self.assertIn('data-ui-version="0.18.1"',page)
+        self.assertIn('app.js?v=0.18.1',page)
 
     def test_failed_save_restores_previous_actual_firmware_mtu(self):
         old=self.settings();(self.conf/'connection.json').write_text(json.dumps(old))

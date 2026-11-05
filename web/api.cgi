@@ -190,7 +190,7 @@ done
 [ -n "$ACCEPTED_ORIGIN" ] || error '403 Forbidden' 'Неверный адрес панели.'
 if [ "${QUERY_STRING:-}" = auth-info ] && [ "${REQUEST_METHOD:-}" = GET ]; then
   INFO=$(sh "$LIB/web-auth.sh" info) || error '503 Service Unavailable' 'Не удалось проверить настройки входа.'
-  respond '200 OK' "$(printf '%s' "$INFO" | jq '. + {uiVersion:"0.18.0"}')"
+  respond '200 OK' "$(printf '%s' "$INFO" | jq '. + {uiVersion:"0.18.1"}')"
 fi
 case "${QUERY_STRING:-}:${REQUEST_METHOD:-}" in login:POST|setup:POST)
   [ "${CONTENT_TYPE:-}" = application/json ] || error '415 Unsupported Media Type' 'Ожидается JSON.'
@@ -232,7 +232,6 @@ case "${REQUEST_METHOD:-}" in
   GET)
     case "${QUERY_STRING:-}" in
       status)
-        TEXT=$("$CTL" status 2>&1 || true)
         SERVICE=$("$CTL" status-json) || error '500 Internal Server Error' 'Не удалось получить состояние службы.'
         META='{}'; [ ! -f "$CONF/web-meta.json" ] || META=$(cat "$CONF/web-meta.json")
         REPORT='null'
@@ -260,9 +259,9 @@ case "${REQUEST_METHOD:-}" in
         OPERATION=''; [ ! -f "$LOCK/action" ] || OPERATION=$(cat "$LOCK/action")
         IDENTITY=$(sh "$LIB/client-identity.sh" inspect 2>/dev/null) || IDENTITY='{}'
         RESULT='null'; [ ! -r "$RUN/result.json" ] || RESULT=$(cat "$RUN/result.json")
-        respond '200 OK' "$(jq -n --arg status "$TEXT" --arg rss "${RSS:-0}" --arg operation "$OPERATION" \
+        respond '200 OK' "$(jq -n --arg rss "${RSS:-0}" --arg operation "$OPERATION" \
           --arg panelOrigin "$ORIGIN" --argjson portChange "$PORT_CHANGE" --argjson interfaceNeedsSave "$INTERFACE_NEEDS_SAVE" --argjson configured "$CONFIGURED" --argjson interfaceReady "$INTERFACE_READY" --argjson identity "$IDENTITY" --argjson operationState "$OP_STATE" --argjson autostart "$AUTOSTART" --argjson service "$SERVICE" --argjson report "$REPORT" --argjson meta "$META" --argjson busy "$BUSY" --argjson result "$RESULT" \
-          '{panelOrigin:$panelOrigin,portChange:$portChange,interfaceNeedsSave:$interfaceNeedsSave,configured:$configured,interfaceReady:$interfaceReady,operationState:$operationState,autostart:$autostart,status:$status,service:$service,report:$report,uiVersion:"0.18.0",clientVersion:($identity.clientVersion // $meta.clientVersion // "неизвестна"),clientIdentityVerified:($identity.clientIdentityVerified//false),clientBuildRevision:$identity.clientBuildRevision,clientSha256:$identity.clientSha256,upstreamVersion:$identity.upstreamVersion,upstreamRevision:$identity.upstreamRevision,revision:($meta.revision // ""),operation:$operation,rssKiB:($rss|tonumber),busy:$busy,result:$result}')"
+          '{panelOrigin:$panelOrigin,portChange:$portChange,interfaceNeedsSave:$interfaceNeedsSave,configured:$configured,interfaceReady:$interfaceReady,operationState:$operationState,autostart:$autostart,status:([$service.message,("Сервер: "+($service.selectedServer//"")),("Интерфейс: "+($service.nativeInterface//"")),(if $autostart then "Автозапуск включён." else "Автозапуск выключен." end)]|join("\n")),service:$service,report:$report,uiVersion:"0.18.1",clientVersion:($identity.clientVersion // $meta.clientVersion // "неизвестна"),clientIdentityVerified:($identity.clientIdentityVerified//false),clientBuildRevision:$identity.clientBuildRevision,clientSha256:$identity.clientSha256,upstreamVersion:$identity.upstreamVersion,upstreamRevision:$identity.upstreamRevision,revision:($meta.revision // ""),operation:$operation,rssKiB:($rss|tonumber),busy:$busy,result:$result}')"
         ;;
       updates)
         UPDATE=$(sh "$LIB/web-update.sh" status) || error '500 Internal Server Error' 'Не удалось прочитать обновление.'
@@ -289,7 +288,7 @@ case "${REQUEST_METHOD:-}" in
         IDENTITY=$(sh "$LIB/client-identity.sh" inspect 2>/dev/null) || IDENTITY='{}'
         # Explicit allowlist: no logs, server names/addresses, credentials or full config.
         respond '200 OK' "$(jq -n --argjson service "$SERVICE" --argjson identity "$IDENTITY" \
-          '{schema:1,uiVersion:"0.18.0",clientVersion:$identity.clientVersion,upstreamVersion:$identity.upstreamVersion,clientBuildRevision:$identity.clientBuildRevision,state:$service.state,connected:$service.connected,nativeInterface:$service.nativeInterface,health:$service.health}')" ;;
+          '{schema:1,uiVersion:"0.18.1",clientVersion:$identity.clientVersion,upstreamVersion:$identity.upstreamVersion,clientBuildRevision:$identity.clientBuildRevision,state:$service.state,connected:$service.connected,nativeInterface:$service.nativeInterface,health:$service.health}')" ;;
       logs)
         { "$CTL" logs 2>&1 || true; [ ! -f "$RUN/action.log" ] || tail -c 8192 "$RUN/action.log"; } |
           tail -c 24576 > "$RUN/log-view.tmp.$$"
