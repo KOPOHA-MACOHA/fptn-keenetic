@@ -49,6 +49,7 @@ rollback() {
 }
 case "${1:-}" in
   check)
+    [ ! -d "$STATE" ] || fail 'Сначала завершите или отмените предыдущую смену порта.'
     PORT=${2:-};valid_port "$PORT" || fail 'Введите TCP-порт 1–65535.'
     current
     [ "$PORT" = "$OLD_PORT" ] || available "$PORT" || fail 'Порт занят другим сервисом. Выберите другой.' ;;
@@ -67,33 +68,40 @@ case "${1:-}" in
     [ "${#FPTN_OPERATION_ID}" -eq 32 ] || fail 'Некорректная операция.'
     jq -e --arg id "$FPTN_OPERATION_ID" '.id==$id' "$ROOT/var/run/fptn-web/action/owner.json" >/dev/null || fail 'Изменилась операция.'
     [ "$(cat "$ROOT/var/run/fptn-web/action/action")" = change-port ] || fail 'Занята другая операция.'
+    [ ! -d "$STATE" ] || fail 'Сначала завершите или отмените предыдущую смену порта.'
     current;[ "$PORT" != "$OLD_PORT" ] || exit 0
     [ -f "$ROOT/share/fptn-web/.fptn-web-owned" ] || fail 'Нет маркера собственной панели.'
     grep -Fq '# Managed by fptn-web-ui' "$FRAGMENT" || fail 'Чужая конфигурация.'
     available "$PORT" || fail 'Порт занят другим сервисом.'
     init_script
-    mkdir "$STATE" || fail 'Есть незавершённая смена порта. Восстановите управление.'
-    cp -p "$FRAGMENT" "$STATE/old-fragment";cp -p "$CONF/web-origin" "$STATE/old-origin"
-    DONE=no
+    STAGE=$(mktemp -d "$CONF/web-port-stage.XXXXXX")
+    INSTALLED=no;DONE=no
     finish() {
       trap ':' INT TERM HUP
-      if [ "$DONE" != yes ]; then
+      if [ "$INSTALLED" = yes ] && [ "$DONE" != yes ]; then
         rollback || echo 'Не удалось завершить откат порта. Используйте восстановление управления.' >&2
       fi
+      [ ! -d "$STAGE" ] || rm -rf "$STAGE"
     }
     trap finish EXIT
     trap 'exit 1' INT TERM HUP
+    cp -p "$FRAGMENT" "$STAGE/old-fragment";cp -p "$CONF/web-origin" "$STAGE/old-origin"
     NEW=http://$LAN:$PORT
     # Replace exactly the managed socket line, retaining all other directives.
     awk -v old="$LAN:$OLD_PORT" -v new="$LAN:$PORT" '
       $0=="$SERVER[\"socket\"] == \"" old "\" {" {print "$SERVER[\"socket\"] == \"" new "\" {"; n++;next}
-      {print} END{if(n!=1)exit 1}' "$STATE/old-fragment" > "$STATE/new-fragment"
-    cp "$STATE/new-fragment" "$STATE/both-fragments"
-    awk '/^\$SERVER\["socket"\]/{body=1} body{print}' "$STATE/old-fragment" >> "$STATE/both-fragments"
+      {print} END{if(n!=1)exit 1}' "$STAGE/old-fragment" > "$STAGE/new-fragment"
+    cp "$STAGE/new-fragment" "$STAGE/both-fragments"
+    awk '/^\$SERVER\["socket"\]/{body=1} body{print}' "$STAGE/old-fragment" >> "$STAGE/both-fragments"
     jq -n --arg id "$FPTN_OPERATION_ID" --arg oldOrigin "$OLD" --arg newOrigin "$NEW" --argjson deadline "$(( $(date +%s)+120 ))" \
-      '{id:$id,oldOrigin:$oldOrigin,newOrigin:$newOrigin,deadline:$deadline}' > "$STATE/info.json.new"
-    mv "$STATE/info.json.new" "$STATE/info.json"
+      '{id:$id,oldOrigin:$oldOrigin,newOrigin:$newOrigin,deadline:$deadline}' > "$STAGE/info.json.new"
+    mv "$STAGE/info.json.new" "$STAGE/info.json"
     available "$PORT" || fail 'Порт успели занять. Изменений нет.'
+    # Publish a complete journal atomically before touching the live vhost.
+    # A power cut during preparation leaves no half-written recovery directory.
+    [ ! -e "$STATE" ] || fail 'Параллельно началась смена порта.'
+    mv "$STAGE" "$STATE"
+    INSTALLED=yes
     cp "$STATE/both-fragments" "$FRAGMENT.new";mv "$FRAGMENT.new" "$FRAGMENT"
     restart && wait_ready "$NEW" || fail 'Новая панель не отвечает; возвращаю прежний порт.'
     UNTIL=$(jq -r .deadline "$STATE/info.json")

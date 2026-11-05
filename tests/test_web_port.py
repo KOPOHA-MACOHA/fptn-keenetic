@@ -80,6 +80,22 @@ else:sys.exit(3)
  def test_failed_http_readiness_rolls_back(self):
   (self.root/'fast-clock').touch();(self.root/'http-down').touch();result=self.run_cmd('apply','2222')
   self.assertNotEqual(result.returncode,0);self.assertEqual(self.fragment.read_text(),self.original)
+ def test_killed_worker_leaves_a_complete_journal_for_explicit_rollback(self):
+  child=self.start()
+  try:
+   self.wait(lambda:(self.conf/'web-port-change/info.json').exists() and ':2222' in self.fragment.read_text())
+   child.kill();child.communicate(timeout=6)
+   result=self.run_cmd('rollback');self.assertEqual(result.returncode,0,result.stdout+result.stderr)
+   self.assertEqual(self.fragment.read_text(),self.original)
+   self.assertEqual((self.conf/'web-origin').read_text(),'http://192.168.1.1:1111\n')
+   self.assertFalse((self.conf/'web-port-change').exists())
+  finally:
+   if child.poll() is None:child.kill();child.communicate(timeout=6)
+ def test_abandoned_transition_is_not_overwritten_by_a_new_request(self):
+  pending=self.conf/'web-port-change';pending.mkdir();(pending/'info.json').write_text('{"previous":true}')
+  for action in [('check','2222'),('apply','2222'),('apply','1111')]:
+   result=self.run_cmd(*action);self.assertNotEqual(result.returncode,0,result.stdout+result.stderr)
+   self.assertEqual(self.fragment.read_text(),self.original);self.assertEqual((pending/'info.json').read_text(),'{"previous":true}')
  def test_foreign_fragment_and_missing_owner_are_rejected(self):
   self.fragment.write_text('foreign config');result=self.run_cmd('apply','2222');self.assertNotEqual(result.returncode,0);self.assertEqual(self.fragment.read_text(),'foreign config')
   self.fragment.write_text(self.original);(self.root/'var/run/fptn-web/action/owner.json').write_text('{}')
