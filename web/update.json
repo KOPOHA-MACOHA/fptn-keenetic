@@ -1,8 +1,8 @@
 {
   "schema": 1,
-  "version": "0.18.0",
-  "revision": "04900857df024ee6da30a3fa90fcd496c273a332",
-  "installerSha256": "97fc1160694ffe372a89022916371e52358520ff5c64a7eabd25e0de266f385c",
+  "version": "0.18.1",
+  "revision": "46d710b673114d78dbcd806ef862b90d345b5afe",
+  "installerSha256": "80f087f323c9076808b933dd000ccfe6e11fc2a6fd72853fb9d5a1ed6a930520",
   "clientRevision": "e195159b2c38704e6fa9f528e90246e5d792be7e",
   "clientVersion": "0.7.0",
   "clientSha256": "85543b88c77a98e859ccc451448b814aaf7e366378b64ea951dff5936bde882c",
