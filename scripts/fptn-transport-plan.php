@@ -84,7 +84,8 @@ if($compressed){
 $token=json_decode($payload,true);
 if(!is_array($token) || !is_array($token['servers']??null) || count($token['servers'])>512) failAuth('В токене нет корректного списка серверов.');
 $names=[];foreach($token['servers'] as $server){$name=$server['name']??null;if(!is_string($name)||strlen($name)>512||$name==='') failAuth('Некорректное имя сервера.');$names[]=$name;}
-$denied=array_map(fn($n)=>strtolower(trim($n)),$policy['excluded']??[]);
+$temporary=json_decode((string)@file_get_contents($root.'/var/run/fptn-keenetic/failed-servers.json',false,null,0,65537),true);
+$denied=array_map(fn($n)=>strtolower(trim($n)),array_merge($policy['excluded']??[],is_array($temporary)?$temporary:[]));
 $allowed=array_values(array_filter(array_unique($names),fn($n)=>!in_array(strtolower(trim($n)),$denied,true)));
 if(count($allowed)>64 || !$allowed) failAuth('Слишком много разрешённых серверов или все исключены.');
 $favKeys=array_map(fn($n)=>strtolower(trim($n)),$policy['favorites']??[]);

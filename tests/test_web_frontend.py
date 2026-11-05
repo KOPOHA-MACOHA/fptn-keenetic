@@ -30,7 +30,7 @@ const document={hidden:false,documentElement:new Element('root'),getElementById:
  throw new Error('Unexpected selector '+selector);
 }};
 const settings={capabilities:{schema:1,clientVersion:'0.4.0',methods:['obfuscation','sni-spoofing-chrome-149','sni-spoofing-chrome-150','sni-spoofing-firefox-151','sni-spoofing-yandex-26-4','sni-spoofing-safari-26-5','sni-spoofing-edge-151'],strategies:['rolling-tunnel','dual-rolling-tunnel','triple-rolling-tunnel','quad-rolling-tunnel']},server:'CZ',servers:['CZ','DE'],connection:{bypass:'obfuscation',strategy:'dual-rolling-tunnel',sni:'google.com'},policy:{mode:'manual',favorites:[],excluded:[]}};
-const stopped={status:'FPTN остановлен',uiVersion:'0.16.0',clientVersion:'0.4.0',upstreamVersion:'0.4.6',clientBuildRevision:'a'.repeat(40),revision:'1234567890',busy:false,report:null,service:{state:'stopped',message:'Служба остановлена',selectedServer:'',connected:false,supervisorAlive:false,canStart:true,canStop:false,canRestart:false}};
+const stopped={status:'FPTN остановлен',uiVersion:'0.17.0',clientVersion:'0.4.0',upstreamVersion:'0.4.6',clientBuildRevision:'a'.repeat(40),revision:'1234567890',busy:false,report:null,service:{state:'stopped',message:'Служба остановлена',selectedServer:'',connected:false,supervisorAlive:false,canStart:true,canStop:false,canRestart:false}};
 const win={location:{href:''}};win.top=win;win.self=win;
 let authState={configured:false,mode:null,rootAvailable:true};const requests=[];
 const context={console,document,window:win,Option:class{constructor(text,value){this.text=text;this.value=value;}},sessionStorage:{getItem(){return '';},setItem(){},removeItem(){}},setInterval(){},setTimeout(){return 1;},clearTimeout(){},fetch:async(url,options={})=>{
@@ -73,6 +73,25 @@ const run=code=>vm.runInContext(code,context);
  context.data=running;run('applyStatus(data)');
  assert(elements.start.disabled&&!elements.stop.disabled,'running: stop only');
  assert(elements['active-server'].textContent==='CZ');
+ // Automatic fallback updates reality, not the user's saved preference or draft.
+ running.service.preferredServer='CZ';running.service.selectionMode='manual';running.service.selectedServer='DE';
+ running.service.lastSwitch={from:'CZ',to:'DE',reason:'health-failed',at:100};
+ running.service.health={state:'missed',failures:2,threshold:3,nextCheckAt:200};
+ context.data=running;run('applyStatus(data)');
+ assert(elements['active-server'].textContent==='DE'&&elements.server.value==='CZ');
+ assert(elements['selection-summary'].textContent.includes('CZ')&&elements['selection-summary'].textContent.includes('другой'));
+ assert(elements['switch-summary'].textContent.includes('CZ → DE')&&elements['health-status'].textContent.includes('2/3'));
+ running.service.selectedServer='CZ';delete running.service.lastSwitch;delete running.service.health;
+ settings.capabilities.dataPlaneHealth=true;settings.connection.health={enabled:true,interval:120,timeout:4,failures:2};await run('loadSettings()');
+ assert(elements['health-enabled'].checked&&run('collectSettings().connection.health.interval')===120);
+ settings.capabilities.dataPlaneHealth=false;delete settings.connection.health;await run('loadSettings()');
+ assert(elements['health-enabled'].disabled&&!elements['health-unsupported'].hidden);
+ running.panelOrigin='http://192.168.1.1:1111';running.portChange={id:'a'.repeat(32),oldOrigin:running.panelOrigin,newOrigin:'http://192.168.1.1:2222',deadline:500};
+ win.location.origin='http://192.168.1.1:1111';context.data=running;run('applyStatus(data);setControls()');
+ assert(!elements['port-transition'].hidden&&elements['port-link'].href==='http://192.168.1.1:2222'&&elements['port-confirm'].hidden);
+ win.location.origin='http://192.168.1.1:2222';run('setControls()');assert(!elements['port-confirm'].hidden);
+ delete running.portChange;delete running.panelOrigin;context.data=running;run('applyStatus(data);setControls()');
+
  running.service.effectiveConnection={bypass:'sni-spoofing-chrome-149',sni:'example.net',strategy:'dual-rolling-tunnel'};context.data=running;run('applyStatus(data)');assert(elements['effective-connection'].textContent.includes('chrome-149')&&elements['effective-connection'].textContent.includes('example.net'));assert(elements.mode.value==='obfuscation','effective fallback must not overwrite saved settings');
  elements['mtu-mode'].value='custom';elements['mtu-mode'].dispatch('change');elements.mtu.value='1360';elements['out-interface'].value='eth2.2';elements.mtu.dispatch('input');
  assert(run('collectSettings().connection.mtu')===1360&&run('collectSettings().connection.outInterface')==='eth2.2');
@@ -136,7 +155,7 @@ class FrontendTest(unittest.TestCase):
         sh=shutil.which('sh')
         result=subprocess.run([sh,str(ROOT/'web/index.cgi')],env={**os.environ,'PATH':'','SCRIPT_FILENAME':'/wrong/inherited/path'},capture_output=True,text=True)
         self.assertEqual(result.returncode,0,result.stderr)
-        self.assertIn('data-ui-version="0.16.0"',result.stdout)
+        self.assertIn('data-ui-version="0.17.0"',result.stdout)
         self.assertIn('Cache-Control: no-store',result.stdout)
 
     def test_real_ui_status_buttons_roles_drafts_and_versions(self):

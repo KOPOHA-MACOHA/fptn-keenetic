@@ -86,6 +86,7 @@ worker() {
   : > "$LOCK/output"
   case "$ACTION" in
     recover)
+      if [ -d "$CONF/web-port-change" ]; then sh "$LIB/web-port.sh" rollback >> "$LOCK/output" 2>&1 || exit 1; fi
       if [ -f "$LOCK/rollback-needed" ]; then restore_saved_settings || exit 1; fi
       SUCCESS_MESSAGE='Управление восстановлено. Состояние службы проверено заново.'
       [ ! -f "$LOCK/install-backup" ] || SUCCESS_MESSAGE='Управление восстановлено. Обновление было прервано — повторите установку.' ;; 
@@ -97,6 +98,8 @@ worker() {
     check) "$CTL" check-servers >> "$LOCK/output" 2>&1; SUCCESS_MESSAGE='Проверка входа на серверы завершена.' ;;
     check-update) sh "$LIB/web-update.sh" check >> "$LOCK/output" 2>&1; SUCCESS_MESSAGE='Проверка обновлений завершена.' ;;
     update) sh "$LIB/web-update.sh" apply >> "$LOCK/output" 2>&1; SUCCESS_MESSAGE='Обновление установлено. Обновите страницу панели.' ;;
+    cancel-port) sh "$LIB/web-port.sh" rollback >> "$LOCK/output" 2>&1; SUCCESS_MESSAGE='Прежний порт восстановлен.' ;;
+    change-port) sh "$LIB/web-port.sh" apply "$(jq -r .port "$LOCK/request.json")" >> "$LOCK/output" 2>&1; SUCCESS_MESSAGE='Новый порт подтверждён. VPN продолжает работать.' ;;
     save)
       # All validation precedes stopping or writing the current configuration.
       TOKEN=$(jq -r '.token // ""' "$LOCK/request.json")
@@ -166,21 +169,28 @@ error() { respond "$1" "$(jq -n --arg error "$2" '{error:$error}')"; }
 # Validate the target before accepting credentials, including login requests.
 [ -r "$CONF/web-origin" ] || error '503 Service Unavailable' 'Панель не настроена.'
 ORIGIN=$(cat "$CONF/web-origin")
-EXPECTED_HOST=${ORIGIN#http://}
-REQUEST_HOST=${HTTP_HOST:-}
-REQUEST_ORIGIN=${HTTP_ORIGIN:-}
-# Browsers omit the default HTTP port in Host/Origin, even for a URL with :80.
-case "$EXPECTED_HOST" in *:80)
-  EXPECTED_HOST=${EXPECTED_HOST%:80}
-  [ "$REQUEST_HOST" != "$EXPECTED_HOST:80" ] || REQUEST_HOST=$EXPECTED_HOST
-  [ "$REQUEST_ORIGIN" != "http://$EXPECTED_HOST:80" ] || REQUEST_ORIGIN=http://$EXPECTED_HOST
-  ORIGIN=http://$EXPECTED_HOST
-esac
-[ "$REQUEST_HOST" = "$EXPECTED_HOST" ] || error '403 Forbidden' 'Неверный адрес панели.'
-[ -z "$REQUEST_ORIGIN" ] || [ "$REQUEST_ORIGIN" = "$ORIGIN" ] || error '403 Forbidden' 'Запрос с другого сайта запрещён.'
+# During an authenticated port change both owned endpoints serve the same panel.
+# No cross-origin calls are allowed: each request still matches its own origin.
+PORT_CHANGE=null
+if [ -r "$CONF/web-port-change/info.json" ]; then PORT_CHANGE=$(cat "$CONF/web-port-change/info.json"); fi
+ACCEPTED_ORIGIN=
+for candidate in "$ORIGIN" "$(printf '%s' "$PORT_CHANGE" | jq -r '.oldOrigin // empty')" "$(printf '%s' "$PORT_CHANGE" | jq -r '.newOrigin // empty')"; do
+  [ -n "$candidate" ] || continue
+  EXPECTED_HOST=${candidate#http://};REQUEST_HOST=${HTTP_HOST:-};REQUEST_ORIGIN=${HTTP_ORIGIN:-}
+  case "$EXPECTED_HOST" in *:80)
+    EXPECTED_HOST=${EXPECTED_HOST%:80}
+    [ "$REQUEST_HOST" != "$EXPECTED_HOST:80" ] || REQUEST_HOST=$EXPECTED_HOST
+    [ "$REQUEST_ORIGIN" != "http://$EXPECTED_HOST:80" ] || REQUEST_ORIGIN=http://$EXPECTED_HOST
+  esac
+  if [ "$REQUEST_HOST" = "$EXPECTED_HOST" ]; then
+    [ -z "$REQUEST_ORIGIN" ] || [ "$REQUEST_ORIGIN" = "http://$EXPECTED_HOST" ] || error '403 Forbidden' 'Запрос с другого сайта запрещён.'
+    ACCEPTED_ORIGIN=$candidate;break
+  fi
+done
+[ -n "$ACCEPTED_ORIGIN" ] || error '403 Forbidden' 'Неверный адрес панели.'
 if [ "${QUERY_STRING:-}" = auth-info ] && [ "${REQUEST_METHOD:-}" = GET ]; then
   INFO=$(sh "$LIB/web-auth.sh" info) || error '503 Service Unavailable' 'Не удалось проверить настройки входа.'
-  respond '200 OK' "$(printf '%s' "$INFO" | jq '. + {uiVersion:"0.16.0"}')"
+  respond '200 OK' "$(printf '%s' "$INFO" | jq '. + {uiVersion:"0.17.0"}')"
 fi
 case "${QUERY_STRING:-}:${REQUEST_METHOD:-}" in login:POST|setup:POST)
   [ "${CONTENT_TYPE:-}" = application/json ] || error '415 Unsupported Media Type' 'Ожидается JSON.'
@@ -251,8 +261,8 @@ case "${REQUEST_METHOD:-}" in
         IDENTITY=$(sh "$LIB/client-identity.sh" inspect 2>/dev/null) || IDENTITY='{}'
         RESULT='null'; [ ! -r "$RUN/result.json" ] || RESULT=$(cat "$RUN/result.json")
         respond '200 OK' "$(jq -n --arg status "$TEXT" --arg rss "${RSS:-0}" --arg operation "$OPERATION" \
-          --argjson interfaceNeedsSave "$INTERFACE_NEEDS_SAVE" --argjson configured "$CONFIGURED" --argjson interfaceReady "$INTERFACE_READY" --argjson identity "$IDENTITY" --argjson operationState "$OP_STATE" --argjson autostart "$AUTOSTART" --argjson service "$SERVICE" --argjson report "$REPORT" --argjson meta "$META" --argjson busy "$BUSY" --argjson result "$RESULT" \
-          '{interfaceNeedsSave:$interfaceNeedsSave,configured:$configured,interfaceReady:$interfaceReady,operationState:$operationState,autostart:$autostart,status:$status,service:$service,report:$report,uiVersion:"0.16.0",clientVersion:($identity.clientVersion // $meta.clientVersion // "неизвестна"),clientIdentityVerified:($identity.clientIdentityVerified//false),clientBuildRevision:$identity.clientBuildRevision,clientSha256:$identity.clientSha256,upstreamVersion:$identity.upstreamVersion,upstreamRevision:$identity.upstreamRevision,revision:($meta.revision // ""),operation:$operation,rssKiB:($rss|tonumber),busy:$busy,result:$result}')"
+          --arg panelOrigin "$ORIGIN" --argjson portChange "$PORT_CHANGE" --argjson interfaceNeedsSave "$INTERFACE_NEEDS_SAVE" --argjson configured "$CONFIGURED" --argjson interfaceReady "$INTERFACE_READY" --argjson identity "$IDENTITY" --argjson operationState "$OP_STATE" --argjson autostart "$AUTOSTART" --argjson service "$SERVICE" --argjson report "$REPORT" --argjson meta "$META" --argjson busy "$BUSY" --argjson result "$RESULT" \
+          '{panelOrigin:$panelOrigin,portChange:$portChange,interfaceNeedsSave:$interfaceNeedsSave,configured:$configured,interfaceReady:$interfaceReady,operationState:$operationState,autostart:$autostart,status:$status,service:$service,report:$report,uiVersion:"0.17.0",clientVersion:($identity.clientVersion // $meta.clientVersion // "неизвестна"),clientIdentityVerified:($identity.clientIdentityVerified//false),clientBuildRevision:$identity.clientBuildRevision,clientSha256:$identity.clientSha256,upstreamVersion:$identity.upstreamVersion,upstreamRevision:$identity.upstreamRevision,revision:($meta.revision // ""),operation:$operation,rssKiB:($rss|tonumber),busy:$busy,result:$result}')"
         ;;
       updates)
         UPDATE=$(sh "$LIB/web-update.sh" status) || error '500 Internal Server Error' 'Не удалось прочитать обновление.'
@@ -274,6 +284,12 @@ case "${REQUEST_METHOD:-}" in
         respond '200 OK' "$(printf '%s' "$SERVERS" | jq --argjson configured "$CONFIGURED" --arg server "$SERVER" --argjson interfaceMtu "$INTERFACE_MTU" --argjson capabilities "$CAPABILITIES" --argjson fallback "$FALLBACK" --argjson connection "$CONNECTION" --argjson policy "$POLICY" \
           '{configured:$configured,interfaceMtu:$interfaceMtu,capabilities:$capabilities,fallback:$fallback,server:$server,servers:[.servers[].name],connection:$connection,policy:$policy}')"
         ;;
+      diagnostics)
+        SERVICE=$("$CTL" status-json) || error '500 Internal Server Error' 'Не удалось прочитать состояние.'
+        IDENTITY=$(sh "$LIB/client-identity.sh" inspect 2>/dev/null) || IDENTITY='{}'
+        # Explicit allowlist: no logs, server names/addresses, credentials or full config.
+        respond '200 OK' "$(jq -n --argjson service "$SERVICE" --argjson identity "$IDENTITY" \
+          '{schema:1,uiVersion:"0.17.0",clientVersion:$identity.clientVersion,upstreamVersion:$identity.upstreamVersion,clientBuildRevision:$identity.clientBuildRevision,state:$service.state,connected:$service.connected,nativeInterface:$service.nativeInterface,health:$service.health}')" ;;
       logs)
         { "$CTL" logs 2>&1 || true; [ ! -f "$RUN/action.log" ] || tail -c 8192 "$RUN/action.log"; } |
           tail -c 24576 > "$RUN/log-view.tmp.$$"
@@ -297,13 +313,21 @@ case "${REQUEST_METHOD:-}" in
     # Byte count is reliable with LC_ALL=C, including Cyrillic server names.
     printf '%s' "$BODY" | jq -e 'type=="object" and (.action|type=="string")' >/dev/null 2>&1 || error '400 Bad Request' 'Некорректный JSON.'
     ACTION=$(printf '%s' "$BODY" | jq -r '.action')
+    if [ "$ACTION" = confirm-port ]; then
+      CONFIRM_ID=$(printf '%s' "$BODY" | jq -er '.id|select(type=="string" and length==32)') || error '400 Bad Request' 'Некорректная операция.'
+      sh "$LIB/web-port.sh" confirm "$CONFIRM_ID" "$ACCEPTED_ORIGIN" || error '409 Conflict' 'Подтвердите новый адрес до истечения ожидания.'
+      respond '200 OK' '{"ok":true}'
+    fi
     if [ "$ACTION" = preview ]; then
       TOKEN=$(printf '%s' "$BODY" | jq -er '.token|select(type=="string")') || error '400 Bad Request' 'Укажите токен.'
       SERVERS=$(printf '%s' "$TOKEN" | decode_token) || error '400 Bad Request' 'В токене не найден список серверов.'
       unset TOKEN
       respond '200 OK' "$(printf '%s' "$SERVERS" | jq '{servers:[.servers[].name]}')"
     fi
-    case "$ACTION" in start|stop|restart|check|enable|disable|recover|check-update|update|setup-interface) ;; save)
+    case "$ACTION" in start|stop|restart|check|enable|disable|recover|check-update|update|setup-interface|cancel-port) ;;
+    change-port)
+      printf '%s' "$BODY" | jq -e '.port|type=="number" and floor==. and .>=1 and .<=65535' >/dev/null || error '400 Bad Request' 'Введите TCP-порт 1–65535.' ;;
+    save)
       printf '%s' "$BODY" | jq -e '(.server|type=="string" and length>0 and length<=128) and
         (.token // ""|type=="string" and length<=262144)' >/dev/null 2>&1 || error '400 Bad Request' 'Некорректный сервер или токен.'
       printf '%s' "$BODY" | jq '.connection' | "$CTL" validate-settings >/dev/null 2>&1 || error '400 Bad Request' 'Проверьте параметры подключения, MTU и SNI.'

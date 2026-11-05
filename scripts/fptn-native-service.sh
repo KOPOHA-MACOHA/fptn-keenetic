@@ -105,14 +105,23 @@ validate_connection() {
     {n=split($0,a,"."); if(n<2) exit 1
      for(i=1;i<=n;i++) if(length(a[i])<1 || length(a[i])>63 || a[i] ~ /^-|-$/) exit 1}
   ' || fail 'Укажите корректный домен SNI латиницей.'
-  jq -n --arg bypass "$BYPASS" --arg strategy "$STRATEGY" --arg sni "$SNI" --argjson mtu "$MTU" --arg outInterface "$OUT_IFACE" --argjson ipv6 "$IPV6" \
-    '{bypass:$bypass,strategy:$strategy,sni:$sni,mtu:$mtu,outInterface:$outInterface,ipv6:$ipv6}'
+  HEALTH=$(printf '%s' "$SETTINGS" | jq -c --argjson supported "$(printf '%s' "$CAPABILITIES" | jq '.dataPlaneHealth // false')" 'if has("health") then .health else {enabled:$supported,interval:60,timeout:5,failures:3} end')
+  printf '%s' "$HEALTH" | jq -e 'type=="object" and (.enabled|type=="boolean") and
+    (.interval|type=="number" and floor==. and .>=30 and .<=3600) and
+    (.timeout|type=="number" and floor==. and .>=2 and .<=15) and
+    (.failures|type=="number" and floor==. and .>=2 and .<=10)' >/dev/null || fail 'Проверьте интервал, тайм-аут и порог проверки связи.'
+  if printf '%s' "$HEALTH" | jq -e '.enabled' >/dev/null; then
+    printf '%s' "$CAPABILITIES" | jq -e '.dataPlaneHealth==true' >/dev/null || fail 'Для проверки связи обновите клиент FPTN.'
+  fi
+  HEALTH=$(printf '%s' "$HEALTH" | jq '{enabled,interval,timeout,failures}')
+  jq -n --argjson health "$HEALTH" --arg bypass "$BYPASS" --arg strategy "$STRATEGY" --arg sni "$SNI" --argjson mtu "$MTU" --arg outInterface "$OUT_IFACE" --argjson ipv6 "$IPV6" \
+    '{bypass:$bypass,strategy:$strategy,sni:$sni,mtu:$mtu,outInterface:$outInterface,ipv6:$ipv6,health:$health}'
 }
 connection_json() {
   if [ -f "$CONF/connection.json" ]; then validate_connection < "$CONF/connection.json"
   else
     CAPABILITIES=$(capabilities_json) || return 1
-    printf '%s' "$CAPABILITIES" | jq '{bypass:"obfuscation",strategy:(if (.strategies|index("dual-rolling-tunnel"))!=null then "dual-rolling-tunnel" else .strategies[0] end),sni:"google.com",mtu:0,outInterface:"",ipv6:false}'
+    printf '%s' "$CAPABILITIES" | jq '{bypass:"obfuscation",strategy:(if (.strategies|index("dual-rolling-tunnel"))!=null then "dual-rolling-tunnel" else .strategies[0] end),sni:"google.com",mtu:0,outInterface:"",ipv6:false,health:{enabled:(.dataPlaneHealth//false),interval:60,timeout:5,failures:3}}'
   fi
 }
 load_connection() {
@@ -501,7 +510,7 @@ run_service() {
       continue
     fi
     UPLINK_CHANGED=no; NETWORK_MISSING=no
-    rm -f "$RUN/ready" "$RUN/active-server" "$RUN/link.json"
+    rm -f "$RUN/ready" "$RUN/active-server" "$RUN/link.json" "$RUN/retry-at"
     printf 'starting\n' > "$RUN/phase"
     echo 'FPTN: подключение.' > "$RUN/state"
     # Each attempt needs a fresh READY, not a line left by the previous client.
@@ -514,6 +523,10 @@ run_service() {
     else
       attempt_service
       stop_child
+      if [ "$ATTEMPT_STABLE" = yes ] && [ -n "$ATTEMPT_SELECTED" ]; then
+        jq --arg name "$ATTEMPT_SELECTED" '. + [$name] | unique' "$RUN/failed-servers.json" > "$RUN/failed-servers.new"
+        mv "$RUN/failed-servers.new" "$RUN/failed-servers.json"
+      fi
       if [ "$UPLINK_CHANGED" = yes ]; then
         printf '[]\n' > "$RUN/failed-servers.json"
         BACKOFF=5
@@ -532,7 +545,7 @@ run_service() {
         [ "$PLAN_INDEX" -ge "$PLAN_COUNT" ] || { sleep 1; continue; }
       fi
     fi
-    if [ "$USE_PLAN" != yes ] && [ -f "$CONF/server-policy.json" ] && [ -n "$ATTEMPT_SELECTED" ]; then
+    if [ "$USE_PLAN" != yes ] && { [ -f "$CONF/server-policy.json" ] || [ "$REPORT_CAPABLE" = yes ]; } && [ -n "$ATTEMPT_SELECTED" ]; then
       jq --arg name "$ATTEMPT_SELECTED" '. + [$name] | unique' "$RUN/failed-servers.json" > "$RUN/failed-servers.new"
       mv "$RUN/failed-servers.new" "$RUN/failed-servers.json"
       FORCE_AUTO=yes
@@ -549,6 +562,7 @@ run_service() {
     FORCE_AUTO=yes
     echo "FPTN: клиент завершился; повтор через $BACKOFF секунд." > "$RUN/state"
     printf 'retrying\n' > "$RUN/phase"
+    printf '%s\n' "$(( $(date +%s)+BACKOFF ))" > "$RUN/retry-at"
     cat "$RUN/state"
     trim_logs
     # Short whole-second waits allow stop during backoff on BusyBox ash.
@@ -562,6 +576,7 @@ run_service() {
 attempt_service() {
   ATTEMPT_SELECTED=; ATTEMPT_READY=no; ATTEMPT_STABLE=no
   load_connection
+  rm -f "$RUN/health.json"
   # Re-read the uplink on every attempt: DHCP/failover can change it.
   if ! resolve_uplink; then NETWORK_MISSING=yes; return 0; fi
   if [ -z "$GW" ] && ! "$LIB/fptn-client-cli" --help | grep -q -- '--keenetic-native-transport'; then
@@ -598,12 +613,19 @@ attempt_service() {
     [ "$BYPASS" = obfuscation ] || METHOD_LABEL="${BYPASS#sni-spoofing-}, SNI $SNI"
     echo "Пробуем: $STAGE_LABEL · $METHOD_LABEL ($PLAN_INDEX/$PLAN_COUNT)." > "$RUN/state"
     printf 'selecting\n' > "$RUN/phase"
-  elif [ -f "$CONF/server-policy.json" ]; then
+  elif [ -f "$CONF/server-policy.json" ] || [ "$REPORT_CAPABLE" = yes ]; then
     READY_TIMEOUT=540
-    set -- "$@" --keenetic-server-policy "$CONF/server-policy.json" --keenetic-skip-file "$RUN/failed-servers.json"
+    POLICY_FILE=$CONF/server-policy.json
+    if [ ! -f "$POLICY_FILE" ]; then server_policy_json > "$RUN/default-server-policy.json"; POLICY_FILE=$RUN/default-server-policy.json; fi
+    set -- "$@" --keenetic-server-policy "$POLICY_FILE" --keenetic-skip-file "$RUN/failed-servers.json"
     [ "$FORCE_AUTO" = no ] || set -- "$@" --keenetic-auto-select
     echo 'FPTN: выбор сервера — избранные, затем остальные разрешённые.' > "$RUN/state"
     printf 'selecting\n' > "$RUN/phase"
+  fi
+  if printf '%s' "$SETTINGS" | jq -e '.health.enabled==true' >/dev/null; then
+    set -- "$@" --keenetic-health-interval "$(printf '%s' "$SETTINGS" | jq -r .health.interval)" \
+      --keenetic-health-timeout "$(printf '%s' "$SETTINGS" | jq -r .health.timeout)" \
+      --keenetic-health-failures "$(printf '%s' "$SETTINGS" | jq -r .health.failures)" --keenetic-health-file "$RUN/health.json"
   fi
   nice -n 10 "$LIB/fptn-client-cli" "$@" >> "$RUN/client.log" 2>&1 &
   CHILD=$!; record_pid "$CHILD" "$RUN/client.pid"; unset TOKEN
@@ -624,6 +646,15 @@ attempt_service() {
   : > "$RUN/ready"
   printf 'running\n' > "$RUN/phase"
   capture_selected
+  PREVIOUS=$(cat "$RUN/last-server" 2>/dev/null || true)
+  REASON=initial
+  [ -z "$PREVIOUS" ] || REASON=reconnect
+  [ ! -f "$RUN/failover-reason" ] || REASON=$(cat "$RUN/failover-reason")
+  jq -n --arg from "$PREVIOUS" --arg to "$ATTEMPT_SELECTED" --arg reason "$REASON" --argjson at "$(date +%s)" \
+    '{from:$from,to:$to,reason:$reason,at:$at}' > "$RUN/last-switch.new"
+  mv "$RUN/last-switch.new" "$RUN/last-switch.json"
+  printf '%s\n' "$ATTEMPT_SELECTED" > "$RUN/last-server"
+  rm -f "$RUN/failover-reason"
   EVER_READY=yes; ATTEMPT_READY=yes
   echo 'FPTN: READY получен для текущего процесса.'
   STABLE_N=0
@@ -640,6 +671,8 @@ attempt_service() {
       if [ "$USE_PLAN" = yes ]; then sh "$LIB/web-auth.sh" transport-cache >/dev/null || true; fi
     fi
   done
+  if grep -q 'KEENETIC_HEALTH_FAILED:' "$RUN/client.log"; then printf 'health-failed\n' > "$RUN/failover-reason"
+  else printf 'connection-lost\n' > "$RUN/failover-reason"; fi
   CLIENT_RC=0
   wait "$CHILD" || CLIENT_RC=$?
   echo "FPTN: процесс завершён, код $CLIENT_RC."
@@ -728,9 +761,15 @@ status_json() {
   if [ "$CLIENT" = true ] && [ -f "$RUN/effective-connection.json" ]; then EFFECTIVE=$(cat "$RUN/effective-connection.json"); fi
   CAN_START=false
   if [ "$STATE" = stopped ] && [ -s "$CONF/token" ] && [ -s "$CONF/server" ] && [ -f "$CONF/native-setup-complete" ]; then CAN_START=true; fi
-  jq -n --arg nativeInterface "$NATIVE" --arg state "$STATE" --arg message "$MESSAGE" --arg server "$ACTIVE" \
+  RETRY_AT=0; [ ! -r "$RUN/retry-at" ] || RETRY_AT=$(cat "$RUN/retry-at")
+  PREFERRED=$(cat "$CONF/server" 2>/dev/null || true)
+  MODE=$(jq -r '.mode // "manual"' "$CONF/server-policy.json" 2>/dev/null || echo manual)
+  HEALTH_STATUS=null; SWITCH=null
+  if [ "$CLIENT" = true ] && [ -r "$RUN/health.json" ]; then HEALTH_STATUS=$(jq -c '{state,checkedAt,nextCheckAt,failures,threshold}' "$RUN/health.json" 2>/dev/null || echo null); fi
+  [ ! -r "$RUN/last-switch.json" ] || SWITCH=$(jq -c '{from,to,reason,at}' "$RUN/last-switch.json" 2>/dev/null || echo null)
+  jq -n --argjson retryAt "$RETRY_AT" --arg preferredServer "$PREFERRED" --arg selectionMode "$MODE" --argjson health "$HEALTH_STATUS" --argjson lastSwitch "$SWITCH" --arg nativeInterface "$NATIVE" --arg state "$STATE" --arg message "$MESSAGE" --arg server "$ACTIVE" \
     --argjson effective "$EFFECTIVE" --argjson supervisor "$SUPERVISOR" --argjson client "$CLIENT" --argjson connected "$CONNECTED" --argjson canStart "$CAN_START" \
-    '{nativeInterface:$nativeInterface,effectiveConnection:$effective,state:$state,message:$message,selectedServer:$server,supervisorAlive:$supervisor,clientAlive:$client,connected:$connected,canStart:$canStart,canStop:$supervisor,canRestart:$supervisor}'
+    '{retryAt:$retryAt,preferredServer:$preferredServer,selectionMode:$selectionMode,health:$health,lastSwitch:$lastSwitch,nativeInterface:$nativeInterface,effectiveConnection:$effective,state:$state,message:$message,selectedServer:$server,supervisorAlive:$supervisor,clientAlive:$client,connected:$connected,canStart:$canStart,canStop:$supervisor,canRestart:$supervisor}'
 }
 check_servers() (
   "$LIB/fptn-client-cli" --help | grep -q -- '--keenetic-probe-only' || fail 'Для проверки нужен клиент 0.4.0.'
@@ -865,7 +904,7 @@ uninstall_runtime() (
   rm -f "$CONF/autostart" "$INIT"
   for file in index.html index.cgi app.js style.css api.cgi .fptn-web-owned; do rm -f "$WEB/$file"; done
   rmdir "$WEB" 2>/dev/null || true
-  for file in fptn-client-cli brotli web-auth.sh web-auth.php web-operations.php transport-plan.php web-update.sh client-capabilities.sh client-identity.sh platform.sh uplink.sh ipv6.sh sources.lock.json SHA256SUMS LICENSE-FPTN LICENSE-BROTLI BROTLI-SOURCE.txt .runtime-managed; do rm -f "$LIB/$file"; done
+  for file in fptn-client-cli brotli web-auth.sh web-auth.php web-operations.php transport-plan.php web-update.sh client-capabilities.sh client-identity.sh platform.sh uplink.sh ipv6.sh web-port.sh sources.lock.json SHA256SUMS LICENSE-FPTN LICENSE-BROTLI BROTLI-SOURCE.txt .runtime-managed; do rm -f "$LIB/$file"; done
   rmdir "$LIB" 2>/dev/null || true
   rm -f "$ROOT/bin/fptnctl"
   echo 'Программа и панель FPTN удалены. Пакеты Entware и другие веб-панели сохранены.'

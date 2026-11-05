@@ -92,6 +92,7 @@ COPY scripts/prepare-native-transport.py /work/prepare-native-transport.py
 COPY src/keenetic-transport.h /work/keenetic-transport.h
 COPY scripts/prepare-server-policy.py /work/prepare-server-policy.py
 COPY scripts/check-probe-mode.sh /work/check-probe-mode.sh
+COPY src/keenetic-health.h /work/keenetic-health.h
 COPY src/keenetic-server-policy.h /work/keenetic-server-policy.h
 COPY src/keenetic-linux-tun.h /work/keenetic-linux-tun.h
 COPY scripts/fptn-native-service.sh /work/fptn-native-service.sh
@@ -109,7 +110,7 @@ RUN --mount=type=secret,id=proxy_ca \
       -DCMAKE_TOOLCHAIN_FILE=/build/conan_toolchain.cmake \
       -DCMAKE_BUILD_TYPE=Release -DCMAKE_EXE_LINKER_FLAGS=-static \
       -DCMAKE_COMPILE_WARNING_AS_ERROR=OFF -DCMAKE_CXX_CLANG_TIDY= \
-      -DFPTN_VERSION=0.6.0 && \
+      -DFPTN_VERSION=0.7.0 && \
     python /work/check-cross-includes.py /build/compile_commands.json && \
     cmake --build /build --target fptn-client-cli -j2
 RUN mkdir /out && \

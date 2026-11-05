@@ -116,6 +116,10 @@ def prepare(root, header):
     args.add_argument("--keenetic-auto-select").default_value(false).implicit_value(true).help("Reselect favorites then other allowed servers");
     args.add_argument("--keenetic-probe-only").default_value(false).implicit_value(true).help("Check allowed FPTN logins without starting a tunnel");
     args.add_argument("--keenetic-probe-report").default_value(std::string{}).help("Private JSON server check report");
+    args.add_argument("--keenetic-health-interval").default_value(0).scan<'i', int>().help("Native data-plane health interval: 0 disables, 30-3600 seconds");
+    args.add_argument("--keenetic-health-timeout").default_value(5).scan<'i', int>().help("Data-plane health timeout: 2-15 seconds per endpoint");
+    args.add_argument("--keenetic-health-failures").default_value(3).scan<'i', int>().help("Consecutive failed cycles before reselection: 2-10");
+    args.add_argument("--keenetic-health-file").default_value(std::string{}).help("Private data-plane health JSON status");
     args.add_argument("--keenetic-status-file").default_value(std::string{}).help("Private JSON tunnel status file");
     args.add_argument("--keenetic-native")''')
     cli = replace(cli, '      const auto preferred_names =', SELECTION+'      const auto preferred_names =')
@@ -147,7 +151,48 @@ def prepare(root, header):
     }''')
     ntp_header, ntp_source = patch_ntp(time_header.read_text(), time_source.read_text())
     # Validate every anchor before writing any file.
+    health_header = header.with_name('keenetic-health.h')
+    health = health_header.read_text()
+    vpn_path = root/'src/fptn-client/vpn/vpn_manager.cpp'
+    vpn = vpn_path.read_text()
+    cli = '#include "keenetic-health.h"\n' + cli
+    cli = replace(cli, '    fptn::utils::WaitForSignal(vpn_client,', '''    if (args.get<int>("--keenetic-health-interval") != 0) {
+      if (!args.get<bool>("--keenetic-native")) throw std::runtime_error("Health probes require native mode");
+      fptn::keenetic::tunnel_health.Configure(args.get<int>("--keenetic-health-interval"),
+          args.get<int>("--keenetic-health-timeout"),args.get<int>("--keenetic-health-failures"),
+          args.get<std::string>("--tun-interface-ip"),out_network_interface_name,
+          args.get<std::string>("--keenetic-health-file"));
+    }
+    fptn::utils::WaitForSignal(vpn_client,''')
+    loop = '#include "keenetic-health.h"\n' + loop
+    loop = replace(loop, '    if (native_failover && loss_window.Expired', '''    if (native_failover && fptn::keenetic::tunnel_health.Tick(state == "connected")) {
+      SPDLOG_WARN("KEENETIC_HEALTH_FAILED: tunnel probes failed, uplink probe succeeded");
+      io_context.stop();
+      return;
+    }
+    if (native_failover && loss_window.Expired''')
+    vpn = '#include "keenetic-health.h"\n' + vpn
+    vpn = replace(vpn, '\n  config_.http_client->Start();', '''
+  fptn::keenetic::tunnel_health.SetSender([this](const std::vector<std::uint8_t>& bytes) {
+    const std::unique_lock<std::mutex> lock(mutex_);
+    if (!running_ || !config_.http_client) return false;
+    auto packet = fptn::common::network::IPPacket::Parse(bytes.data(), bytes.size());
+    return packet && config_.http_client->Send(std::move(packet));
+  });
+  config_.http_client->Start();''')
+    vpn = replace(vpn, 'bool VpnManager::Stop() {', '''bool VpnManager::Stop() {
+  fptn::keenetic::tunnel_health.SetSender({});''')
+    vpn = replace(vpn, '  constexpr std::size_t kMaxQueueSize = 1024 * 16;', '''  for (auto& packet : packets) {
+    if (packet && fptn::keenetic::tunnel_health.Receive(
+        packet->Data())) packet.reset();
+  }
+  constexpr std::size_t kMaxQueueSize = 1024 * 16;''')
+    # Validate the additional upstream anchors before writing anything.
     cli_path.write_text(cli)
+    vpn_path.write_text(vpn)
+    for directory in [cli_path.parent,loop_path.parent,vpn_path.parent]:
+        (directory/'keenetic-health.h').write_text(health)
+        (directory/'keenetic-server-policy.h').write_text(header.read_text())
     loop_path.write_text(loop)
     time_header.write_text(ntp_header)
     time_source.write_text(ntp_source)

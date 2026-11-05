@@ -1,5 +1,5 @@
 'use strict';
-const UI_VERSION = '0.16.0';
+const UI_VERSION = '0.17.0';
 const $ = id => document.getElementById(id);
 if (window.top !== window.self) { document.documentElement.replaceChildren(); throw new Error('Panel cannot be framed'); }
 let profiles={},clientCapabilities=null;
@@ -39,7 +39,7 @@ async function api(query,body){
   if(response.status===401){loggedOut();throw new Error(data.error||'Войдите по логину и паролю.');}
   if(!response.ok)throw new Error(data.error||'Ошибка запроса');return data;
 }
-function collectSettings(){return {server:$('server').value,token:$('token').value.trim(),connection:{ipv6:$('ipv6').checked,mtu:$('mtu-mode').value==='custom'?Number($('mtu').value):0,outInterface:$('out-interface').value.trim(),strategy:$('strategy').value,bypass:$('mode').value==='obfuscation'?'obfuscation':$('profile').value,sni:$('sni').value.trim()||'google.com'},fallback:$('fallback-enabled').checked?{enabled:$('fallback-enabled').checked,profiles:[...new Set(fallbackProfiles.map(id=>$(id).value).filter(Boolean))],domains:$('fallback-domains').value.split(/\r?\n/).map(s=>s.trim()).filter(Boolean),budget:Number($('fallback-budget').value)}:{...savedFallback,enabled:false},policy:{mode:$('selection-mode').value,favorites:[...favorites].sort(),excluded:[...excluded].sort()}};}
+function collectSettings(){return {server:$('server').value,token:$('token').value.trim(),connection:{health:{enabled:$('health-enabled').checked,interval:Number($('health-interval').value),timeout:Number($('health-timeout').value),failures:Number($('health-failures').value)},ipv6:$('ipv6').checked,mtu:$('mtu-mode').value==='custom'?Number($('mtu').value):0,outInterface:$('out-interface').value.trim(),strategy:$('strategy').value,bypass:$('mode').value==='obfuscation'?'obfuscation':$('profile').value,sni:$('sni').value.trim()||'google.com'},fallback:$('fallback-enabled').checked?{enabled:$('fallback-enabled').checked,profiles:[...new Set(fallbackProfiles.map(id=>$(id).value).filter(Boolean))],domains:$('fallback-domains').value.split(/\r?\n/).map(s=>s.trim()).filter(Boolean),budget:Number($('fallback-budget').value)}:{...savedFallback,enabled:false},policy:{mode:$('selection-mode').value,favorites:[...favorites].sort(),excluded:[...excluded].sort()}};}
 function updateDirty(){
   dirty=loaded&&JSON.stringify(collectSettings())!==savedSnapshot;
   $('unsaved').hidden=!dirty;
@@ -65,6 +65,16 @@ function setControls(){
   $('check-servers').disabled=busy||!known||!loaded||dirty||lastData?.configured===false;
   document.querySelectorAll('#dashboard input,#dashboard select,#dashboard textarea,.server-role').forEach(el=>{el.disabled=busy||versionMismatch;});
   if(!busy&&!versionMismatch){showSelection();showMtu();}
+  $('health-enabled').disabled=busy||versionMismatch||!clientCapabilities?.dataPlaneHealth;
+  $('port-save').disabled=busy||!known||dirty;
+  $('download-diagnostics').disabled=!known;
+  const moving=lastData?.portChange;
+  const here=window.location.origin;
+  $('port-confirm').hidden=!moving||moving.newOrigin.replace(/:80$/,'')!==here;
+  $('port-confirm').disabled=pending||versionMismatch;
+  $('port-rollback').hidden=!moving||busy;
+  $('port-rollback').disabled=busy||!known;
+
 }
 function fillServers(servers,selected){serverNames=servers;favorites=new Set([...favorites].filter(name=>servers.includes(name)));excluded=new Set([...excluded].filter(name=>servers.includes(name)));renderServers(selected);}
 function renderServers(selected=$('server').value){
@@ -92,7 +102,7 @@ function updateHealth(){
     if(excluded.has(name)){node.textContent='Исключён · не проверяется';continue;}
     if(!result){node.textContent='Не проверялся';continue;}
     if(result.ok){const ms=Number(result.latency_ms);node.textContent='Вход доступен'+(Number.isFinite(ms)?' · '+Math.round(ms)+' мс':'');node.classList.add('available');}
-    else{node.textContent=[401,403].includes(result.code)?'Ошибка авторизации':'Вход не удался';node.classList.add('unavailable');}
+    else{node.textContent=[401,403].includes(result.code)?'Доступ отклонён: проверьте токен или подписку':'Вход не удался';node.classList.add('unavailable');}
   }
   if(report){const time=new Date(report.checked_at*1000).toLocaleTimeString('ru-RU');$('check-summary').textContent=(report.complete?'Последняя проверка: ':'Проверяем серверы… ')+time+'. Это время входа FPTN, не ICMP ping и не тест передачи через туннель.';}
   else $('check-summary').textContent='Серверы ещё не проверены. Проверка использует сохранённый токен и метод обхода; действующий туннель остаётся запущенным.';
@@ -122,6 +132,9 @@ function showSni(){$('sni-fields').hidden=$('mode').value!=='sni';}
 async function loadSettings(){
   const data=await api('settings');$('token-summary').textContent=data.configured===false?'Добавить токен FPTN':'Заменить токен';$('token-help').textContent=data.configured===false?'Вставьте токен из приложения FPTN. Он останется только на роутере.':'Текущий токен сохранён на роутере и не возвращается в браузер.';if(data.configured===false)$('token-details').open=true;renderCapabilities(data.capabilities);const policy=data.policy||{mode:'manual',favorites:[],excluded:[]};favorites=new Set(policy.favorites);excluded=new Set(policy.excluded);$('selection-mode').value=policy.mode;fillServers(data.servers,data.server);
   $('mtu-mode').value=data.connection.mtu>0?'custom':'auto';$('mtu').value=String(data.connection.mtu||data.interfaceMtu||1420);$('mtu-auto-option').textContent='Как в Keenetic'+(data.interfaceMtu?' ('+data.interfaceMtu+')':'');showMtu();$('out-interface').value=data.connection.outInterface||'';
+  const health=data.connection.health||{enabled:false,interval:60,timeout:5,failures:3};
+  $('health-enabled').checked=health.enabled;$('health-interval').value=String(health.interval);$('health-timeout').value=String(health.timeout);$('health-failures').value=String(health.failures);
+  $('health-unsupported').hidden=Boolean(data.capabilities?.dataPlaneHealth);
   $('ipv6').checked=data.connection.ipv6===true;$('strategy').value=data.connection.strategy;const bypass=data.connection.bypass;$('mode').value=bypass==='obfuscation'?'obfuscation':'sni';if(bypass!=='obfuscation')$('browser').value=bypass.split('-')[2];fillProfiles(bypass);$('sni').value=data.connection.sni;showSni();const fallback=data.fallback||{enabled:false,profiles:[],domains:[],budget:60};savedFallback=JSON.parse(JSON.stringify(fallback));$('fallback-enabled').checked=fallback.enabled;setFallbackProfiles(fallback.profiles);$('fallback-domains').value=(fallback.domains.length?fallback.domains:[data.connection.sni]).join('\n');$('fallback-budget').value=String(fallback.budget);$('fallback-fields').hidden=!fallback.enabled;previewToken='';$('token').value='';loaded=true;savedSnapshot=JSON.stringify(collectSettings());updateDirty();
 }
 function applyStatus(data){
@@ -143,11 +156,23 @@ function applyStatus(data){
   $('status-title').textContent=service.state==='running'?(service.connected?'Туннель подключён':'Клиент запущен'):titles[service.state]||'Состояние неизвестно';
   $('indicator').className='dot'+(service.connected?' active':['starting','selecting','retrying','reconnecting','waiting-network'].includes(service.state)?' busy':'');
   const effective=service.effectiveConnection;$('effective-connection').textContent=effective?(service.state==='running'?'Используется: ':'Попытка: ')+(effective.bypass==='obfuscation'?'маскировка трафика':effective.bypass.replace('sni-spoofing-','')+' · SNI '+effective.sni)+(effective.mtu?' · MTU '+effective.mtu:'')+(effective.outInterface?' · '+effective.outInterface:''):'Параметры активного подключения появятся после переподключения.';
-  $('status-message').textContent=service.message;$('status-text').textContent=data.status;
+  $('status-message').textContent=service.message+(service.state==='retrying'&&service.retryAt?' Следующая попытка: '+new Date(service.retryAt*1000).toLocaleTimeString('ru-RU'):'');$('status-text').textContent=data.status;
   $('active-server').textContent=service.selectedServer||'Нет активного сервера';
+  const preferred=service.preferredServer||'';
+  $('selection-summary').textContent=service.selectionMode==='auto'?'Сохранён режим: автовыбор, избранные сначала.':preferred?'Предпочтительный сервер: '+preferred+(service.selectedServer&&service.selectedServer!==preferred?'. Сейчас используется другой сервер после автовыбора.':''):'';
+  const change=service.lastSwitch;
+  const causes={initial:'Первое подключение',reconnect:'Повторное подключение','connection-lost':'Соединение потеряно','health-failed':'Не прошла проверка передачи через VPN'};
+  $('switch-summary').textContent=change?'Последнее подключение: '+new Date(change.at*1000).toLocaleTimeString('ru-RU')+' · '+(causes[change.reason]||'Переподключение')+(change.from&&change.from!==change.to?' · '+change.from+' → '+change.to:''):'';
+  const health=service.health;
+  const healthTitles={scheduled:'Проверка запланирована',checking:'Проверяем передачу через VPN',ok:'Передача через VPN подтверждена',missed:'Ответ не получен',failed:'Проверка VPN не прошла; выбираем другой сервер','checking-uplink':'Проверяем исходящее подключение',inconclusive:'Нет ответа и через исходящее подключение; сервер по этой проверке не меняем',disabled:'Автопроверка отключена'};
+  $('health-status').textContent=health?(healthTitles[health.state]||'Состояние проверки неизвестно')+(health.failures?' · неудач: '+health.failures+'/'+health.threshold:'')+(health.nextCheckAt&&['ok','missed','scheduled','inconclusive'].includes(health.state)?' · следующая: '+new Date(health.nextCheckAt*1000).toLocaleTimeString('ru-RU'):''):'';
+  if(data.panelOrigin){$('panel-address').textContent=data.panelOrigin;if(!$('panel-port').value)$('panel-port').value=data.panelOrigin.split(':').pop();}
+  const moving=data.portChange;$('port-transition').hidden=!moving;
+  if(moving){$('port-link').href=moving.newOrigin;$('port-transition-text').textContent='Новый адрес: '+moving.newOrigin+'. Подтвердите до '+new Date(moving.deadline*1000).toLocaleTimeString('ru-RU');}
+
   $('memory').textContent=data.rssKiB?'ОЗУ '+(data.rssKiB/1024).toFixed(1)+' МиБ':'';
   $('recover-operation').hidden=!data.operationState?.stale;
-  const operations={'setup-interface':'Создание интерфейса FPTN',recover:'Восстановление управления',start:'Запуск клиента',stop:'Остановка клиента',restart:'Переподключение',save:'Применение настроек',check:'Проверка входа на серверы','check-update':'Проверка обновлений',update:'Установка обновления'};
+  const operations={'setup-interface':'Создание интерфейса FPTN',recover:'Восстановление управления',start:'Запуск клиента',stop:'Остановка клиента',restart:'Переподключение',save:'Применение настроек',check:'Проверка входа на серверы','change-port':'Смена порта панели','check-update':'Проверка обновлений',update:'Установка обновления'};
   $('operation').hidden=!data.busy;$('operation').textContent=(operations[data.operation]||'Выполнение операции')+'…';
   if(data.operationState?.stale)$('operation').textContent=data.operationState.message;
   updateHealth();updateDirty();
@@ -240,6 +265,10 @@ $('recover-operation').addEventListener('click',()=>command({action:'recover'}))
 $('autostart-toggle').addEventListener('click',()=>command({action:lastData?.autostart?'disable':'enable'}));
 $('check-servers').addEventListener('click',()=>{if(dirty){notice('Сначала примените изменения настроек.',true);return;}command({action:'check'});});
 $('settings-form').addEventListener('submit',event=>{event.preventDefault();const settings=collectSettings();if(settings.fallback.enabled&&settings.fallback.profiles.some(method=>!clientCapabilities?.methods.includes(method))){notice('Выберите запасные профили, доступные в установленном клиенте.',true);return;}if(settings.fallback.enabled&&(favorites.size<1||favorites.size>8||settings.fallback.profiles.length<1||settings.fallback.profiles.length>2||settings.fallback.domains.length<1||settings.fallback.domains.length>2)){notice('Для подбора выберите 1–8 избранных, 1–2 профиля и 1–2 SNI.',true);return;}if(settings.token&&settings.token!==previewToken){notice('Сначала нажмите «Прочитать серверы» для нового токена.',true);return;}const allowed=serverNames.filter(name=>!excluded.has(name));if(!allowed.length||allowed.length>64){notice('Оставьте от 1 до 64 разрешённых серверов.',true);return;}command({action:'save',...settings});});
+$('port-form').addEventListener('submit',event=>{event.preventDefault();const port=Number($('panel-port').value);if(!Number.isInteger(port)||port<1||port>65535){notice('Введите TCP-порт 1–65535.',true);return;}if(dirty){notice('Сначала примените или отмените изменения подключения.',true);return;}command({action:'change-port',port});});
+$('port-rollback').addEventListener('click',()=>command({action:'cancel-port'}));
+$('port-confirm').addEventListener('click',async()=>{try{await api('',{action:'confirm-port',id:lastData?.portChange?.id});notice('Новый адрес подтверждён. Дождитесь завершения перезапуска панели.');}catch(error){notice(error.message,true);}});
+$('download-diagnostics').addEventListener('click',async()=>{try{const data=await api('diagnostics');const blob=new Blob([JSON.stringify(data,null,2)+'\n'],{type:'application/json'});const url=URL.createObjectURL(blob);const a=document.createElement('a');a.href=url;a.download='fptn-diagnostics.json';a.click();setTimeout(()=>URL.revokeObjectURL(url),1000);}catch(error){notice(error.message,true);}});
 $('refresh-logs').addEventListener('click',async()=>{try{$('logs').textContent=(await api('logs')).log||'Журнал пока пуст.';}catch(error){notice(error.message,true);}});
 document.addEventListener('visibilitychange',()=>{if(!document.hidden)poll();});setInterval(()=>{if(!document.hidden)poll();},5000);
 $('auth-retry').addEventListener('click',initializePanel);

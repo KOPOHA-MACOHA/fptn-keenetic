@@ -64,7 +64,9 @@ SUM=$(nice -n 10 sha256sum "$CLIENT" | awk '{print $1}')
 [ "$(fingerprint)" = "$KEY" ] || fail 'Клиент заменился во время проверки; повторите запрос.'
 NATIVE_SELECTION=false
 grep -Fq "OpkgTunN" "$TMP/help" && NATIVE_SELECTION=true
-jq -n --argjson nativeInterfaceSelection "$NATIVE_SELECTION" --arg key "$KEY" --arg version "$VERSION" --arg sum "$SUM" --argjson methods "$METHODS" --argjson strategies "$STRATEGIES" \
-  '{schema:1,nativeInterfaceSelection:$nativeInterfaceSelection,fingerprint:$key,clientVersion:$version,sha256:$sum,methods:$methods,strategies:$strategies}' > "$TMP/capabilities.json"
+HEALTH=false
+grep -Fq -- '--keenetic-health-interval' "$TMP/help" && HEALTH=true
+jq -n --argjson dataPlaneHealth "$HEALTH" --argjson nativeInterfaceSelection "$NATIVE_SELECTION" --arg key "$KEY" --arg version "$VERSION" --arg sum "$SUM" --argjson methods "$METHODS" --argjson strategies "$STRATEGIES" \
+  '{schema:1,dataPlaneHealth:$dataPlaneHealth,nativeInterfaceSelection:$nativeInterfaceSelection,fingerprint:$key,clientVersion:$version,sha256:$sum,methods:$methods,strategies:$strategies}' > "$TMP/capabilities.json"
 mv "$TMP/capabilities.json" "$CACHE/current.json"
 jq 'del(.fingerprint)' "$CACHE/current.json"

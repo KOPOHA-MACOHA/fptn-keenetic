@@ -40,6 +40,17 @@ class TransportPlanTest(unittest.TestCase):
             for name in item['eligible']:
                 pair=(name,item['connection']['bypass'],item['connection']['sni']);self.assertNotIn(pair,pairs);pairs.append(pair)
         self.assertEqual(plan['budget'],60)
+    def test_failed_stable_server_is_not_retried_from_last_good_cache(self):
+        self.policy['favorites']=['CZ','DE'];self.write()
+        plan=self.plan();(self.run/'transport-plan.json').write_text(json.dumps(plan));(self.run/'active-server').write_text('CZ\n')
+        (self.run/'effective-connection.json').write_text(json.dumps(self.base))
+        self.assertEqual(self.call('transport-cache').returncode,0)
+        (self.run/'failed-servers.json').write_text('["CZ"]')
+        plan=self.plan(FPTN_FORCE_AUTO='yes')
+        self.assertNotEqual(plan['plans'][0]['stage'],'cached')
+        for item in plan['plans']:
+            self.assertNotIn('CZ',item['eligible']);self.assertIn('CZ',item['policy']['excluded'])
+
     def test_manual_first_then_auto_on_reconnect_and_exclusion_wins(self):
         self.policy['mode']='manual';self.write();(self.conf/'server').write_text('DE\n')
         self.assertEqual(self.plan()['plans'][0]['eligible'],['DE'])
