@@ -191,6 +191,11 @@ elements['update-close'].dispatch('click');
 run("beginUpdate({revision:'c'.repeat(40)});updateWatch.uncertain=true;renderUpdate('unknown')");
 context.data={...base,result:{ok:false,message:'old result'}};run('applyStatus(data)');
 assert(!run('updateWatch.finished')&&elements['panel-shell'].inert&&elements['update-close'].hidden&&!elements['update-reload'].hidden);
+// Repairing a client can keep the same UI revision: an old success is not proof.
+run("finishUpdate(false,'reset')");elements['update-close'].dispatch('click');
+run("beginUpdate({revision:'a'.repeat(40)});updateWatch.uncertain=true;renderUpdate('unknown')");
+context.data={...base,result:{ok:true,action:'update',message:'old success'}};run('applyStatus(data)');
+assert(!run('updateWatch.finished')&&elements['panel-shell'].inert);
 context.data={...base,busy:true,operation:'update',operationState:{stale:true,canRecover:true,message:'interrupted'}};run('applyStatus(data)');
 assert(run('updateWatch.finished')&&!elements['update-close'].hidden);
 console.log('Update modal: confirmed completion, rollback, interruption and uncertain POST: PASS');

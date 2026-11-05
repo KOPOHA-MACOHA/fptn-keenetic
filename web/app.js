@@ -281,7 +281,7 @@ function renderUpdate(message){
 }
 function beginUpdate(target){
   if(updateWatch&&!updateWatch.finished)return;
-  updateWatch={revision:target?.revision||null,version:target?.version||'',accepted:false,uncertain:false,seenBusy:false,finished:false};
+  updateWatch={revision:target?.revision||null,originalRevision:lastData?.revision||null,version:target?.version||'',accepted:false,uncertain:false,seenBusy:false,finished:false};
   $('update-title').textContent='Обновление FPTN'+(updateWatch.version?' до '+updateWatch.version:'');
   $('update-detail').textContent='Панель заблокирована на время установки. При перезапуске веб-сервера связь может временно пропасть.';
   renderUpdate('Отправляем запрос на обновление…');$('update-dialog').focus();
@@ -303,7 +303,7 @@ function observeUpdate(data){
   }
   if(!updateWatch||updateWatch.finished||data.busy)return;
   if(!updateWatch.accepted){
-    if(updateWatch.uncertain&&updateWatch.revision&&data.revision===updateWatch.revision&&data.result?.action==='update'&&data.result.ok===true)finishUpdate(true,data.result.message||'Новая версия установлена.');
+    if(updateWatch.uncertain&&updateWatch.revision&&updateWatch.revision!==updateWatch.originalRevision&&data.revision===updateWatch.revision&&data.result?.action==='update'&&data.result.ok===true)finishUpdate(true,data.result.message||'Новая версия установлена.');
     return;
   }
   const result=data.result;
