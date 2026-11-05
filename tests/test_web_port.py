@@ -20,6 +20,7 @@ r=pathlib.Path(os.environ['FPTN_PREFIX']);cmd=pathlib.Path(sys.argv[0]).name
 if cmd=='id':print(0)
 elif cmd=='netstat':
  if (r/'occupied').exists():print('tcp6 0 0 :::2222 :::* LISTEN 55/foreign')
+ if (r/'stale-old').exists() and (r/'etc/fptn/web-port-change/confirmed').exists():print('tcp 0 0 192.168.1.1:1111 0.0.0.0:* LISTEN 55/lighttpd')
 elif cmd=='lighttpd':
  if (r/'bad-config').exists():sys.exit(1)
 elif cmd=='date':
@@ -52,6 +53,16 @@ else:sys.exit(3)
    self.assertNotIn(':1111',self.fragment.read_text());self.assertIn(':2222',self.fragment.read_text())
    self.assertEqual((self.conf/'web-origin').read_text().strip(),'http://192.168.1.1:2222')
    self.assertEqual((self.root/'etc/lighttpd/lighttpd.conf').read_text(),'original shared config\n')
+  finally:
+   if child.poll() is None:child.terminate();child.communicate(timeout=6)
+ def test_old_listener_left_by_failed_restart_is_not_reported_as_a_success(self):
+  (self.root/'stale-old').touch();child=self.start()
+  try:
+   self.wait(lambda:(self.conf/'web-port-change/info.json').exists() and ':2222' in self.fragment.read_text())
+   result=self.run_cmd('confirm','a'*32,'http://192.168.1.1:2222');self.assertEqual(result.returncode,0,result.stderr)
+   out,err=child.communicate(timeout=6);self.assertNotEqual(child.returncode,0,out+err)
+   self.assertEqual(self.fragment.read_text(),self.original)
+   self.assertEqual((self.conf/'web-origin').read_text(),'http://192.168.1.1:1111\n')
   finally:
    if child.poll() is None:child.terminate();child.communicate(timeout=6)
  def test_conflicting_ipv6_wildcard_and_bad_ports_leave_files_untouched(self):

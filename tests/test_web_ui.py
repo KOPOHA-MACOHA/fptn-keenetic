@@ -114,11 +114,37 @@ else: sys.exit(2)
         return json.loads((self.run/'result.json').read_text())
 
     def settings(self, **overrides):
-        return {'bypass': 'obfuscation', 'strategy': 'dual-rolling-tunnel', 'sni': 'google.com', 'mtu':0, 'outInterface':'', 'ipv6':False, **overrides}
+        return {'bypass': 'obfuscation', 'strategy': 'dual-rolling-tunnel', 'sni': 'google.com', 'mtu':0, 'outInterface':'', 'ipv6':False, 'health':{'enabled':False,'interval':60,'timeout':5,'failures':3}, **overrides}
 
     def save(self, **overrides):
         return self.request(body={'action': 'save', 'server': self.names[0],
                                   'token': '', 'connection': self.settings(), **overrides})
+
+    def test_port_transition_requires_authentication_same_origin_and_new_endpoint_confirmation(self):
+        state=self.conf/'web-port-change';state.mkdir()
+        info={'id':'a'*32,'oldOrigin':'http://192.168.1.1:1111','newOrigin':'http://192.168.1.1:2222','deadline':int(time.time())+120}
+        (state/'info.json').write_text(json.dumps(info))
+        shutil.copyfile(ROOT/'scripts/fptn-web-port.sh',self.root/'libexec/fptn/web-port.sh')
+        body={'action':'confirm-port','id':'a'*32}
+        self.assertEqual(self.request(body=body,HTTP_HOST='192.168.1.1:2222',HTTP_ORIGIN=info['newOrigin'],HTTP_AUTHORIZATION='')[0],401)
+        self.assertEqual(self.request(body=body,HTTP_HOST='192.168.1.1:2222',HTTP_ORIGIN=info['oldOrigin'])[0],403)
+        self.assertEqual(self.request(body=body)[0],409)
+        self.assertFalse((state/'confirmed').exists())
+        result=self.request(body=body,HTTP_HOST='192.168.1.1:2222',HTTP_ORIGIN=info['newOrigin'])
+        self.assertEqual(result[0],200,result);self.assertTrue((state/'confirmed').exists())
+
+    def test_diagnostics_are_allowlisted_not_logs_or_saved_secrets(self):
+        status,data=self.request('diagnostics');self.assertEqual(status,200,data)
+        text=json.dumps(data)
+        self.assertNotIn(self.token,text)
+        for name in self.names:self.assertNotIn(name,text)
+        self.assertEqual(set(data),{'schema','uiVersion','clientVersion','upstreamVersion','clientBuildRevision','state','connected','nativeInterface','health'})
+        self.assertEqual(self.request('diagnostics',HTTP_AUTHORIZATION='')[0],401)
+
+    def test_invalid_port_requests_never_reserve_an_operation(self):
+        for port in [0,65536,True,'2222',2222.5]:
+            status,data=self.request(body={'action':'change-port','port':port})
+            self.assertEqual(status,400,data);self.assertFalse((self.run/'action').exists())
 
     def test_requires_separate_key_and_expected_origin(self):
         self.assertEqual(self.request(HTTP_AUTHORIZATION='')[0], 401)

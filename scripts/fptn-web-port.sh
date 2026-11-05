@@ -100,6 +100,12 @@ case "${1:-}" in
     cp "$STATE/new-fragment" "$FRAGMENT.new";mv "$FRAGMENT.new" "$FRAGMENT"
     printf '%s\n' "$NEW" > "$CONF/web-origin.new";mv "$CONF/web-origin.new" "$CONF/web-origin"
     restart && wait_ready "$NEW" || fail 'Не прошла завершающая проверка; возвращаю прежний порт.'
+    # A failed init can leave the old process serving both sockets. Do not report
+    # completion merely because the new port answers in that stale process.
+    LISTENERS=$(netstat -lntp 2>/dev/null) || fail 'Не удалось проверить завершение смены порта.'
+    if printf '%s\n' "$LISTENERS" | awk -v old="$LAN:$OLD_PORT" '$1~/^tcp/ && $4==old {found=1} END{exit !found}'; then
+      fail 'Прежний порт остался открыт после перезапуска; возвращаю прежние настройки.'
+    fi
     DONE=yes;rm -rf "$STATE"
     echo "Порт изменён. Панель: $NEW" ;;
   *) fail 'Неизвестное действие.' ;;
