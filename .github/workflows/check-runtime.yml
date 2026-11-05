@@ -29,41 +29,12 @@ jobs:
           sudo apt-get update -qq
           sudo apt-get install -y -qq php-cgi lighttpd libboost-dev iproute2 iptables
           php-cgi -n -v
-      - name: Verify real IPv4/IPv6 socket binding and endpoint fallback
-        run: sudo --preserve-env=PATH python3 -m unittest discover -s tests -p 'test_native_transport.py' -v
-      - name: Verify WAN selection in isolated Linux network namespaces
-        run: sudo --preserve-env=PATH env FPTN_REQUIRE_NETNS=1 python3 -m unittest discover -s tests -p 'test_uplink_namespaces.py' -v
-      - name: Verify experimental IPv6 NAT request/reply and firmware lifecycle
-        run: |
-          python3 -m unittest discover -s tests -p 'test_ipv6_lifecycle.py' -v
-          sudo --preserve-env=PATH env FPTN_REQUIRE_NETNS=1 python3 -m unittest discover -s tests -p 'test_ipv6_nat_kernel.py' -v
-      - name: Verify isolated bootstrap on the runner with PHP and lighttpd installed
-        run: python3 -m unittest discover -s tests -p 'test_bootstrap.py' -v
-      - name: Verify discovery and invalidation of client capabilities
-        run: python3 -m unittest discover -s tests -p 'test_client_capabilities.py' -v
-      - name: Verify client identity and binary update rollback
-        run: |
-          python3 -m unittest discover -s tests -p 'test_client_identity.py' -v
-          python3 -m unittest discover -s tests -p 'test_web_installer.py' -v
-          python3 -m unittest discover -s tests -p 'test_web_update.py' -v
-      - name: Verify real lighttpd entry and authentication endpoints
-        run: python3 -m unittest discover -s tests -p 'test_lighttpd_entry.py' -v
-      - name: Verify interrupted operations and credential changes
-        run: |
-          python3 -m unittest discover -s tests -p 'test_web_operations.py' -v
-          python3 -m unittest discover -s tests -p 'test_web_auth.py' -v
-      - name: Verify bounded favorite transport fallback
-        run: sudo --preserve-env=PATH python3 -m unittest discover -s tests -p 'test_transport_plan.py' -v
-      - name: Verify transport options and MTU rollback
-        run: |
-          sudo --preserve-env=PATH python3 -m unittest discover -s tests -p 'test_native_transport_options.py' -v
-          python3 -m unittest discover -s tests -p 'test_web_ui.py' -v
-      - name: Verify scripts, UI, credentials and upgrade rollback
+      - name: Verify the complete runtime suite once, including required isolated kernel checks
         run: |
           python3 scripts/package-web.py --check
-          python3 -m unittest discover -s tests -p 'test_web_auth.py' -v
           python3 -m compileall -q scripts
-          sudo --preserve-env=PATH python3 -m unittest discover -s tests -v
+          sudo --preserve-env=PATH env FPTN_REQUIRE_NETNS=1 python3 -m unittest discover -s tests -v
+
   package:
     needs: test
     if: inputs.source-ref == '' && github.event_name == 'push' && github.ref == 'refs/heads/main'
