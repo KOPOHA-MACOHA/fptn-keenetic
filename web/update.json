@@ -1,32 +1,32 @@
 {
   "schema": 1,
-  "version": "0.16.0",
-  "revision": "4c4809e4e3a9d654a44cd3734f4e70d4c1be1eaf",
-  "installerSha256": "b8eec460eb84fa57c813a5732e06a8b5fd8302bf56ea15874ee2222a1a449dd2",
-  "clientRevision": "b86721212ce5d1ba14682d79331a3485a66641a8",
-  "clientVersion": "0.6.0",
-  "clientSha256": "24154b13be1a2f845ac7d972bd06fa57f773981561f7d378b814d0f42c77783f",
+  "version": "0.17.0",
+  "revision": "fcf959273e2057c516dc45364054c5efd68e14c8",
+  "installerSha256": "71c322525b190d278bac93b9fb7de590594b5e7276270104d6509096f35acdd6",
+  "clientRevision": "e195159b2c38704e6fa9f528e90246e5d792be7e",
+  "clientVersion": "0.7.0",
+  "clientSha256": "85543b88c77a98e859ccc451448b814aaf7e366378b64ea951dff5936bde882c",
   "upstreamVersion": "0.4.6",
   "upstreamRevision": "a389bee62da930807c3bc85284ee4976e9c7e08f",
   "platforms": {
     "mipsel-mips32r2-softfloat": {
-      "clientRevision": "b86721212ce5d1ba14682d79331a3485a66641a8",
-      "clientVersion": "0.6.0",
-      "clientSha256": "24154b13be1a2f845ac7d972bd06fa57f773981561f7d378b814d0f42c77783f",
+      "clientRevision": "e195159b2c38704e6fa9f528e90246e5d792be7e",
+      "clientVersion": "0.7.0",
+      "clientSha256": "85543b88c77a98e859ccc451448b814aaf7e366378b64ea951dff5936bde882c",
       "upstreamVersion": "0.4.6",
       "upstreamRevision": "a389bee62da930807c3bc85284ee4976e9c7e08f"
     },
     "aarch64": {
-      "clientRevision": "b86721212ce5d1ba14682d79331a3485a66641a8",
-      "clientVersion": "0.6.0",
-      "clientSha256": "cbfac96afde1952d279c665b932dcbc2e35629ace243a29c5998b37e9d223306",
+      "clientRevision": "e195159b2c38704e6fa9f528e90246e5d792be7e",
+      "clientVersion": "0.7.0",
+      "clientSha256": "a763755fe5ee03e3b0f039064100eccea451eb338ccbb3a3786fb7a69679854d",
       "upstreamVersion": "0.4.6",
       "upstreamRevision": "a389bee62da930807c3bc85284ee4976e9c7e08f"
     },
     "armv7-softfloat": {
-      "clientRevision": "b86721212ce5d1ba14682d79331a3485a66641a8",
-      "clientVersion": "0.6.0",
-      "clientSha256": "70e83c35d4bcffd97635d1690b64803365b50e3501e78021c5616b3aeeea8071",
+      "clientRevision": "e195159b2c38704e6fa9f528e90246e5d792be7e",
+      "clientVersion": "0.7.0",
+      "clientSha256": "83b5b358d3724e341366c1019cf421f7763e40eae27acc3259229a29b6560967",
       "upstreamVersion": "0.4.6",
       "upstreamRevision": "a389bee62da930807c3bc85284ee4976e9c7e08f"
     }
