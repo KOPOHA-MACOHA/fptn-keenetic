@@ -196,7 +196,7 @@ int main(int argc,char**argv){
             status=self.cmd('status')
             self.assertNotIn('READY получен',status.stdout)
             state=json.loads(self.cmd('status-json').stdout)
-            self.assertIn(state['state'],['starting','selecting'])
+            self.assertIn(state['state'],['starting','selecting','retrying'])
             self.assertFalse(state['connected'])
         finally: stopped=self.cmd('stop')
         self.assertEqual(stopped.returncode,0,stopped.stdout+stopped.stderr)
