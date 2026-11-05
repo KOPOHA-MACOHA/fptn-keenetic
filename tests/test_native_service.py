@@ -120,7 +120,11 @@ int main(int argc,char**argv){
  char *record=getenv("FPTN_MOCK_ARGS");
  if(record){FILE *f=fopen(record,"w");if(!f)return 4;for(int i=1;i<argc;i++)fprintf(f,"%s\n",argv[i]);fclose(f);}
  signal(SIGTERM,stop);
- puts("KEENETIC_SELECTED: CZ");fflush(stdout);
+ const char *selected="CZ";
+ if(!getenv("FPTN_MOCK_IGNORE_SKIP"))for(int i=1;i+1<argc;i++)if(!strcmp(argv[i],"--keenetic-skip-file")){
+  FILE*f=fopen(argv[i+1],"r");if(f){char data[4096]={0};fread(data,1,sizeof(data)-1,f);fclose(f);if(strstr(data,"CZ")){if(strstr(data,"DE"))return 6;selected="DE";}}
+ }
+ printf("KEENETIC_SELECTED: %s\n",selected);fflush(stdout);
  char *trace=getenv("FPTN_MOCK_TRANSPORT_TRACE");char *method="",*sni="";
  for(int i=1;i+1<argc;i++){if(!strcmp(argv[i],"--bypass-method"))method=argv[i+1];if(!strcmp(argv[i],"--sni"))sni=argv[i+1];}
  if(trace){FILE*f=fopen(trace,"a");if(f){fprintf(f,"%s %s\n",method,sni);fclose(f);}}
@@ -129,7 +133,8 @@ int main(int argc,char**argv){
   for(int i=1;i+1<argc;i++)if(!strcmp(argv[i],"--keenetic-probe-report")){FILE*f=fopen(argv[i+1],"w");if(f){fputs("{\"complete\":true,\"results\":[{\"name\":\"CZ\",\"code\":401,\"ok\":false}]}",f);fclose(f);}}
   return 6;
  }
- if(getenv("FPTN_MOCK_ALWAYS_FAIL") || (required && strcmp(required,method)))return 6;
+ char *fail_after=getenv("FPTN_MOCK_FAIL_AFTER");
+ if(getenv("FPTN_MOCK_ALWAYS_FAIL") || (fail_after && !access(fail_after,F_OK)) || (required && strcmp(required,method)))return 6;
 
  char *fail_once=getenv("FPTN_MOCK_FAIL_ONCE");
  if(fail_once && !access(fail_once,F_OK)){unlink(fail_once);return 5;}
@@ -190,16 +195,21 @@ int main(int argc,char**argv){
             self.assertFalse((run/'ready').exists(), 'Previous attempt READY must not carry over')
             status=self.cmd('status')
             self.assertNotIn('READY получен',status.stdout)
-            self.assertIn('подключение',status.stdout)
+            state=json.loads(self.cmd('status-json').stdout)
+            self.assertIn(state['state'],['starting','selecting'])
+            self.assertFalse(state['connected'])
         finally: stopped=self.cmd('stop')
         self.assertEqual(stopped.returncode,0,stopped.stdout+stopped.stderr)
         self.assertFalse(run.exists())
         self.assertEqual(self.state()['mutations'],0)
 
     def test_stop_during_backoff_does_not_restart(self):
+        self.env['FPTN_MOCK_IGNORE_SKIP']='1'
+        marker=self.root/'fail-after-start';self.env['FPTN_MOCK_FAIL_AFTER']=str(marker)
         root=self.prepare_native_client(); run=root/'var/run/fptn-keenetic'
         try:
             started=self.cmd('start'); self.assertEqual(started.returncode,0,started.stdout+started.stderr)
+            marker.touch()
             old=int((run/'client.pid').read_text().split()[0]); os.kill(old,signal.SIGKILL)
             self.wait_for(lambda: (run/'state').exists() and 'повтор через' in (run/'state').read_text())
             stopped=self.cmd('stop')

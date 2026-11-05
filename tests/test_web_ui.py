@@ -141,6 +141,13 @@ else: sys.exit(2)
         self.assertEqual(set(data),{'schema','uiVersion','clientVersion','upstreamVersion','clientBuildRevision','state','connected','nativeInterface','health'})
         self.assertEqual(self.request('diagnostics',HTTP_AUTHORIZATION='')[0],401)
 
+    def test_busy_port_is_reported_before_reserving_or_stopping_anything(self):
+        shutil.copyfile(ROOT/'scripts/fptn-web-port.sh',self.root/'libexec/fptn/web-port.sh')
+        listener=self.bin/'netstat';listener.write_text('#!/bin/sh\necho "tcp6 0 0 :::2222 :::* LISTEN 77/foreign"\n');listener.chmod(0o700)
+        status,data=self.request(body={'action':'change-port','port':2222})
+        self.assertEqual(status,400,data);self.assertIn('занят',data['error'])
+        self.assertFalse((self.run/'action').exists());self.assertFalse((self.root/'trace').exists())
+
     def test_invalid_port_requests_never_reserve_an_operation(self):
         for port in [0,65536,True,'2222',2222.5]:
             status,data=self.request(body={'action':'change-port','port':port})

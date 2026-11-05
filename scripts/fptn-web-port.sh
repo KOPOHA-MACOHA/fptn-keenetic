@@ -48,6 +48,10 @@ rollback() {
   rm -rf "$STATE"
 }
 case "${1:-}" in
+  check)
+    PORT=${2:-};valid_port "$PORT" || fail 'Введите TCP-порт 1–65535.'
+    current
+    [ "$PORT" = "$OLD_PORT" ] || available "$PORT" || fail 'Порт занят другим сервисом. Выберите другой.' ;;
   info)
     if [ -r "$STATE/info.json" ]; then cat "$STATE/info.json"; else echo null; fi ;;
   confirm)

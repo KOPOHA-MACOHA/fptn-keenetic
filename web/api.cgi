@@ -326,11 +326,12 @@ case "${REQUEST_METHOD:-}" in
     fi
     case "$ACTION" in start|stop|restart|check|enable|disable|recover|check-update|update|setup-interface|cancel-port) ;;
     change-port)
-      printf '%s' "$BODY" | jq -e '.port|type=="number" and floor==. and .>=1 and .<=65535' >/dev/null || error '400 Bad Request' 'Введите TCP-порт 1–65535.' ;;
+      printf '%s' "$BODY" | jq -e '.port|type=="number" and floor==. and .>=1 and .<=65535' >/dev/null || error '400 Bad Request' 'Введите TCP-порт 1–65535.'
+      PORT_CHECK=$(sh "$LIB/web-port.sh" check "$(printf '%s' "$BODY" | jq -r .port)" 2>&1) || error '400 Bad Request' "$PORT_CHECK" ;;
     save)
       printf '%s' "$BODY" | jq -e '(.server|type=="string" and length>0 and length<=128) and
         (.token // ""|type=="string" and length<=262144)' >/dev/null 2>&1 || error '400 Bad Request' 'Некорректный сервер или токен.'
-      printf '%s' "$BODY" | jq '.connection' | "$CTL" validate-settings >/dev/null 2>&1 || error '400 Bad Request' 'Проверьте параметры подключения, MTU и SNI.'
+      printf '%s' "$BODY" | jq '.connection' | "$CTL" validate-settings >/dev/null 2>&1 || error '400 Bad Request' 'Проверьте параметры подключения, MTU, SNI и проверку связи.'
       if printf '%s' "$BODY" | jq -e '.connection.ipv6==true' >/dev/null; then
         "$CTL" check-ipv6 >/dev/null 2>&1 || error '400 Bad Request' 'IPv6 NAT недоступен. Нужны ip6tables Entware и поддержка NAT66 в ядре.'
       fi

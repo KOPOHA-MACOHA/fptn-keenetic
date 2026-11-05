@@ -523,7 +523,7 @@ run_service() {
     else
       attempt_service
       stop_child
-      if [ "$ATTEMPT_STABLE" = yes ] && [ -n "$ATTEMPT_SELECTED" ]; then
+      if [ "$USE_PLAN" = yes ] && [ "$ATTEMPT_STABLE" = yes ] && [ -n "$ATTEMPT_SELECTED" ]; then
         jq --arg name "$ATTEMPT_SELECTED" '. + [$name] | unique' "$RUN/failed-servers.json" > "$RUN/failed-servers.new"
         mv "$RUN/failed-servers.new" "$RUN/failed-servers.json"
       fi
@@ -546,13 +546,16 @@ run_service() {
       fi
     fi
     if [ "$USE_PLAN" != yes ] && { [ -f "$CONF/server-policy.json" ] || [ "$REPORT_CAPABLE" = yes ]; } && [ -n "$ATTEMPT_SELECTED" ]; then
-      jq --arg name "$ATTEMPT_SELECTED" '. + [$name] | unique' "$RUN/failed-servers.json" > "$RUN/failed-servers.new"
-      mv "$RUN/failed-servers.new" "$RUN/failed-servers.json"
-      FORCE_AUTO=yes
-      echo 'FPTN: повторный автовыбор, неработающий сервер временно пропускается.'
-      # Try other candidates even when the first process failed before READY.
-      sleep 1
-      continue
+      # Bound a selection pass even if a buggy client ignores its skip file.
+      if ! jq -e --arg name "$ATTEMPT_SELECTED" 'index($name)!=null' "$RUN/failed-servers.json" >/dev/null; then
+        jq --arg name "$ATTEMPT_SELECTED" '. + [$name] | unique' "$RUN/failed-servers.json" > "$RUN/failed-servers.new"
+        mv "$RUN/failed-servers.new" "$RUN/failed-servers.json"
+        FORCE_AUTO=yes
+        echo 'FPTN: повторный автовыбор, неработающий сервер временно пропускается.'
+        # Try other candidates even when the first process failed before READY.
+        sleep 1
+        continue
+      fi
     fi
     if [ "$EVER_READY" != yes ] && [ "${FPTN_BOOT_RETRY:-}" != boot ]; then
       fail 'Первое подключение не удалось: fptnctl logs.'
