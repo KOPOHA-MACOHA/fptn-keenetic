@@ -72,7 +72,7 @@ const run=code=>vm.runInContext(code,context);
  const running=structuredClone(stopped);running.service={state:'running',message:'Подключён',selectedServer:'CZ',connected:true,supervisorAlive:true,canStart:false,canStop:true,canRestart:true};
  context.data=running;run('applyStatus(data)');
  assert(elements.start.disabled&&!elements.stop.disabled,'running: stop only');
- assert(elements['active-server'].textContent==='CZ');
+ assert(elements['active-server'].textContent==='CZ'&&elements['active-server-label'].textContent==='Подключено к');
  // Automatic fallback updates reality, not the user's saved preference or draft.
  running.service.preferredServer='CZ';running.service.selectionMode='manual';running.service.selectedServer='DE';
  running.service.lastSwitch={from:'CZ',to:'DE',reason:'health-failed',at:100};

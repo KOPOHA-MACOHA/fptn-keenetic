@@ -8,7 +8,7 @@
   <title>FPTN · Keenetic</title>
   <link rel="icon" href="data:,">
   <link rel="stylesheet" href="style.css?v=0.17.0-8f209edfd09d">
-  <script src="app.js?v=0.17.0-8986377f77b7" defer></script>
+  <script src="app.js?v=0.17.0-c00a3db8c7c7" defer></script>
 </head>
 <body>
   <div class="shell">
@@ -36,7 +36,7 @@
       <section class="card overview">
         <div class="status-heading"><span id="indicator" class="dot"></span><h2 id="status-title">Проверяем состояние…</h2><span id="memory" class="memory"></span></div>
         <p id="status-message" class="status-text"></p><p id="effective-connection" class="hint"></p>
-        <p class="current-server">Подключено к: <strong id="active-server">Нет активного сервера</strong></p>
+        <p class="current-server"><span id="active-server-label">Сервер</span>: <strong id="active-server">Нет активного сервера</strong></p>
         <p id="selection-summary" class="hint"></p><p id="switch-summary" class="hint"></p><p id="health-status" class="hint"></p>
         <p id="operation" class="operation" hidden></p><button id="recover-operation" type="button" hidden>Восстановить управление</button>
         <div class="actions"><button id="start" class="primary" data-command="start">Запустить</button><button id="stop" data-command="stop">Остановить</button><button id="restart" data-command="restart">Переподключить</button></div>

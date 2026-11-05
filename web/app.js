@@ -157,6 +157,7 @@ function applyStatus(data){
   $('indicator').className='dot'+(service.connected?' active':['starting','selecting','retrying','reconnecting','waiting-network'].includes(service.state)?' busy':'');
   const effective=service.effectiveConnection;$('effective-connection').textContent=effective?(service.state==='running'?'Используется: ':'Попытка: ')+(effective.bypass==='obfuscation'?'маскировка трафика':effective.bypass.replace('sni-spoofing-','')+' · SNI '+effective.sni)+(effective.mtu?' · MTU '+effective.mtu:'')+(effective.outInterface?' · '+effective.outInterface:''):'Параметры активного подключения появятся после переподключения.';
   $('status-message').textContent=service.message+(service.state==='retrying'&&service.retryAt?' Следующая попытка: '+new Date(service.retryAt*1000).toLocaleTimeString('ru-RU'):'');$('status-text').textContent=data.status;
+  $('active-server-label').textContent=service.connected?'Подключено к':['starting','selecting','reconnecting'].includes(service.state)?'Текущая попытка':'Сервер';
   $('active-server').textContent=service.selectedServer||'Нет активного сервера';
   const preferred=service.preferredServer||'';
   $('selection-summary').textContent=service.selectionMode==='auto'?'Сохранён режим: автовыбор, избранные сначала.':preferred?'Предпочтительный сервер: '+preferred+(service.selectedServer&&service.selectedServer!==preferred?'. Сейчас используется другой сервер после автовыбора.':''):'';

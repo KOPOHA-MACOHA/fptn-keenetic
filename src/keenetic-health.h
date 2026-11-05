@@ -63,7 +63,7 @@ class TunnelHealth {
     } else Close();
     deadline_=now+std::chrono::seconds(timeout_);Publish("checking-uplink",now);
   }
-  void Send(Time now) {
+  void Send(Time now,std::unique_lock<std::mutex>& lock) {
     auto q=Query();Bytes b(28+q.size());b[0]=0x45;Put(b,2,static_cast<std::uint16_t>(b.size()));
     b[8]=64;b[9]=17;
     for(int n=0;n<4;++n){b[12+n]=(source_>>(24-8*n))&255;b[16+n]=(destinations_[endpoint_]>>(24-8*n))&255;}
@@ -72,8 +72,13 @@ class TunnelHealth {
     std::uint32_t sum=0;for(int p=0;p<20;p+=2)sum+=Word(b,p);
     while(sum>>16)sum=(sum&65535)+(sum>>16);
     Put(b,10,static_cast<std::uint16_t>(~sum)); // UDP checksum zero is legal for IPv4
-    if(send_) send_(b);
     deadline_=now+std::chrono::seconds(timeout_);Publish("checking",now);
+    // Never call the original transport while holding the probe mutex: a very
+    // fast incoming reply (or a strategy callback) can re-enter Receive.
+    const auto sender=send_;
+    lock.unlock();
+    try {if(sender)sender(b);}catch(...) { /* timeout handles failed sends */ }
+    lock.lock();
   }
  public:
   ~TunnelHealth(){Close();}
@@ -104,13 +109,13 @@ class TunnelHealth {
     reply_=true;return true;
   }
   bool Tick(bool connected,Time now=Clock::now()) {
-    const std::lock_guard<std::mutex> lock(mutex_);
+    std::unique_lock<std::mutex> lock(mutex_);
     if(!interval_)return false;
     if(!connected){pending_=reply_=direct_=false;listening_=false;Close();next_=now+std::chrono::seconds(interval_);return false;}
     if(!pending_){
       if(now<next_)return false;
       std::random_device random;id_=static_cast<std::uint16_t>(random());port_=40000+random()%20000;
-      pending_=true;listening_=true;reply_=false;direct_=false;endpoint_=0;Send(now);return false;
+      pending_=true;listening_=true;reply_=false;direct_=false;endpoint_=0;Send(now,lock);return false;
     }
     if(direct_){
       std::array<std::uint8_t,2048> buf{};auto size = fd_<0 ? -1 : ::recv(fd_,buf.data(),buf.size(),0);
@@ -126,7 +131,7 @@ class TunnelHealth {
       Close();pending_=false;next_=now+std::chrono::seconds(interval_);
       Publish("inconclusive",now);return false; // WAN or probe service failure: never rotate blindly
     }
-    if(endpoint_==0){endpoint_=1;Send(now);return false;}
+    if(endpoint_==0){endpoint_=1;Send(now,lock);return false;}
     ++failures_;
     if(failures_>=limit_){BeginDirect(now);return false;}
     pending_=false;listening_=false;next_=now+std::chrono::seconds(interval_);Publish("missed",now);return false;

@@ -50,6 +50,11 @@ int main(int argc,char**argv){
  // Disabled/reconnecting instances must not emit probes or keep a socket open.
  int before=sends;health.Configure(0,5,3,"10.0.0.1","eth2.2",argv[1],now);health.Tick(true,now+std::chrono::hours(24));assert(sends==before);
  health.Configure(60,5,3,"10.0.0.1","eth2.2",argv[1],now);health.Tick(false,now+std::chrono::seconds(90));health.Tick(true,now+std::chrono::seconds(91));assert(sends==before);
+ // The transport may deliver a reply synchronously; no callback may run under
+ // the probe mutex. A lock inversion here would hang this process.
+ health.Configure(30,2,2,"10.0.0.1","eth2.2",argv[1],now);
+ health.SetSender([&](const Bytes& b){return health.Receive(answer(b));});
+ now+=std::chrono::seconds(30);assert(!health.Tick(true,now));assert(!health.Tick(true,now));
  bool denied=false;try{health.Configure(1,5,3,"10.0.0.1","eth2.2",argv[1]);}catch(...){denied=true;}assert(denied);
  denied=false;try{health.Configure(60,5,3,"10.0.0.1","opkgtun7",argv[1]);}catch(...){denied=true;}assert(denied);
 }
