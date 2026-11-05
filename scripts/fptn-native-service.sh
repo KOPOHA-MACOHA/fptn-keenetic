@@ -1012,7 +1012,7 @@ resource_report() {
   # END PASSIVE RESOURCE READER
 }
 
-[ "${1:-}" = resources ] || need_root
+need_root
 case "${1:-}" in
   enable|disable) set_autostart "$1" ;;
   _boot) [ ! -f "$CONF/autostart" ] || start_service boot ;;
