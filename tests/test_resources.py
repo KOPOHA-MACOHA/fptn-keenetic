@@ -8,6 +8,7 @@ import unittest
 
 ROOT = Path(__file__).resolve().parents[1]
 SERVICE = ROOT / 'scripts/fptn-native-service.sh'
+PROFILE = ROOT / 'tests/profile-resources.sh'
 
 
 def stat(pid, start, ticks, state='S'):
@@ -17,14 +18,6 @@ def stat(pid, start, ticks, state='S'):
 
 
 class ResourceTests(unittest.TestCase):
-    def setUp(self):
-        temp = tempfile.TemporaryDirectory()
-        self.addCleanup(temp.cleanup)
-        bindir = Path(temp.name)
-        (bindir/'id').write_text('#!/bin/sh\necho 0\n')
-        (bindir/'id').chmod(0o700)
-        self.env = {**os.environ, 'PATH':str(bindir)+':'+os.environ['PATH']}
-
     def fixture(self, restart=False, invalid_idle=False):
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
@@ -58,7 +51,7 @@ cp -r '{root}/frame'"$step"/. '{proc}/'
 printf '%s\\n' "$step" > '{root}/step'
 ''')
             (bindir/'sleep').chmod(0o700)
-            reader=SERVICE.read_text().split('# BEGIN PASSIVE RESOURCE READER\n',1)[1].split('# END PASSIVE RESOURCE READER',1)[0]
+            reader=PROFILE.read_text().split('# BEGIN PASSIVE RESOURCE READER\n',1)[1].split('# END PASSIVE RESOURCE READER',1)[0]
             reader=reader.replace('/proc/',str(proc)+'/')
             result=subprocess.run(['sh','-c','RUN="$1"; DURATION=4; INTERVAL=2\n'+reader,'test',str(run)],
                 env={**os.environ,'PATH':str(bindir)+':'+os.environ['PATH']},capture_output=True,text=True,timeout=10)
@@ -87,13 +80,13 @@ printf '%s\\n' "$step" > '{root}/step'
     def test_invalid_arguments_fail_without_creating_state(self):
         with tempfile.TemporaryDirectory() as tmp:
             for args in [('0','1'),('2','0'),('3','4'),('3601','2'),('2;touch x','1'),('99999999','1')]:
-                result=subprocess.run(['sh',str(SERVICE),'resources',*args],env={**self.env,'FPTN_PREFIX':tmp},capture_output=True,text=True,timeout=3)
+                result=subprocess.run(['sh',str(PROFILE),*args],env={**os.environ,'FPTN_PREFIX':tmp},capture_output=True,text=True,timeout=3)
                 self.assertNotEqual(result.returncode,0)
             self.assertEqual(list(Path(tmp).iterdir()),[])
 
     def test_live_proc_and_no_service_never_starts_or_writes_anything(self):
         with tempfile.TemporaryDirectory() as tmp:
-            result=subprocess.run(['sh',str(SERVICE),'resources','2','1'],env={**self.env,'FPTN_PREFIX':tmp},capture_output=True,text=True,timeout=8)
+            result=subprocess.run(['sh',str(PROFILE),'2','1'],env={**os.environ,'FPTN_PREFIX':tmp},capture_output=True,text=True,timeout=8)
             self.assertEqual(result.returncode,0,result.stderr)
             self.assertIn('[ИТОГ] общий CPU:',result.stdout)
             self.assertIn('client: CPU н/д',result.stdout)

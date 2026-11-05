@@ -26,6 +26,20 @@ class RuntimePackageTest(unittest.TestCase):
                 self.assertIn('fptn-keenetic/'+name,names)
         result=subprocess.run(['sha256sum','-c','SHA256SUMS'],cwd=self.output/'fptn-keenetic',capture_output=True,text=True)
         self.assertEqual(result.returncode,0,result.stdout+result.stderr)
+    def test_developer_profiler_is_not_distributed_or_embedded_in_controller(self):
+        (self.root/'tests').mkdir()
+        (self.root/'tests/profile-resources.sh').write_text((ROOT/'tests/profile-resources.sh').read_text())
+        controller=self.root/'scripts/fptn-native-service.sh'
+        controller.write_text((ROOT/'scripts/fptn-native-service.sh').read_text())
+        with (self.root/'web/SHA256SUMS').open('a') as manifest:
+            manifest.write(hashlib.sha256(controller.read_bytes()).hexdigest()+'  scripts/fptn-native-service.sh\n')
+        archive=self.build()
+        with tarfile.open(archive) as tar:
+            self.assertFalse(any('/tests/' in name or 'profile-resources' in name for name in tar.getnames()))
+            installed=tar.extractfile('fptn-keenetic/scripts/fptn-native-service.sh').read().decode()
+            self.assertNotIn('resource_report',installed)
+            self.assertNotIn('resources)',installed)
+
     def test_wrong_decoder_and_mixed_platforms_are_not_packaged(self):
         (self.decoder/'brotli').write_text('other decoder')
         with self.assertRaises(ValueError):self.build()
