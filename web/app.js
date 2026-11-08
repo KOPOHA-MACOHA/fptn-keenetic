@@ -1,5 +1,5 @@
 'use strict';
-const UI_VERSION = '0.18.2';
+const UI_VERSION = '0.18.3';
 const $ = id => document.getElementById(id);
 if (window.top !== window.self) { document.documentElement.replaceChildren(); throw new Error('Panel cannot be framed'); }
 let profiles={},clientCapabilities=null;
@@ -35,10 +35,17 @@ async function initializePanel(){
 }
 
 async function api(query,body){
-  const response=await fetch('api.cgi'+(query?'?'+query:''),{method:body?'POST':'GET',cache:'no-store',credentials:'omit',headers:{Authorization:'Bearer '+key,...(body?{'Content-Type':'application/json'}:{})},...(body?{body:JSON.stringify(body)}:{})});
-  let data;try{data=await response.json();}catch{throw new Error('Не удалось прочитать ответ панели. Обновите страницу.');}
-  if(response.status===401){loggedOut();throw new Error(data.error||'Войдите по логину и паролю.');}
-  if(!response.ok){const error=new Error(data.error||'Ошибка запроса');error.status=response.status;throw error;}return data;
+  const controller=new AbortController();
+  const timeout=setTimeout(()=>controller.abort(),15000);
+  try{
+    const response=await fetch('api.cgi'+(query?'?'+query:''),{signal:controller.signal,method:body?'POST':'GET',cache:'no-store',credentials:'omit',headers:{Authorization:'Bearer '+key,...(body?{'Content-Type':'application/json'}:{})},...(body?{body:JSON.stringify(body)}:{})});
+    let data;try{data=await response.json();}catch{throw new Error('Не удалось прочитать ответ панели. Обновите страницу.');}
+    if(response.status===401){loggedOut();throw new Error(data.error||'Войдите по логину и паролю.');}
+    if(!response.ok){const error=new Error(data.error||'Ошибка запроса');error.status=response.status;throw error;}return data;
+  }catch(error){
+    if(controller.signal.aborted)throw new Error('Панель не ответила за 15 секунд. Обновите страницу, чтобы проверить состояние.');
+    throw error;
+  }finally{clearTimeout(timeout);}
 }
 function collectSettings(){return {server:$('server').value,token:$('token').value.trim(),connection:{health:{enabled:$('health-enabled').checked,interval:Number($('health-interval').value),timeout:Number($('health-timeout').value),failures:Number($('health-failures').value)},ipv6:$('ipv6').checked,mtu:$('mtu-mode').value==='custom'?Number($('mtu').value):0,outInterface:$('out-interface').value.trim(),strategy:$('strategy').value,bypass:$('mode').value==='obfuscation'?'obfuscation':$('profile').value,sni:$('sni').value.trim()||'google.com'},fallback:$('fallback-enabled').checked?{enabled:$('fallback-enabled').checked,profiles:[...new Set(fallbackProfiles.map(id=>$(id).value).filter(Boolean))],domains:$('fallback-domains').value.split(/\r?\n/).map(s=>s.trim()).filter(Boolean),budget:Number($('fallback-budget').value)}:{...savedFallback,enabled:false},policy:{mode:$('selection-mode').value,favorites:[...favorites].sort(),excluded:[...excluded].sort()}};}
 function updateDirty(){
@@ -277,20 +284,23 @@ function renderUpdate(message){
   $('update-modal').hidden=false;$('panel-shell').inert=true;
   $('update-message').textContent=message;
   $('update-progress').hidden=Boolean(updateWatch?.finished);
-  $('update-reload').hidden=!(updateWatch?.finished||updateWatch?.uncertain);$('update-close').hidden=!updateWatch?.finished;
+  $('update-reload').hidden=false;$('update-close').hidden=!updateWatch?.finished;
 }
 function beginUpdate(target){
   if(updateWatch&&!updateWatch.finished)return;
-  updateWatch={revision:target?.revision||null,originalRevision:lastData?.revision||null,version:target?.version||'',accepted:false,uncertain:false,seenBusy:false,finished:false};
-  $('update-title').textContent='Обновление FPTN'+(updateWatch.version?' до '+updateWatch.version:'');
-  $('update-detail').textContent='Панель заблокирована на время установки. При перезапуске веб-сервера связь может временно пропасть.';
+  updateWatch={revision:target?.revision||null,originalRevision:lastData?.revision||null,version:target?.version||'',clientVersion:target?.clientVersion||'',accepted:false,uncertain:false,seenBusy:false,finished:false};
+  const changes=[];
+  if(updateWatch.clientVersion&&updateWatch.clientVersion!==lastData?.clientVersion)changes.push('клиента до '+updateWatch.clientVersion);
+  if(updateWatch.version&&updateWatch.version!==UI_VERSION)changes.push('панели до '+updateWatch.version);
+  $('update-title').textContent=changes.length?'Обновление '+changes.join(' и '):'Обновление сборки FPTN';
+  $('update-detail').textContent='Клиент: '+(updateWatch.clientVersion||'уточняется')+' · Панель: '+(updateWatch.version||UI_VERSION)+'. Обновление страницы не отменяет принятую фоновую установку.';
   renderUpdate('Отправляем запрос на обновление…');$('update-dialog').focus();
 }
 function finishUpdate(ok,message){
   if(!updateWatch)return;
   updateWatch.finished=true;updateWatch.ok=ok;pending=false;
   $('update-title').textContent=ok?'Обновление установлено':'Обновление не завершено';
-  $('update-detail').textContent=ok?'Перезагрузите панель, чтобы открыть новую версию интерфейса.':'Если операция была прервана, используйте «Восстановить управление» после закрытия окна.';
+  $('update-detail').textContent=ok?'Обновите страницу, чтобы увидеть актуальные версии и состояние службы.':'Если операция была прервана, используйте «Восстановить управление» после закрытия окна.';
   renderUpdate(message);$('update-reload').focus();
 }
 function observeUpdate(data){

@@ -9,7 +9,7 @@ class WebPortTest(unittest.TestCase):
   self.conf=self.root/'etc/fptn';self.conf.mkdir(parents=True);self.fragments=self.root/'etc/lighttpd/conf.d';self.fragments.mkdir(parents=True)
   self.fragment=self.fragments/'95-fptn.conf';self.original='# Managed by fptn-web-ui\n$SERVER["socket"] == "192.168.1.1:1111" {\n server.document-root = "/opt/share/fptn-web"\n}\n'
   self.fragment.write_text(self.original);(self.root/'etc/lighttpd/lighttpd.conf').write_text('original shared config\n')
-  (self.conf/'web-origin').write_text('http://192.168.1.1:1111\n');(self.conf/'web-meta.json').write_text('{"uiVersion":"0.18.2"}')
+  (self.conf/'web-origin').write_text('http://192.168.1.1:1111\n');(self.conf/'web-meta.json').write_text('{"uiVersion":"0.18.3"}')
   web=self.root/'share/fptn-web';web.mkdir(parents=True);(web/'.fptn-web-owned').touch()
   lock=self.root/'var/run/fptn-web/action';lock.mkdir(parents=True);(lock/'action').write_text('change-port\n');(lock/'owner.json').write_text(json.dumps({'id':'a'*32}))
   init=self.root/'etc/init.d/S80lighttpd';init.parent.mkdir(parents=True)
@@ -27,7 +27,7 @@ elif cmd=='date':
  p=r/'clock';n=int(p.read_text()) if p.exists() else 1000;p.write_text(str(n+(200 if (r/'fast-clock').exists() else 0)));print(n)
 elif cmd=='curl':
  if (r/'http-down').exists() and ':2222/' in ' '.join(sys.argv):sys.exit(7)
- print(json.dumps({'uiVersion':'0.18.2','configured':True}))
+ print(json.dumps({'uiVersion':'0.18.3','configured':True}))
 else:sys.exit(3)
 '''
   for name in ['id','netstat','lighttpd','curl','date']:

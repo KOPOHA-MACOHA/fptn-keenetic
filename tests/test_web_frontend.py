@@ -30,10 +30,10 @@ const document={hidden:false,documentElement:new Element('root'),getElementById:
  throw new Error('Unexpected selector '+selector);
 }};
 const settings={capabilities:{schema:1,clientVersion:'0.4.0',methods:['obfuscation','sni-spoofing-chrome-149','sni-spoofing-chrome-150','sni-spoofing-firefox-151','sni-spoofing-yandex-26-4','sni-spoofing-safari-26-5','sni-spoofing-edge-151'],strategies:['rolling-tunnel','dual-rolling-tunnel','triple-rolling-tunnel','quad-rolling-tunnel']},server:'CZ',servers:['CZ','DE'],connection:{bypass:'obfuscation',strategy:'dual-rolling-tunnel',sni:'google.com'},policy:{mode:'manual',favorites:[],excluded:[]}};
-const stopped={status:'FPTN остановлен',uiVersion:'0.18.2',clientVersion:'0.4.0',upstreamVersion:'0.4.6',clientBuildRevision:'a'.repeat(40),revision:'1234567890',busy:false,report:null,service:{state:'stopped',message:'Служба остановлена',selectedServer:'',connected:false,supervisorAlive:false,canStart:true,canStop:false,canRestart:false}};
+const stopped={status:'FPTN остановлен',uiVersion:'0.18.3',clientVersion:'0.4.0',upstreamVersion:'0.4.6',clientBuildRevision:'a'.repeat(40),revision:'1234567890',busy:false,report:null,service:{state:'stopped',message:'Служба остановлена',selectedServer:'',connected:false,supervisorAlive:false,canStart:true,canStop:false,canRestart:false}};
 const win={location:{href:''}};win.top=win;win.self=win;
 let authState={configured:false,mode:null,rootAvailable:true};const requests=[];
-const context={console,document,window:win,Option:class{constructor(text,value){this.text=text;this.value=value;}},sessionStorage:{getItem(){return '';},setItem(){},removeItem(){}},setInterval(){},setTimeout(){return 1;},clearTimeout(){},fetch:async(url,options={})=>{
+const context={AbortController,console,document,window:win,Option:class{constructor(text,value){this.text=text;this.value=value;}},sessionStorage:{getItem(){return '';},setItem(){},removeItem(){}},setInterval(){},setTimeout(){return 1;},clearTimeout(){},fetch:async(url,options={})=>{
  let data=settings;
  if(url.includes('?auth-info'))data=structuredClone(authState);
  else if(url.includes('?setup')){const body=JSON.parse(options.body);requests.push({url,body});authState={configured:true,mode:body.mode,rootAvailable:true};data=body.mode==='entware'?{key:'f'.repeat(64)}:{ok:true};}
@@ -155,7 +155,7 @@ class FrontendTest(unittest.TestCase):
         sh=shutil.which('sh')
         result=subprocess.run([sh,str(ROOT/'web/index.cgi')],env={**os.environ,'PATH':'','SCRIPT_FILENAME':'/wrong/inherited/path'},capture_output=True,text=True)
         self.assertEqual(result.returncode,0,result.stderr)
-        self.assertIn('data-ui-version="0.18.2"',result.stdout)
+        self.assertIn('data-ui-version="0.18.3"',result.stdout)
         self.assertIn('Cache-Control: no-store',result.stdout)
 
     def test_real_ui_status_buttons_roles_drafts_and_versions(self):
@@ -176,7 +176,7 @@ class FrontendTest(unittest.TestCase):
 const base={...stopped,configured:true,interfaceReady:true,revision:'a'.repeat(40)};
 run("beginUpdate({revision:'c'.repeat(40),version:'0.19.0'})");
 assert(!elements['update-modal'].hidden&&elements['panel-shell'].inert);
-assert(elements['update-reload'].hidden&&elements['update-close'].hidden);
+assert(!elements['update-reload'].hidden&&elements['update-close'].hidden);
 context.data={...base,busy:true,operation:'update'};run('applyStatus(data)');
 run('showOffline(new Error("network"))');assert(elements['panel-shell'].inert&&elements['update-close'].hidden);
 assert(elements['update-message'].textContent.includes('недоступна'));
@@ -202,6 +202,68 @@ console.log('Update modal: confirmed completion, rollback, interruption and unce
 '''
         with tempfile.TemporaryDirectory() as folder:
             script=Path(folder)/'modal.js';script.write_text(harness+scenario)
+            result=subprocess.run([node,str(script),str(ROOT/'web/index.html'),str(ROOT/'web/app.js')],capture_output=True,text=True,timeout=10)
+            self.assertEqual(result.returncode,0,result.stdout+result.stderr)
+
+    def test_update_title_distinguishes_client_panel_and_combined_release(self):
+        node=shutil.which('node')
+        if not node:self.skipTest('node unavailable')
+        import tempfile
+        harness=NODE.split('(async()=>{',1)[0]
+        scenario=r'''
+context.data={...stopped,uiVersion:'0.18.3',clientVersion:'0.7.0'};run('lastData=data');
+run("beginUpdate({revision:'c'.repeat(40),version:'0.18.3',clientVersion:'0.8.0'})");
+assert(elements['update-title'].textContent==='Обновление клиента до 0.8.0');
+assert(elements['update-detail'].textContent.includes('Клиент: 0.8.0')&&elements['update-detail'].textContent.includes('Панель: 0.18.3'));
+assert(!elements['update-reload'].hidden&&elements['update-close'].hidden&&elements['panel-shell'].inert);
+context.fetch=()=>{throw Error('reload must never submit or cancel an operation');};
+elements['update-reload'].dispatch('click');assert(win.location.href.startsWith('/?v='));assert(!run('updateWatch.finished'));
+run("finishUpdate(false,'reset')");elements['update-close'].dispatch('click');
+context.data={...stopped,clientVersion:'0.8.0'};run('lastData=data');
+run("beginUpdate({revision:'c'.repeat(40),version:'0.18.4',clientVersion:'0.8.0'})");
+assert(elements['update-title'].textContent==='Обновление панели до 0.18.4');
+run("finishUpdate(false,'reset')");elements['update-close'].dispatch('click');
+context.data={...stopped,clientVersion:'0.7.0'};run('lastData=data');
+run("beginUpdate({revision:'c'.repeat(40),version:'0.18.4',clientVersion:'0.8.0'})");
+assert(elements['update-title'].textContent==='Обновление клиента до 0.8.0 и панели до 0.18.4');
+console.log('Separate client/panel targets and safe reload while update runs: PASS');
+'''
+        with tempfile.TemporaryDirectory() as folder:
+            script=Path(folder)/'targets.js';script.write_text(harness+scenario)
+            result=subprocess.run([node,str(script),str(ROOT/'web/index.html'),str(ROOT/'web/app.js')],capture_output=True,text=True,timeout=10)
+            self.assertEqual(result.returncode,0,result.stdout+result.stderr)
+
+    def test_api_timeouts_release_polling_and_do_not_repeat_uncertain_update(self):
+        node=shutil.which('node')
+        if not node:self.skipTest('node unavailable')
+        import tempfile
+        harness=NODE.split('(async()=>{',1)[0]
+        scenario=r'''
+(async()=>{
+ const tick=()=>new Promise(r=>setImmediate(r));await tick();
+ let abortTimer,cleared=0,calls=0;
+ context.setTimeout=(fn,ms)=>{assert(ms===15000);abortTimer=fn;return 7;};
+ context.clearTimeout=id=>{assert(id===7);cleared++;};
+ run("key='a'.repeat(64);sessionReady=true");
+ const stalled=(url,options)=>{calls++;return new Promise((resolve,reject)=>options.signal.addEventListener('abort',()=>reject(new Error('aborted')),{once:true}));};
+ context.fetch=stalled;
+ let waiting=run('poll()');assert(run('polling'));abortTimer();await waiting;
+ assert(!run('polling')&&cleared===1&&calls===1);assert(elements['status-message'].textContent.includes('15 секунд'));
+ // A response can also hang after headers: the deadline must cover its JSON body.
+ context.fetch=async(url,options)=>({ok:true,status:200,json:()=>new Promise((resolve,reject)=>options.signal.addEventListener('abort',()=>reject(new Error('body aborted')),{once:true}))});
+ waiting=run('poll()');await tick();abortTimer();await waiting;assert(!run('polling')&&cleared===2);
+ context.fetch=async()=>({ok:true,status:200,json:async()=>structuredClone(stopped)});
+ await run('poll()');assert(run('lastData.revision')===stopped.revision&&cleared===3,'polling must recover without reload');
+ // Timing out the POST means acceptance is unknown. Never re-submit or announce success.
+ context.fetch=stalled;calls=0;context.target={version:'0.18.3',clientVersion:'0.8.0',revision:'c'.repeat(40)};run('updateInfo=target');
+ waiting=run("command({action:'update'})");abortTimer();await waiting;
+ assert(calls===1&&run('updateWatch.uncertain')&&!run('updateWatch.finished'));
+ assert(elements['panel-shell'].inert&&!elements['update-reload'].hidden&&elements['update-close'].hidden);
+ console.log('Header/body deadlines, polling recovery, and no repeated update POST: PASS');
+})().catch(error=>{console.error(error);process.exit(1);});
+'''
+        with tempfile.TemporaryDirectory() as folder:
+            script=Path(folder)/'timeouts.js';script.write_text(harness+scenario)
             result=subprocess.run([node,str(script),str(ROOT/'web/index.html'),str(ROOT/'web/app.js')],capture_output=True,text=True,timeout=10)
             self.assertEqual(result.returncode,0,result.stdout+result.stderr)
 
