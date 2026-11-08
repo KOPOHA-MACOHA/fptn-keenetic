@@ -27,7 +27,7 @@ jobs:
       - name: Prepare PHP and lighttpd integration tests
         run: |
           sudo apt-get update -qq
-          sudo apt-get install -y -qq php-cgi lighttpd libboost-dev iproute2 iptables
+          sudo apt-get install -y -qq php-cgi lighttpd libboost-dev libspdlog-dev libfmt-dev iproute2 iptables
           php-cgi -n -v
       - name: Verify the complete runtime suite once, including required isolated kernel checks
         run: |

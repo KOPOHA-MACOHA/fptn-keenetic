@@ -10,6 +10,13 @@ def replace(text, old, new, count=1):
     return text.replace(old, new)
 
 
+def compact_client_logger(text):
+    # This header is shared with server code. Keep its original queue there.
+    return replace(text, '    constexpr std::size_t kLogQueueSize = 32768;',
+        '    // Router client: bound eager async-message storage; keep async logging and overflow policy.\n'
+        '    const std::size_t kLogQueueSize = app_name == "fptn-client-cli" ? 1024 : 32768;')
+
+
 def prepare(root, header):
     cli = root/'src/fptn-client/fptn-client-cli.cpp'
     text = cli.read_text()
@@ -48,6 +55,8 @@ def prepare(root, header):
             '        results, boost::asio::redirect_error(boost::asio::use_awaitable, ec));',
             f'co_await fptn::keenetic::AsyncConnect(boost::beast::get_lowest_layer({layer}), results, ec);')
         path.write_text(text)
+    logger = root/'src/common/logger/logger.h'
+    logger.write_text(compact_client_logger(logger.read_text()))
     (root/'src/common/network/keenetic-transport.h').write_text(header.read_text())
 
 
