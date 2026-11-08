@@ -15,7 +15,7 @@ class WebPortTest(unittest.TestCase):
   init=self.root/'etc/init.d/S80lighttpd';init.parent.mkdir(parents=True)
   init.write_text('#!/bin/sh\nprintf "restart\\n" >> "$FPTN_PREFIX/restarts"\nexit 1\n');init.chmod(0o700)
   mock='''#!/usr/bin/env python3
-import os,sys,json,pathlib
+import os,sys,json,pathlib,fcntl
 r=pathlib.Path(os.environ['FPTN_PREFIX']);cmd=pathlib.Path(sys.argv[0]).name
 if cmd=='id':print(0)
 elif cmd=='netstat':
@@ -24,7 +24,10 @@ elif cmd=='netstat':
 elif cmd=='lighttpd':
  if (r/'bad-config').exists():sys.exit(1)
 elif cmd=='date':
- p=r/'clock';n=int(p.read_text()) if p.exists() else 1000;p.write_text(str(n+(200 if (r/'fast-clock').exists() else 0)));print(n)
+ # apply and confirm call date concurrently; serialize the fixture clock.
+ with (r/'clock.lock').open('a') as guard:
+  fcntl.flock(guard,fcntl.LOCK_EX)
+  p=r/'clock';n=int(p.read_text()) if p.exists() else 1000;p.write_text(str(n+(200 if (r/'fast-clock').exists() else 0)));print(n)
 elif cmd=='curl':
  if (r/'http-down').exists() and ':2222/' in ' '.join(sys.argv):sys.exit(7)
  print(json.dumps({'uiVersion':'0.18.3','configured':True}))
