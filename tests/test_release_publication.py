@@ -398,20 +398,22 @@ class BoundaryTest(unittest.TestCase):
             with self.assertRaises(RuntimeError) as raised:api.get(path,missing=True)
             self.assertNotIn(api.token,str(raised.exception))
         with self.assertRaises(RuntimeError):pub.NoApiRedirect().redirect_request(None,None,302,'',{},'https://another.example/')
-        with self.assertRaises(RuntimeError):pub.HttpsAssetRedirect().redirect_request(None,None,302,'',{},'http://example.invalid/')
 
-    def test_public_metadata_download_has_no_api_authorization(self):
-        import io
-        from unittest.mock import MagicMock
+    def test_metadata_download_uses_immutable_asset_id_and_keeps_token_out_of_command(self):
         data=b'checked metadata';name='SHA256SUMS';tag='runtime-'+'a'*40
-        release={'tag_name':tag,'assets':[{'name':name,'digest':'sha256:'+pub.checksum(data),'size':len(data),
-            'browser_download_url':f'https://github.com/{pub.REPOSITORY}/releases/download/{tag}/{name}'}]}
-        opener=MagicMock();opener.open.return_value=io.BytesIO(data)
-        with patch.object(pub.urllib.request,'build_opener',return_value=opener):
+        release={'tag_name':tag,'assets':[{'id':42,'name':name,'digest':'sha256:'+pub.checksum(data),'size':len(data)}]}
+        response=subprocess.CompletedProcess([],0,stdout=data,stderr=b'')
+        with patch.object(pub.subprocess,'run',return_value=response) as execute:
             self.assertEqual(pub.GitHub('private-api-token').download(release,name),data)
-        request=opener.open.call_args.args[0]
-        self.assertIsNone(request.get_header('Authorization'))
-        self.assertNotIn('private-api-token',str(request.header_items()))
+        command=execute.call_args.args[0]
+        self.assertEqual(command[-1],f'repos/{pub.REPOSITORY}/releases/assets/42')
+        self.assertNotIn('private-api-token',str(command))
+        self.assertEqual(execute.call_args.kwargs['env']['GH_TOKEN'],'private-api-token')
+        # Error logs retain the HTTP code but never CLI stderr/signed URLs/token.
+        failed=subprocess.CompletedProcess([],1,stdout=b'',stderr=b'HTTP 403 private-api-token signed-url')
+        with patch.object(pub.subprocess,'run',return_value=failed):
+            with self.assertRaises(RuntimeError) as raised:pub.GitHub('private-api-token').download(release,name)
+            self.assertIn('HTTP 403',str(raised.exception));self.assertNotIn('private-api-token',str(raised.exception))
 
     def test_reusable_publication_is_opt_in_and_pr_checker_does_not_enable_it(self):
         import yaml

@@ -57,12 +57,6 @@ class NoApiRedirect(urllib.request.HTTPRedirectHandler):
         raise RuntimeError('Unexpected redirect from the GitHub API')
 
 
-class HttpsAssetRedirect(urllib.request.HTTPRedirectHandler):
-    def redirect_request(self, request, fp, code, message, headers, url):
-        if urllib.parse.urlsplit(url).scheme != 'https':
-            raise RuntimeError('Non-HTTPS release redirect refused')
-        return super().redirect_request(request, fp, code, message, headers, url)
-
 
 class GitHub:
     def __init__(self, token):
@@ -91,6 +85,8 @@ class GitHub:
             if missing and error.code == 404:
                 return None
             raise RuntimeError(f'GitHub {method} {path.split("?")[0]}: HTTP {error.code}') from None
+        except urllib.error.URLError:
+            raise RuntimeError(f'GitHub {method} {path.split("?")[0]}: API network request failed') from None
 
     def get(self, path, missing=False):
         return self.request('GET', path, missing=missing)
@@ -114,14 +110,22 @@ class GitHub:
         asset = self.asset(release, name)
         if asset['size'] > 65536:
             raise ValueError('Publication metadata is too large')
-        expected = f'https://github.com/{REPOSITORY}/releases/download/{release["tag_name"]}/{name}'
-        if asset.get('browser_download_url') != expected:
-            raise ValueError('Unexpected metadata download URL')
-        # Public release URLs need no Authorization header; signed CDN redirects
-        # must never receive our API token.
-        request = urllib.request.Request(expected, headers={'User-Agent': 'fptn-keenetic-publication'})
-        with urllib.request.build_opener(HttpsAssetRedirect()).open(request, timeout=30) as response:
-            data = response.read(65537)
+        if type(asset.get('id')) is not int or asset['id'] < 1:
+            raise ValueError('Invalid release asset ID')
+        # Bind the immutable asset ID, not a possibly cached public download URL.
+        # gh handles authenticated API requests and strips auth on CDN redirects.
+        command = ['gh', 'api', '--hostname', 'github.com', '--method', 'GET', '-H', 'Accept: application/octet-stream',
+                   f'repos/{REPOSITORY}/releases/assets/{asset["id"]}']
+        try:
+            response = subprocess.run(command, capture_output=True, timeout=45,
+                                      env={**os.environ, 'GH_TOKEN': self.token})
+        except subprocess.TimeoutExpired:
+            raise RuntimeError('GitHub metadata download timed out: ' + name) from None
+        if response.returncode:
+            status = re.search(rb'HTTP (\d{3})', response.stderr)
+            suffix = 'HTTP ' + status[1].decode() if status else 'gh exit ' + str(response.returncode)
+            raise RuntimeError('GitHub metadata download failed: ' + name + ' (' + suffix + ')')
+        data = response.stdout
         if len(data) != asset['size'] or checksum(data) != asset['digest'][7:]:
             raise ValueError('Release metadata checksum mismatch: ' + name)
         return data
