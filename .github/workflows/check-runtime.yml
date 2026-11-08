@@ -10,6 +10,11 @@ on:
         description: Exact candidate commit created by the upstream checker
         required: true
         type: string
+      publish-runtime:
+        description: Publish the exact validated main revision for the release orchestrator
+        required: false
+        type: boolean
+        default: false
 permissions:
   contents: read
 concurrency:
@@ -17,6 +22,7 @@ concurrency:
   cancel-in-progress: true
 jobs:
   test:
+    name: runtime-test-${{ inputs.source-ref || github.sha }}
     runs-on: ubuntu-24.04
     timeout-minutes: 10
     steps:
@@ -24,10 +30,23 @@ jobs:
         with:
           ref: ${{ inputs.source-ref || github.sha }}
           persist-credentials: false
+          fetch-depth: 0
+      - name: Verify the requested revision and main ancestry before publication
+        env:
+          RUNTIME_SHA: ${{ inputs.source-ref || github.sha }}
+          PUBLISH_RUNTIME: ${{ inputs.publish-runtime || false }}
+        run: |
+          python3 - <<'PYREF'
+          import os,re,subprocess
+          ref=os.environ['RUNTIME_SHA']
+          if not re.fullmatch('[0-9a-f]{40}',ref):raise SystemExit('Expected an exact runtime SHA')
+          if os.environ['PUBLISH_RUNTIME']=='true':
+            subprocess.run(['git','merge-base','--is-ancestor',ref,'origin/main'],check=True)
+          PYREF
       - name: Prepare PHP and lighttpd integration tests
         run: |
           sudo apt-get update -qq
-          sudo apt-get install -y -qq php-cgi lighttpd libboost-dev libspdlog-dev libfmt-dev iproute2 iptables
+          sudo apt-get install -y -qq php-cgi lighttpd libboost-dev libspdlog-dev libfmt-dev python3-yaml iproute2 iptables
           php-cgi -n -v
       - name: Verify the complete runtime suite once, including required isolated kernel checks
         run: |
@@ -36,8 +55,12 @@ jobs:
           sudo --preserve-env=PATH env FPTN_REQUIRE_NETNS=1 python3 -m unittest discover -s tests -v
 
   package:
+    name: runtime-package-${{ inputs.source-ref || github.sha }}
     needs: test
-    if: inputs.source-ref == '' && github.event_name == 'push' && github.ref == 'refs/heads/main'
+    if: >-
+      github.repository == 'KOPOHA-MACOHA/fptn-keenetic' && github.ref == 'refs/heads/main' &&
+      ((inputs.source-ref == '' && github.event_name == 'push') ||
+       (inputs.publish-runtime && (github.event_name == 'workflow_run' || github.event_name == 'workflow_dispatch')))
     runs-on: ubuntu-24.04
     timeout-minutes: 5
     permissions:
@@ -45,6 +68,7 @@ jobs:
     env:
       GH_TOKEN: ${{ github.token }}
       GH_REPO: ${{ github.repository }}
+      RUNTIME_SHA: ${{ inputs.source-ref || github.sha }}
     steps:
       - uses: actions/checkout@v4
         with:
@@ -72,24 +96,27 @@ jobs:
             for asset in brotli LICENSE-BROTLI BROTLI-SOURCE.txt; do
               gh release download "$decoder" --pattern "$asset" --dir "$stage/decoder"
             done
-            python3 scripts/package-runtime.py . "$stage/client" "$stage/decoder" "$stage/output" "$GITHUB_SHA" "$platform"
+            python3 scripts/package-runtime.py . "$stage/client" "$stage/decoder" "$stage/output" "$RUNTIME_SHA" "$platform"
             cat "$stage/output/SHA256SUMS" >> output/SHA256SUMS
             mv "$stage/output/"*.tar.gz output/
           done
+      - name: Bind package digests to this exact validation run
+        run: python3 scripts/release-publication.py evidence --directory output --runtime "$RUNTIME_SHA"
       - uses: actions/upload-artifact@v4
         with:
           name: fptn-keenetic-install
           path: |
             output/*.tar.gz
             output/SHA256SUMS
+            output/runtime-evidence.json
           if-no-files-found: error
       - name: Publish the tested complete runtime package
         run: |
           set -eu
-          tag="runtime-$GITHUB_SHA"
+          tag="runtime-$RUNTIME_SHA"
           if ! gh release view "$tag" >/dev/null 2>&1; then
-            gh release create "$tag" --target "$GITHUB_SHA" --prerelease \
-              --title "FPTN Keenetic runtime ${GITHUB_SHA:0:7}" \
+            gh release create "$tag" --target "$RUNTIME_SHA" --prerelease \
+              --title "FPTN Keenetic runtime ${RUNTIME_SHA:0:7}" \
               --notes 'Complete install/update packages for registered Entware architectures. Exact client/decoder and source metadata, panel and service are included. Runtime tests passed in Actions; foreign-architecture CLI/probes are tested under QEMU, not live ARM hardware. Run sh install.sh install inside the extracted folder. Routes and DNS stay in Keenetic; optional IPv6 NAT66 is off by default.'
           fi
-          gh release upload "$tag" output/*.tar.gz output/SHA256SUMS --clobber
+          gh release upload "$tag" output/*.tar.gz output/SHA256SUMS output/runtime-evidence.json --clobber

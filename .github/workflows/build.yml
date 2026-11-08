@@ -16,6 +16,9 @@ on:
       - 'scripts/fptn-client-capabilities.sh'
       - 'scripts/fptn-client-identity.sh'
       - 'scripts/package-client-release.py'
+      - 'scripts/release-publication.py'
+      - 'tests/test_release_publication.py'
+      - '.github/workflows/release-publication.yml'
       - 'client-release.json'
       - 'runtime-assets.json'
       - 'install.sh'
@@ -82,7 +85,7 @@ jobs:
       - name: Prepare PHP auth tests
         run: |
           sudo apt-get update -qq
-          sudo apt-get install -y -qq php-cgi lighttpd libboost-dev libspdlog-dev libfmt-dev
+          sudo apt-get install -y -qq php-cgi lighttpd libboost-dev libspdlog-dev libfmt-dev python3-yaml
       - name: Check Python and workflow configuration
         run: |
           python3 -m compileall -q scripts
