@@ -9,8 +9,8 @@ import tarfile
 
 MARKER = '# END DEPENDENCY IMAGE INPUTS'
 INPUTS = ('sources.lock.json', 'profiles/mipsel-softfloat', 'scripts/prepare-source.py',
-          'scripts/fix-static-libgcc.py', 'scripts/verify-elf.py', 'scripts/dependency-lock.py',
-          *('build-locks/'+name for name in ('conan.lock','graph.json','metadata.json','python.txt','apt.txt','build-profile','ubuntu.sources')))
+          'scripts/fix-static-libgcc.py', 'scripts/verify-elf.py', 'scripts/dependency-lock.py', 'scripts/install-locked-dependencies.sh', 'scripts/seed-conan-cache.py',
+          *('build-locks/'+name for name in ('conan.lock','graph.json','metadata.json','python.txt','apt.txt','build-profile','ubuntu.sources','shared-build-cache.json')))
 
 
 def cache_key(root):

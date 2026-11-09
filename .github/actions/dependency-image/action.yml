@@ -44,12 +44,21 @@ runs:
         GH_TOKEN: ${{ github.token }}
         GH_REPO: ${{ github.repository }}
       run: python3 scripts/arm-dependency-release.py restore mipsel-mips32r2-softfloat '${{ steps.key.outputs.key }}' "$RUNNER_TEMP/fptn-dependency-cache/dependencies.tar"
+    - id: seed
+      if: steps.restore.outputs.cache-hit != 'true' && steps.release-dependencies.outputs.restored != 'true'
+      shell: bash
+      env:
+        GH_TOKEN: ${{ github.token }}
+        GH_REPO: ${{ github.repository }}
+      run: python3 scripts/seed-conan-cache.py "$RUNNER_TEMP/conan-seed/dependencies.tar"
     - if: steps.restore.outputs.cache-hit != 'true' && steps.release-dependencies.outputs.restored != 'true'
       name: Prepare dependency snapshot (only on input-key change or missing cache)
       uses: docker/build-push-action@v6
       with:
         context: .
         target: dependency-image
+        build-args: CONAN_SEED_IMAGE=${{ steps.seed.outputs.context != '' && 'shared-conan-seed' || 'empty-conan-seed' }}
+        build-contexts: ${{ steps.seed.outputs.context != '' && format('shared-conan-seed={0}', steps.seed.outputs.context) || '' }}
         provenance: false
         sbom: false
         outputs: type=oci,dest=${{ runner.temp }}/fptn-dependency-cache/dependencies.tar

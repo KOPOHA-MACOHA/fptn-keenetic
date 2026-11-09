@@ -1,6 +1,7 @@
 # syntax=docker/dockerfile:1@sha256:4edf897a3ffa55b89f906fc8cc78afdb3f1834cc9c7083565e611a8a7d5fe99e
 # SDK supplies a modern compiler only. No OpenWrt package is installed on Keenetic.
 ARG DEPENDENCIES_IMAGE=dependencies
+ARG CONAN_SEED_IMAGE=empty-conan-seed
 FROM --platform=linux/amd64 openwrt/sdk:ramips-mt7621-24.10.7@sha256:80fac8772ff0c536ba8a1b59497acd038daa744b7e3a628508b447a50145308c AS sdk
 FROM --platform=linux/amd64 ubuntu:24.04@sha256:68ee22004a9109b44973313b02ff7b1de250f1de0f5ecb628d73f579aaff33ac AS toolchain
 # The minimal Ubuntu base has no CA bundle; bootstrap HTTPS from the pinned SDK.
@@ -47,7 +48,13 @@ RUN mkdir /out && \
 FROM scratch AS probe-export
 COPY --from=probe /out/ /
 
+FROM scratch AS empty-conan-seed
+COPY build-locks/build-profile /root/.conan2/profiles/default
+FROM ${CONAN_SEED_IMAGE} AS conan-seed
+
 FROM toolchain AS dependencies
+COPY --from=conan-seed /root/.conan2 /root/.conan2
+COPY scripts/install-locked-dependencies.sh /work/install-locked-dependencies.sh
 COPY scripts/prepare-source.py /work/prepare-source.py
 RUN --mount=type=secret,id=proxy_ca \
     if [ -f /run/secrets/proxy_ca ]; then export GIT_SSL_CAINFO=/run/secrets/proxy_ca; fi; \
@@ -68,9 +75,7 @@ RUN --mount=type=secret,id=proxy_ca \
              CURL_CA_BUNDLE=/run/secrets/proxy_ca GIT_SSL_CAINFO=/run/secrets/proxy_ca \
              CMAKE_TLS_CAINFO=/run/secrets/proxy_ca; \
     fi; \
-    conan install . --output-folder=/build --build=missing --lockfile=/work/build-locks/conan.lock \
-      --profile:build=default --profile:host=/work/profile -s:b compiler.cppstd=20 \
-      -o with_gui_client=False -o openwrt=True && \
+    bash /work/install-locked-dependencies.sh && \
     python /work/dependency-lock.py graph /work/build-locks
 
 # Strip disposable Conan builds/sources before flattening. Packages and /build stay.
@@ -89,6 +94,7 @@ WORKDIR /work/upstream
 
 # CI overrides this FROM with an integrity-checked OCI snapshot, not a cache hint.
 FROM ${DEPENDENCIES_IMAGE} AS client
+# Restored OCI snapshots skip dependencies above; verify their locks here too.
 COPY build-locks /work/build-locks
 COPY scripts/dependency-lock.py /work/dependency-lock.py
 RUN python /work/dependency-lock.py check /work/build-locks

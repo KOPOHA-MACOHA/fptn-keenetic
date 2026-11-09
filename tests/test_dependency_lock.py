@@ -113,7 +113,8 @@ class DependencyLockTest(unittest.TestCase):
         self.assertNotIn('conan>=',docker)
         self.assertIn('COPY --from=sdk /etc/ssl/certs/ca-certificates.crt', docker)
         self.assertIn('https://snapshot.ubuntu.com/ubuntu/20261030T000000Z/', (self.lock/'ubuntu.sources').read_text())
-        self.assertIn('--lockfile=/work/build-locks/conan.lock',docker)
+        self.assertIn('install-locked-dependencies.sh', docker)
+        self.assertIn('--lockfile=/work/build-locks/conan.lock',(ROOT/'scripts/install-locked-dependencies.sh').read_text())
         self.assertNotIn('--lockfile-partial',docker)
         client = docker.split('FROM ${DEPENDENCIES_IMAGE} AS client')[1]
         self.assertLess(client.index('dependency-lock.py check'),client.index('prepare-connect-test.py'))
