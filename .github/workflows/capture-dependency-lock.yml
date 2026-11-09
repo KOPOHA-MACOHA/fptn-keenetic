@@ -1,8 +1,5 @@
 name: Capture existing dependency locks
 on:
-  push:
-    branches: [main]
-    paths: ['.github/workflows/capture-dependency-lock.yml', 'scripts/capture-dependency-lock.sh']
   workflow_dispatch:
 permissions:
   contents: read
@@ -32,11 +29,16 @@ jobs:
           fi
           mkdir -p "$RUNNER_TEMP/lock-deps"
       - if: matrix.platform == 'mipsel-mips32r2-softfloat'
+        id: restore
         uses: actions/cache/restore@v4
         with:
           path: ${{ runner.temp }}/lock-deps/dependencies.tar
           key: fptn-deps-oci-v1-${{ steps.inputs.outputs.key }}
-          fail-on-cache-miss: true
+          fail-on-cache-miss: false
+      - if: matrix.platform == 'mipsel-mips32r2-softfloat' && steps.restore.outputs.cache-hit != 'true'
+        run: |
+          python3 scripts/arm-dependency-release.py restore mipsel-mips32r2-softfloat '${{ steps.inputs.outputs.key }}' "$RUNNER_TEMP/lock-deps/dependencies.tar"
+          test -s "$RUNNER_TEMP/lock-deps/dependencies.tar"
       - if: matrix.platform != 'mipsel-mips32r2-softfloat'
         run: |
           python3 scripts/arm-dependency-release.py restore '${{ matrix.platform }}' '${{ steps.inputs.outputs.key }}' "$RUNNER_TEMP/lock-deps/dependencies.tar"
@@ -78,6 +80,7 @@ jobs:
       - uses: actions/download-artifact@v4
         with:
           path: evidence
+          pattern: dependency-lock-*
       - run: |
           set -euo pipefail
           cd evidence

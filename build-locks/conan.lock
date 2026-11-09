@@ -1,0 +1,40 @@
+{
+  "version": "0.5",
+  "requires": [
+    "zlib/1.3.2#1cb806da49011867778ffb6ac7190fcb",
+    "yaff/0.0.0@local/local#209a0675d0b3ce0329c50dce955cfba7",
+    "spdlog/1.17.0#bcbaaf7147bda6ad24ffbd1ac3d7142c",
+    "re2/20251105#8579cfd0bda4daf0683f9e3898f964b4",
+    "protobuf/5.29.3#2106fa74a66b9c0166a38dd01c74c88e",
+    "prometheus-cpp/1.3.0#bc7a2580b50b71325073289320205af0",
+    "openssl/boringssl@local/local#b7961a38963af0fe4d6f3802fb846064",
+    "nlohmann_json/3.12.0#2d634ab0ec8d9f56353e5ccef6d6612c",
+    "libidn2/2.3.8#d78162d7bbd03feebe541d1b7c9bd9fd",
+    "libiconv/1.17#9923bc6dc6f106646d6967e0039a5ada",
+    "jwt-cpp/0.7.2#26a8a59c0954e76d5c8224470132da7f",
+    "gtest/1.18.0#e2507fc4efe2ec9e2db9e5c91eefab9f",
+    "fmt/12.1.0#6baf0fb8351783472b94ee6e36232391",
+    "cpp-httplib/0.46.1#77e6a5fa85144d85498114192addaafc",
+    "civetweb/1.16#f4a42c8aa0bc0fe4bbe2a2270af0cea2",
+    "bzip2/1.0.8#c470882369c2d95c5c77e970c0c7e321",
+    "brotli/1.2.0#18763c68c2f5c1511cacfb59e95515d6",
+    "boost/1.90.0#c53082fe7f85e9c7f7d23ffcbbfc5c53",
+    "argparse/3.2#e3bf8d3aa1eb0d23c48ec61b60e0a029",
+    "abseil/20250127.0#e0dcc4b8a367edb49b062cb07ed8e9e6"
+  ],
+  "build_requires": [
+    "zlib/1.3.2#1cb806da49011867778ffb6ac7190fcb",
+    "yaff/0.0.0@local/local#209a0675d0b3ce0329c50dce955cfba7",
+    "protobuf/5.29.3#2106fa74a66b9c0166a38dd01c74c88e",
+    "cmake/4.4.4#fec9c7048fae91e03c31e59977cd9c12",
+    "b2/5.6.1#41ae5699a0588de1202afe5b675cc86d",
+    "abseil/20250127.0#e0dcc4b8a367edb49b062cb07ed8e9e6"
+  ],
+  "python_requires": [],
+  "overrides": {
+    "openssl/[>=1.1 <4]": [
+      "openssl/boringssl@local/local"
+    ]
+  },
+  "config_requires": []
+}

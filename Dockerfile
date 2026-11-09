@@ -4,20 +4,20 @@ ARG DEPENDENCIES_IMAGE=dependencies
 FROM --platform=linux/amd64 openwrt/sdk:ramips-mt7621-24.10.7@sha256:80fac8772ff0c536ba8a1b59497acd038daa744b7e3a628508b447a50145308c AS sdk
 FROM --platform=linux/amd64 ubuntu:24.04@sha256:68ee22004a9109b44973313b02ff7b1de250f1de0f5ecb628d73f579aaff33ac AS toolchain
 ENV DEBIAN_FRONTEND=noninteractive
+COPY build-locks /work/build-locks
+COPY scripts/dependency-lock.py /work/dependency-lock.py
 RUN --mount=type=secret,id=proxy_ca \
     if [ -f /run/secrets/proxy_ca ]; then \
       export CURL_CA_BUNDLE=/run/secrets/proxy_ca SSL_CERT_FILE=/run/secrets/proxy_ca; \
     fi; \
     apt-get -o Acquire::https::CaInfo="${SSL_CERT_FILE:-/etc/ssl/certs/ca-certificates.crt}" update && \
     apt-get -o Acquire::https::CaInfo="${SSL_CERT_FILE:-/etc/ssl/certs/ca-certificates.crt}" install -y --no-install-recommends \
-      build-essential git ca-certificates curl wget file binutils perl \
-      autoconf automake libtool pkg-config python3-pip python3-venv \
-      ninja-build bison flex gettext golang-go unzip zip qemu-user && \
+      $(cat /work/build-locks/apt.txt) && \
     rm -rf /var/lib/apt/lists/*
 RUN --mount=type=secret,id=proxy_ca \
     if [ -f /run/secrets/proxy_ca ]; then export PIP_CERT=/run/secrets/proxy_ca; fi; \
     python3 -m venv /tools && \
-    /tools/bin/pip install --no-cache-dir 'conan>=2.20,<3' 'cmake==3.31.6' ninja
+    /tools/bin/pip install --no-cache-dir --require-hashes --no-build-isolation -r /work/build-locks/python.txt
 COPY --from=sdk /builder/staging_dir/toolchain-mipsel_24kc_gcc-13.3.0_musl /builder/staging_dir/toolchain-mipsel_24kc_gcc-13.3.0_musl
 COPY --from=sdk /builder/staging_dir/host /builder/staging_dir/host
 COPY --from=sdk /builder/scripts /builder/scripts
@@ -55,7 +55,9 @@ RUN --mount=type=secret,id=proxy_ca \
     git -C /work/upstream checkout --detach FETCH_HEAD && \
     test "$(git -C /work/upstream rev-parse HEAD)" = "$revision" && \
     python /work/prepare-source.py /work/upstream /work/sources.lock.json
-RUN conan profile detect --force
+COPY build-locks/build-profile /root/.conan2/profiles/default
+RUN python /work/dependency-lock.py sources /work/build-locks && \
+    python /work/dependency-lock.py tools /work/build-locks
 WORKDIR /work/upstream
 RUN --mount=type=secret,id=proxy_ca \
     if [ -f /run/secrets/proxy_ca ]; then \
@@ -63,9 +65,10 @@ RUN --mount=type=secret,id=proxy_ca \
              CURL_CA_BUNDLE=/run/secrets/proxy_ca GIT_SSL_CAINFO=/run/secrets/proxy_ca \
              CMAKE_TLS_CAINFO=/run/secrets/proxy_ca; \
     fi; \
-    conan install . --output-folder=/build --build=missing \
+    conan install . --output-folder=/build --build=missing --lockfile=/work/build-locks/conan.lock \
       --profile:build=default --profile:host=/work/profile -s:b compiler.cppstd=20 \
-      -o with_gui_client=False -o openwrt=True
+      -o with_gui_client=False -o openwrt=True && \
+    python /work/dependency-lock.py graph /work/build-locks
 
 # Strip disposable Conan builds/sources before flattening. Packages and /build stay.
 FROM dependencies AS dependency-clean
@@ -83,6 +86,9 @@ WORKDIR /work/upstream
 
 # CI overrides this FROM with an integrity-checked OCI snapshot, not a cache hint.
 FROM ${DEPENDENCIES_IMAGE} AS client
+COPY build-locks /work/build-locks
+COPY scripts/dependency-lock.py /work/dependency-lock.py
+RUN python /work/dependency-lock.py check /work/build-locks
 COPY scripts/check-cross-includes.py /work/check-cross-includes.py
 COPY scripts/prepare-connect-test.py /work/prepare-connect-test.py
 COPY scripts/run-connect-test.sh /work/run-connect-test.sh

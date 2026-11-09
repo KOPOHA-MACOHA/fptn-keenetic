@@ -11,6 +11,8 @@ concurrency:
   cancel-in-progress: false
 jobs:
   prepare:
+    permissions:
+      contents: write
     if: github.event_name == 'workflow_dispatch' || ((github.event.workflow_run.conclusion == 'success' || github.event.workflow_run.conclusion == 'failure') && github.event.workflow_run.head_branch == 'main' && github.event.workflow_run.event == 'push')
     runs-on: ubuntu-24.04
     timeout-minutes: 120
@@ -25,6 +27,8 @@ jobs:
       - uses: docker/setup-buildx-action@v3
       - name: Prepare reusable dependency snapshot
         uses: ./.github/actions/dependency-image
+        with:
+          publish: 'true'
   verify-fresh-runner:
     needs: prepare
     runs-on: ubuntu-24.04

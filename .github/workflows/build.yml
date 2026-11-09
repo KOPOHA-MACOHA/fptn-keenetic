@@ -151,6 +151,8 @@ jobs:
       - name: Restore prepared dependency image
         id: dependencies-image
         uses: ./.github/actions/dependency-image
+        with:
+          publish: 'true'
       - name: Cross-build FPTN CLI
         uses: docker/build-push-action@v6
         with:

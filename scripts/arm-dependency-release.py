@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Persistent, input-keyed ARM OCI snapshots; only used on GitHub Actions runners."""
+"""Persistent, input-keyed dependency OCI snapshots; only used on GitHub Actions runners."""
 import argparse
 import hashlib
 import json
@@ -58,7 +58,7 @@ def metadata(path, platform, key):
 def main():
     p = argparse.ArgumentParser(description=__doc__)
     p.add_argument('action', choices=['restore', 'publish'])
-    p.add_argument('platform', choices=['aarch64', 'armv7-softfloat'])
+    p.add_argument('platform', choices=['mipsel-mips32r2-softfloat', 'aarch64', 'armv7-softfloat'])
     p.add_argument('key')
     p.add_argument('archive', type=Path)
     a = p.parse_args()
@@ -108,7 +108,7 @@ def main():
             gh('release', 'create', tag, str(a.archive)+'#dependencies.tar',
                str(stage/'metadata.json')+'#metadata.json', '--repo', repo,
                '--target', revision, '--prerelease', '--latest=false',
-               '--title', f'ARM build dependencies: {a.platform} ({a.key[:12]})',
+               '--title', f'Build dependencies: {a.platform} ({a.key[:12]})',
                '--notes', 'Build-time OCI snapshot, keyed by SDK, ABI and dependency inputs. '
                'Not a router installation package. Retained independently of the Actions cache.')
             print(f'Published immutable dependency snapshot: {tag}')

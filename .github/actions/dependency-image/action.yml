@@ -1,6 +1,9 @@
 name: Restore prepared dependency image
 description: Reuse a complete immutable OCI snapshot instead of rerunning Conan.
 inputs:
+  publish:
+    description: Preserve the verified snapshot in Releases (requires contents write).
+    default: 'false'
   require-hit:
     description: Fail rather than rebuilding when verifying cross-job reuse.
     default: 'false'
@@ -34,7 +37,14 @@ runs:
       run: |
         echo 'Expected a dependency image cache hit; refusing to compile dependencies.' >&2
         exit 1
-    - if: steps.restore.outputs.cache-hit != 'true'
+    - id: release-dependencies
+      if: steps.restore.outputs.cache-hit != 'true' && inputs.require-hit != 'true'
+      shell: bash
+      env:
+        GH_TOKEN: ${{ github.token }}
+        GH_REPO: ${{ github.repository }}
+      run: python3 scripts/arm-dependency-release.py restore mipsel-mips32r2-softfloat '${{ steps.key.outputs.key }}' "$RUNNER_TEMP/fptn-dependency-cache/dependencies.tar"
+    - if: steps.restore.outputs.cache-hit != 'true' && steps.release-dependencies.outputs.restored != 'true'
       name: Prepare dependency snapshot (only on input-key change or missing cache)
       uses: docker/build-push-action@v6
       with:
@@ -62,3 +72,10 @@ runs:
           "$RUNNER_TEMP/fptn-dependency-layout")
         echo "context=$context" >> "$GITHUB_OUTPUT"
         echo 'Prepared dependency image verified; Conan installation will not run in the client build.'
+    - name: Preserve the verified MIPS image outside the disposable Actions cache
+      if: inputs.publish == 'true' && github.repository == 'KOPOHA-MACOHA/fptn-keenetic' && github.ref == 'refs/heads/main' && github.event_name != 'pull_request'
+      shell: bash
+      env:
+        GH_TOKEN: ${{ github.token }}
+        GH_REPO: ${{ github.repository }}
+      run: python3 scripts/arm-dependency-release.py publish mipsel-mips32r2-softfloat '${{ steps.key.outputs.key }}' "$RUNNER_TEMP/fptn-dependency-cache/dependencies.tar"

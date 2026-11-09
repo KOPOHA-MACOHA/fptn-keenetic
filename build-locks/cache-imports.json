@@ -1,0 +1,14 @@
+{
+  "aarch64": {
+    "9997eda4872791a65221b9319d619d9c36454c794dc6260390548539d4e31888": {
+      "oldKey": "30636d55083c26c9640c220ac92976db7517c69dfbd547d76997a62152f63128",
+      "imageDigest": "sha256:f4944a18adfe66e00daddefb424d7f1789a7a54198b496f779f5d3dd7d223d4f"
+    }
+  },
+  "armv7-softfloat": {
+    "e0ef406d0f0859cda13d2f68e80e6b410670aaf9d7ebe21a49cb321f0c6dc24c": {
+      "oldKey": "9f81812fb4b6a3a0560cb6e3b70f10e228381819d3b47ff8c0ea942b35602c7a",
+      "imageDigest": "sha256:23faabb104b7f49e006f1d056d170bec5190bbcaa579ced58ddf34f299cf1252"
+    }
+  }
+}

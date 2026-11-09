@@ -14,6 +14,8 @@ on:
       - 'scripts/fix-platform-libgcc.py'
       - 'scripts/verify-platform-elf.py'
       - 'scripts/platform-dependency-key.py'
+      - 'build-locks/**'
+      - 'scripts/dependency-lock.py'
       - '.github/workflows/build-platforms.yml'
   workflow_dispatch:
 permissions:
@@ -64,8 +66,12 @@ jobs:
         id: release-dependencies
         if: steps.restore.outputs.cache-hit != 'true'
         run: python3 scripts/arm-dependency-release.py restore '${{ matrix.platform }}' '${{ steps.key.outputs.key }}' "$RUNNER_TEMP/port-deps/dependencies.tar"
-      - name: Prepare dependencies only when both stores are missing
+      - name: Import an exact audited pre-lock snapshot without recompiling
+        id: import-dependencies
         if: steps.restore.outputs.cache-hit != 'true' && steps.release-dependencies.outputs.restored != 'true'
+        run: python3 scripts/import-dependency-image.py '${{ matrix.platform }}' '${{ steps.key.outputs.key }}' "$RUNNER_TEMP/port-deps/dependencies.tar"
+      - name: Prepare dependencies only when both stores are missing
+        if: steps.restore.outputs.cache-hit != 'true' && steps.release-dependencies.outputs.restored != 'true' && steps.import-dependencies.outputs.restored != 'true'
         uses: docker/build-push-action@v6
         with:
           context: .
