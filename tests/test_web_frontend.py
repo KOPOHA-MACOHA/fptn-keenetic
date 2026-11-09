@@ -220,12 +220,12 @@ context.fetch=()=>{throw Error('reload must never submit or cancel an operation'
 elements['update-reload'].dispatch('click');assert(win.location.href.startsWith('/?v='));assert(!run('updateWatch.finished'));
 run("finishUpdate(false,'reset')");elements['update-close'].dispatch('click');
 context.data={...stopped,clientVersion:'0.8.0'};run('lastData=data');
-run("beginUpdate({revision:'c'.repeat(40),version:'0.18.4',clientVersion:'0.8.0'})");
-assert(elements['update-title'].textContent==='Обновление панели до 0.18.4');
+run("beginUpdate({revision:'c'.repeat(40),version:'0.18.5',clientVersion:'0.8.0'})");
+assert(elements['update-title'].textContent==='Обновление панели до 0.18.5');
 run("finishUpdate(false,'reset')");elements['update-close'].dispatch('click');
 context.data={...stopped,clientVersion:'0.7.0'};run('lastData=data');
-run("beginUpdate({revision:'c'.repeat(40),version:'0.18.4',clientVersion:'0.8.0'})");
-assert(elements['update-title'].textContent==='Обновление клиента до 0.8.0 и панели до 0.18.4');
+run("beginUpdate({revision:'c'.repeat(40),version:'0.18.5',clientVersion:'0.8.0'})");
+assert(elements['update-title'].textContent==='Обновление клиента до 0.8.0 и панели до 0.18.5');
 console.log('Separate client/panel targets and safe reload while update runs: PASS');
 '''
         with tempfile.TemporaryDirectory() as folder:
