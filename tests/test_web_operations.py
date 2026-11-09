@@ -59,7 +59,15 @@ class WebOperationTest(unittest.TestCase):
     def test_finished_or_update_action_only_releases_lock_and_preserves_running_vpn(self):
         for action in ['save','update']:
             self.reserve(action);self.stale();self.client_run.mkdir(exist_ok=True)
-            status,data=self.request(body={'action':'recover'});self.assertEqual(status,202,data)
+            # A just-finished worker can still disappear during the conservative
+            # /proc inspection. HTTP 409 asks the caller to retry once it settles;
+            # it is not a guarantee that the first request must recover immediately.
+            deadline=time.monotonic()+3
+            while True:
+                status,data=self.request(body={'action':'recover'})
+                if status!=409 or time.monotonic()>=deadline:break
+                time.sleep(.05)
+            self.assertEqual(status,202,data)
             self.assertTrue(self.wait_worker()['ok']);self.assertTrue(self.client_run.exists())
             self.assertFalse((self.root/'trace').exists())
 

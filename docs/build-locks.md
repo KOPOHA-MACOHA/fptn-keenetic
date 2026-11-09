@@ -86,3 +86,13 @@ Conan повторяется не более трёх раз внутри одн
 совпадают lock, build-профиль и инструменты; пакеты выбирает Conan по полным ID.
 Это переиспользует общие x86_64 build-tools, не назначает ARM-пакеты целевыми MIPS.
 Отсутствие такого кеша допускает чистую сборку, повреждение — ошибка.
+
+## Проверки реализации
+
+- [Компиляция, ABI и офлайн-режимы для трёх архитектур](https://github.com/KOPOHA-MACOHA/fptn-keenetic/actions/workflows/verify-dependency-lock.yml).
+- [Восстановление снимков из Releases на свежих runners](https://github.com/KOPOHA-MACOHA/fptn-keenetic/actions/workflows/verify-persistent-locks.yml).
+- [Полный набор тестов runtime и панели](https://github.com/KOPOHA-MACOHA/fptn-keenetic/actions/workflows/check-runtime.yml).
+
+Обычные архитектурные workflow затем используют те же точные ключи готовых
+снимков и формируют артефакты для конвейера публикации. Менять версии клиента
+или панели только ради фиксации сборочной среды не требуется.

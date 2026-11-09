@@ -95,6 +95,7 @@ WORKDIR /work/upstream
 # CI overrides this FROM with an integrity-checked OCI snapshot, not a cache hint.
 FROM ${DEPENDENCIES_IMAGE} AS client
 # Restored OCI snapshots skip dependencies above; verify their locks here too.
+# This offline guard never installs or rebuilds Conan packages.
 COPY build-locks /work/build-locks
 COPY scripts/dependency-lock.py /work/dependency-lock.py
 RUN python /work/dependency-lock.py check /work/build-locks
