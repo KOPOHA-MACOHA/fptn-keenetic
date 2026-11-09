@@ -111,6 +111,8 @@ class DependencyLockTest(unittest.TestCase):
         docker = (ROOT/'Dockerfile').read_text()
         self.assertIn('--require-hashes --no-build-isolation', docker)
         self.assertNotIn('conan>=',docker)
+        self.assertIn('COPY --from=sdk /etc/ssl/certs/ca-certificates.crt', docker)
+        self.assertIn('https://snapshot.ubuntu.com/ubuntu/20261030T000000Z/', (self.lock/'ubuntu.sources').read_text())
         self.assertIn('--lockfile=/work/build-locks/conan.lock',docker)
         self.assertNotIn('--lockfile-partial',docker)
         client = docker.split('FROM ${DEPENDENCIES_IMAGE} AS client')[1]

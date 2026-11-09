@@ -3,6 +3,8 @@
 ARG DEPENDENCIES_IMAGE=dependencies
 FROM --platform=linux/amd64 openwrt/sdk:ramips-mt7621-24.10.7@sha256:80fac8772ff0c536ba8a1b59497acd038daa744b7e3a628508b447a50145308c AS sdk
 FROM --platform=linux/amd64 ubuntu:24.04@sha256:68ee22004a9109b44973313b02ff7b1de250f1de0f5ecb628d73f579aaff33ac AS toolchain
+# The minimal Ubuntu base has no CA bundle; bootstrap HTTPS from the pinned SDK.
+COPY --from=sdk /etc/ssl/certs/ca-certificates.crt /etc/ssl/certs/ca-certificates.crt
 ENV DEBIAN_FRONTEND=noninteractive
 COPY build-locks /work/build-locks
 COPY build-locks/ubuntu.sources /etc/apt/sources.list.d/ubuntu.sources
