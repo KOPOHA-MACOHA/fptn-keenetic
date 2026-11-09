@@ -69,3 +69,13 @@ class RuntimePackageTest(unittest.TestCase):
         import shutil
         shutil.rmtree(self.output/'fptn-keenetic');(self.client/'fptn-client-cli').write_bytes(b'wrong architecture')
         with self.assertRaises(ValueError):module.build(self.root,self.client,self.decoder,self.output,'a'*40,platform)
+
+    def test_rebuilding_same_revision_has_stable_archive_headers_and_bytes(self):
+        first=self.build().read_bytes()
+        other=self.base/'out-repeat';other.mkdir()
+        second=module.build(self.root,self.client,self.decoder,other,'a'*40).read_bytes()
+        self.assertEqual(first,second)
+        self.assertEqual(first[4:8],b'\0'*4)
+        import io
+        with tarfile.open(fileobj=io.BytesIO(second),mode='r:gz') as archive:
+            self.assertTrue(all(m.mtime==0 and m.uid==0 and m.gid==0 for m in archive.getmembers()))

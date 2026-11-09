@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """Bundle verified existing binaries and the exact runtime revision; no compiler."""
 import hashlib
+import gzip
 import json
 from pathlib import Path
 import re
@@ -60,8 +61,16 @@ def build(root, client, decoder, output, revision, platform=None):
     paths = sorted(p for p in directory.rglob('*') if p.is_file())
     (directory/'SHA256SUMS').write_text(''.join(digest(p)+'  '+p.relative_to(directory).as_posix()+'\n' for p in paths))
     archive = output/('fptn-keenetic-'+release['platform']+'.tar.gz')
-    with tarfile.open(archive, 'w:gz') as tar:
-        tar.add(directory, arcname='fptn-keenetic')
+    def stable_member(info):
+        info.uid = info.gid = 0
+        info.uname = info.gname = ''
+        info.mtime = 0
+        info.mode = 0o755 if info.isdir() else 0o644
+        return info
+    with archive.open('wb') as raw:
+        with gzip.GzipFile(fileobj=raw, mode='wb', filename='', mtime=0) as zipped:
+            with tarfile.open(fileobj=zipped, mode='w') as tar:
+                tar.add(directory, arcname='fptn-keenetic', filter=stable_member)
     (output/'SHA256SUMS').write_text(digest(archive)+'  '+archive.name+'\n')
     return archive
 
