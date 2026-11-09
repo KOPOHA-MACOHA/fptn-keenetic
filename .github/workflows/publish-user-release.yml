@@ -1,0 +1,42 @@
+name: Publish user release
+on:
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/publish-user-release.yml'
+      - 'scripts/publish-user-release.py'
+      - 'docs/release-0.18.4.md'
+  workflow_run:
+    workflows: [Publish verified releases]
+    types: [completed]
+    branches: [main]
+  workflow_dispatch:
+permissions:
+  contents: read
+concurrency:
+  group: fptn-user-release
+  cancel-in-progress: false
+jobs:
+  publish:
+    if: >-
+      github.repository == 'KOPOHA-MACOHA/fptn-keenetic' &&
+      (github.event_name != 'workflow_run' ||
+       (github.event.workflow_run.conclusion == 'success' &&
+        github.event.workflow_run.head_repository.full_name == github.repository))
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    permissions:
+      contents: write
+      actions: read
+    env:
+      GH_TOKEN: ${{ github.token }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: main
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Check release presentation and artifact selection
+        run: python3 -m unittest discover -s tests -p test_user_release.py -v
+      - name: Publish only verified installation files and mark Latest
+        run: python3 scripts/publish-user-release.py

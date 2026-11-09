@@ -1,8 +1,5 @@
 name: Publish verified token decoder
 on:
-  push:
-    branches: [main]
-    paths: [.github/workflows/publish-decoder.yml]
   workflow_dispatch:
 permissions:
   contents: write
@@ -41,7 +38,7 @@ jobs:
           set -eu
           tag=$(jq -r .decoderRelease runtime-assets.json)
           if ! gh release view "$tag" >/dev/null 2>&1; then
-            gh release create "$tag" --target "$GITHUB_SHA" \
+            gh release create "$tag" --target "$GITHUB_SHA" --prerelease --latest=false \
               --title 'Brotli token decoder for Entware mipsel' \
               --notes 'Existing static decoder, built and round-trip tested in run 40177196930 and already used on Hopper. No VPN transport changes. Source and license included.'
           fi

@@ -1,5 +1,7 @@
 # FPTN для Keenetic / Entware
 
+Готовые установочные файлы: **[последний выпуск FPTN Keenetic](https://github.com/KOPOHA-MACOHA/fptn-keenetic/releases/latest)**.
+
 Исследовательский проект интеграции [FPTN](https://github.com/fptn-project/fptn)
 с KeeneticOS и Entware: кросс-сборка, совместимость платформ, VPN-клиент,
 управляемая служба и локальная веб-панель. Это не официальный выпуск FPTN или Keenetic.
