@@ -130,8 +130,8 @@ class PublicationTest(unittest.TestCase):
         self.write('scripts/install-web-ui.sh','#!/bin/sh\n# fixture installer\n')
         self.write('scripts/package-runtime.py','# fixture packager\n')
         self.write('install.sh','#!/bin/sh\n# fixture bootstrap\n')
-        self.write('web/index.html','<html data-ui-version="0.18.3">\n')
-        self.write('web/app.js',"const UI_VERSION = '0.18.3';\n")
+        self.write('web/index.html','<html data-ui-version="0.18.4">\n')
+        self.write('web/app.js',"const UI_VERSION = '0.18.4';\n")
         self.write('web/api.cgi','#!/bin/sh\n')
         self.source=self.commit('source')
         self.rows,self.assets=self.publish_clients(self.source)
@@ -141,7 +141,7 @@ class PublicationTest(unittest.TestCase):
         self.refresh_manifest()
         self.runtime=self.commit('pin fixture binaries')
         self.publish_runtime(self.runtime)
-        channel={'schema':1,'version':'0.18.3','revision':self.runtime,'installerSha256':pub.checksum(self.repo.read(self.runtime,'scripts/install-web-ui.sh')),
+        channel={'schema':1,'version':'0.18.4','revision':self.runtime,'installerSha256':pub.checksum(self.repo.read(self.runtime,'scripts/install-web-ui.sh')),
                  'clientRevision':self.source,'clientVersion':'0.8.0','clientSha256':self.rows[pub.PLATFORMS[0]]['sha256'],
                  'upstreamVersion':'0.4.6','upstreamRevision':'a'*40}
         channel['platforms']={p:{'clientVersion':'0.8.0','clientRevision':self.source,'clientSha256':self.rows[p]['sha256'],'upstreamVersion':'0.4.6','upstreamRevision':'a'*40} for p in pub.PLATFORMS}
@@ -197,7 +197,7 @@ class PublicationTest(unittest.TestCase):
         return self.commit('new client source')
 
     def changed_ui(self):
-        self.write('web/app.js',"const UI_VERSION = '0.18.3';\n// UI-only fix\n")
+        self.write('web/app.js',"const UI_VERSION = '0.18.4';\n// UI-only fix\n")
         self.refresh_manifest()
         return self.commit('UI-only fix')
 

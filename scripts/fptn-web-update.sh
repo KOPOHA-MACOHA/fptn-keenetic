@@ -59,6 +59,13 @@ case "${1:-}" in
   case "$CHECKED" in ''|*[!0-9]*) fail 'Повторите проверку обновлений.' ;; esac
   [ "$CHECKED" -le "$NOW" ] && [ "$((NOW-CHECKED))" -le 86400 ] || fail 'Каталог устарел. Повторите проверку обновлений.'
   sh "$0" status | jq -e '.available==true' >/dev/null || fail 'Обновление уже установлено или версия устарела.'
+  if [ -f "$CONF/opkg-managed.json" ]; then
+    [ -x "$ROOT/bin/fptn-package" ] || fail 'Не найден управляющий скрипт пакета.'
+    "$ROOT/bin/fptn-package" upgrade
+    EXPECTED=$(printf '%s' "$CATALOG" | jq -r .revision)
+    jq -e --arg rev "$EXPECTED" '.revision==$rev' "$CONF/opkg-managed.json" >/dev/null || fail 'Пакет канала ещё не соответствует проверенному выпуску. Повторите обновление позже.'
+    exit 0
+  fi
   TEMP=$(mktemp -d "$RUN/update-install.XXXXXX")
   trap 'rm -rf "$TEMP"' EXIT
   REV=$(printf '%s' "$CATALOG" | jq -r .revision)

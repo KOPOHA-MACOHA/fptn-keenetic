@@ -7,7 +7,8 @@ PATH=/opt/sbin:/opt/bin:/opt/usr/bin:/usr/sbin:/usr/bin:/sbin:/bin
 export PATH
 fail() { echo "FPTN: $*" >&2; exit 1; }
 [ "$(id -u)" = 0 ] || fail 'Запустите от root Entware.'
-[ "${1:-install}" = install ] || fail 'Использование: sh install.sh install [LAN_IP] [PORT]'
+MODE=${1:-install}
+case "$MODE" in install|opkg) ;; *) fail 'Использование: sh install.sh [install|opkg] [LAN_IP] [PORT]' ;; esac
 LAN=${2:-}
 if [ -z "$LAN" ] && [ -r /opt/etc/fptn/web-origin ]; then
   LAN=$(cat /opt/etc/fptn/web-origin); LAN=${LAN#http://}; LAN=${LAN%:*}
@@ -30,7 +31,7 @@ esac
 command -v ndmc >/dev/null 2>&1 || fail 'Требуется KeeneticOS.'
 [ -c /dev/net/tun ] || fail 'Включите компонент TUN Keenetic.'
 command -v opkg >/dev/null 2>&1 || fail 'Не найден opkg.'
-NEW_HTTP=no
+NEW_HTTP=${FPTN_BOOTSTRAP_HTTP:-no}
 if [ ! -f /opt/etc/lighttpd/lighttpd.conf ] && ! command -v lighttpd >/dev/null 2>&1; then
   pidof lighttpd >/dev/null 2>&1 && fail 'Уже работает lighttpd с другой конфигурацией.'
   NEW_HTTP=yes
@@ -70,6 +71,20 @@ if [ "$NEW_HTTP" = yes ]; then
   fi
 fi
 for cmd in curl jq sha256sum mktemp; do command -v "$cmd" >/dev/null 2>&1 || fail "Не найдена команда $cmd."; done
+if [ "$MODE" = opkg ]; then
+  case "$(value arch)" in
+    mipsel) FEED=mipselsf-k3.4 ;; aarch64) FEED=aarch64-k3.10 ;; arm) FEED=armv7sf-k3.2 ;; *) fail 'Неизвестная платформа.' ;;
+  esac
+  mkdir -p /opt/etc/opkg
+  FEED_FILE=/opt/etc/opkg/fptn-keenetic.conf
+  if [ -e "$FEED_FILE" ]; then grep -Fq '# Managed by FPTN package channel' "$FEED_FILE" || fail 'Конфигурация feed занята другим приложением.'; fi
+  printf '%s\n' '# Managed by FPTN package channel' "src/gz fptn_keenetic https://github.com/KOPOHA-MACOHA/fptn-keenetic/releases/download/entware-feed-$FEED" > "$FEED_FILE.new"
+  mv "$FEED_FILE.new" "$FEED_FILE"
+  export FPTN_PACKAGE_LAN=$LAN FPTN_INSTALL_PORT=$PORT
+  opkg update
+  opkg install fptn-keenetic
+  exit 0
+fi
 BUNDLE=$(dirname "$(readlink -f "$0")")
 if [ -f "$BUNDLE/release-revision" ] && [ -f "$BUNDLE/scripts/install-web-ui.sh" ]; then
   REV=$(cat "$BUNDLE/release-revision")

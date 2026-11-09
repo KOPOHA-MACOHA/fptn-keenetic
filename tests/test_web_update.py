@@ -85,3 +85,17 @@ shutil.copyfile(root/('channel' if url.endswith('web/update.json') else 'install
         self.catalog['platforms']={'aarch64':{'clientRevision':'e'*40,'clientVersion':'0.5.0'}}
         self.channel.write_text(json.dumps(self.catalog));self.assertNotEqual(self.call('check').returncode,0)
         self.assertFalse((self.run/'update-available.json').exists());self.assertFalse((self.root/'applied').exists())
+
+    def test_package_managed_update_uses_opkg_controller_and_checks_result(self):
+        (self.conf/'opkg-managed.json').write_text('{"revision":"old"}')
+        package=self.root/'bin/fptn-package'
+        package.write_text('#!/bin/sh\necho "$1" > "$FPTN_PREFIX/package-action"\nprintf \'{"revision":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"}\' > "$FPTN_PREFIX/etc/fptn/opkg-managed.json"\n')
+        package.chmod(0o700)
+        self.check();result=self.call('apply');self.assertEqual(result.returncode,0,result.stderr)
+        self.assertEqual((self.root/'package-action').read_text().strip(),'upgrade')
+        self.assertFalse((self.root/'applied').exists())
+
+    def test_stale_package_feed_does_not_claim_success(self):
+        (self.conf/'opkg-managed.json').write_text('{"revision":"old"}')
+        package=self.root/'bin/fptn-package';package.write_text('#!/bin/sh\nexit 0\n');package.chmod(0o700)
+        self.check();self.assertNotEqual(self.call('apply').returncode,0)

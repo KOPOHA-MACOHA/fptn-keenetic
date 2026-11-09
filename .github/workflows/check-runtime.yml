@@ -46,13 +46,15 @@ jobs:
       - name: Prepare PHP and lighttpd integration tests
         run: |
           sudo apt-get update -qq
-          sudo apt-get install -y -qq php-cgi lighttpd libboost-dev libspdlog-dev libfmt-dev python3-yaml iproute2 iptables
+          sudo apt-get install -y -qq php-cgi lighttpd libboost-dev libspdlog-dev libfmt-dev python3-yaml iproute2 iptables libarchive-dev libcurl4-openssl-dev pkg-config
           php-cgi -n -v
+      - name: Build the pinned native opkg test tool
+        run: sh tests/build-opkg.sh
       - name: Verify the complete runtime suite once, including required isolated kernel checks
         run: |
           python3 scripts/package-web.py --check
           python3 -m compileall -q scripts
-          sudo --preserve-env=PATH env FPTN_REQUIRE_NETNS=1 python3 -m unittest discover -s tests -v
+          sudo --preserve-env=PATH env FPTN_REQUIRE_NETNS=1 FPTN_TEST_OPKG="$FPTN_TEST_OPKG" python3 -m unittest discover -s tests -v
 
   package:
     name: runtime-package-${{ inputs.source-ref || github.sha }}
@@ -74,6 +76,7 @@ jobs:
         with:
           ref: ${{ inputs.source-ref || github.sha }}
           persist-credentials: false
+          fetch-depth: 0
       - name: Download the pinned client and decoder without rebuilding dependencies
         run: |
           set -eu
@@ -97,9 +100,24 @@ jobs:
               gh release download "$decoder" --pattern "$asset" --dir "$stage/decoder"
             done
             python3 scripts/package-runtime.py . "$stage/client" "$stage/decoder" "$stage/output" "$RUNTIME_SHA" "$platform"
+            serial=$(git rev-list --count "$RUNTIME_SHA")
+            python3 scripts/package-ipk.py . "$stage/output/fptn-keenetic-$platform.tar.gz" "$stage/ipk" "$platform" "$RUNTIME_SHA" "$serial"
+            cp "$stage/ipk/"*.ipk output/
+            for file in Packages Packages.gz package.json; do cp "$stage/ipk/$file" "output/$platform-$file"; done
             cat "$stage/output/SHA256SUMS" >> output/SHA256SUMS
             mv "$stage/output/"*.tar.gz output/
           done
+      - name: Bind IPK architecture and index digests to the validated runtime
+        run: |
+          python3 - <<'PYIPK'
+          import hashlib,json,pathlib,os
+          root=pathlib.Path('output');rows={}
+          for p in ['mipsel-mips32r2-softfloat','aarch64','armv7-softfloat']:
+            row=json.loads((root/(p+'-package.json')).read_text())
+            row['indexes']={n:hashlib.sha256((root/(p+'-'+n)).read_bytes()).hexdigest() for n in ['Packages','Packages.gz']}
+            rows[p]=row
+          (root/'ipk-evidence.json').write_text(json.dumps({'schema':1,'runtimeRevision':os.environ['RUNTIME_SHA'],'platforms':rows},indent=2)+'\n')
+          PYIPK
       - name: Bind package digests to this exact validation run
         run: python3 scripts/release-publication.py evidence --directory output --runtime "$RUNTIME_SHA"
       - uses: actions/upload-artifact@v4
@@ -109,6 +127,10 @@ jobs:
             output/*.tar.gz
             output/SHA256SUMS
             output/runtime-evidence.json
+            output/*.ipk
+            output/*-Packages*
+            output/*-package.json
+            output/ipk-evidence.json
           if-no-files-found: error
       - name: Publish the tested complete runtime package
         run: |
@@ -119,4 +141,4 @@ jobs:
               --title "FPTN Keenetic runtime ${RUNTIME_SHA:0:7}" \
               --notes 'Complete install/update packages for registered Entware architectures. Exact client/decoder and source metadata, panel and service are included. Runtime tests passed in Actions; foreign-architecture CLI/probes are tested under QEMU, not live ARM hardware. Run sh install.sh install inside the extracted folder. Routes and DNS stay in Keenetic; optional IPv6 NAT66 is off by default.'
           fi
-          gh release upload "$tag" output/*.tar.gz output/SHA256SUMS output/runtime-evidence.json --clobber
+          gh release upload "$tag" output/*.tar.gz output/*.ipk output/*-Packages* output/*-package.json output/ipk-evidence.json output/SHA256SUMS output/runtime-evidence.json --clobber

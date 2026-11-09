@@ -215,6 +215,8 @@ class Repo:
         rows = self.manifest(ref)
         for name in ('scripts/install-web-ui.sh', 'install.sh', 'scripts/package-runtime.py'):
             rows[name] = checksum(self.read(ref, name))
+        for name in ('scripts/package-ipk.py', 'packaging/fptn-package.sh'):
+            if name in self.tree(ref):rows[name] = checksum(self.read(ref, name))
         return checksum(json.dumps(rows, sort_keys=True).encode())
 
     def panel_version(self, ref):

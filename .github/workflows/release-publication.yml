@@ -58,10 +58,31 @@ jobs:
     with:
       source-ref: ${{ needs.prepare.outputs.runtime }}
       publish-runtime: true
-  promote:
+  packages:
     needs: [prepare, validate]
     if: >-
       always() && needs.prepare.result == 'success' &&
+      ((needs.prepare.outputs.status == 'validate' && needs.validate.result == 'success') ||
+       (needs.prepare.outputs.status == 'promote' && needs.validate.result == 'skipped'))
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    permissions:
+      contents: write
+      actions: read
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.prepare.outputs.runtime }}
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Publish verified Entware packages before advancing the runtime channel
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: python3 scripts/publish-opkg-feed.py --runtime '${{ needs.prepare.outputs.runtime }}'
+  promote:
+    needs: [prepare, validate, packages]
+    if: >-
+      always() && needs.prepare.result == 'success' && needs.packages.result == 'success' &&
       ((needs.prepare.outputs.status == 'validate' && needs.validate.result == 'success') ||
        (needs.prepare.outputs.status == 'promote' && needs.validate.result == 'skipped'))
     runs-on: ubuntu-24.04

@@ -969,7 +969,9 @@ case "${1:-}" in
     ndmc -c "show interface $NATIVE" >/dev/null || fail 'Интерфейс FPTN не найден.'
     ndmc -c 'system configuration save'
     rm -f "$CONF/native-setup-unsaved" ;;
-  uninstall) uninstall_runtime ;;
+  uninstall)
+    if [ -f "$CONF/opkg-managed.json" ] && [ "${FPTN_PACKAGE_REMOVE:-}" != 1 ]; then exec opkg remove fptn-keenetic; fi
+    uninstall_runtime ;;
   configure) mkdir -p "$CONF"; chmod 700 "$CONF"; configure ;;
   start) start_service ;;
   stop) stop_service ;;
