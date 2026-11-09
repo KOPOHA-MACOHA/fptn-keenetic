@@ -8,7 +8,7 @@ import re
 import subprocess
 import tempfile
 
-LOCK_FILES = ('conan.lock', 'graph.json', 'metadata.json', 'python.txt', 'apt.txt', 'build-profile')
+LOCK_FILES = ('conan.lock', 'graph.json', 'metadata.json', 'python.txt', 'apt.txt', 'build-profile', 'ubuntu.sources')
 
 
 def graph_contract(document):

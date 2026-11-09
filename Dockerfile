@@ -5,6 +5,7 @@ FROM --platform=linux/amd64 openwrt/sdk:ramips-mt7621-24.10.7@sha256:80fac8772ff
 FROM --platform=linux/amd64 ubuntu:24.04@sha256:68ee22004a9109b44973313b02ff7b1de250f1de0f5ecb628d73f579aaff33ac AS toolchain
 ENV DEBIAN_FRONTEND=noninteractive
 COPY build-locks /work/build-locks
+COPY build-locks/ubuntu.sources /etc/apt/sources.list.d/ubuntu.sources
 COPY scripts/dependency-lock.py /work/dependency-lock.py
 RUN --mount=type=secret,id=proxy_ca \
     if [ -f /run/secrets/proxy_ca ]; then \
