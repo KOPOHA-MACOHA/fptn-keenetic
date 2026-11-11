@@ -38,11 +38,13 @@ jobs:
         run: |
           sudo apt-get update -qq
           sudo apt-get install -y -qq php-cgi lighttpd libboost-dev libspdlog-dev libfmt-dev python3-yaml iproute2 iptables libarchive-dev libcurl4-openssl-dev pkg-config
+      - name: Build the pinned native opkg test tool
+        working-directory: keenetic
+        run: sh tests/build-opkg.sh
       - name: Validate the imported runtime and panel
         working-directory: keenetic
         run: |
           set -euo pipefail
-          sh tests/build-opkg.sh
           python3 scripts/package-web.py --check
           python3 -m compileall -q scripts
           sudo --preserve-env=PATH env FPTN_REQUIRE_NETNS=1 FPTN_TEST_OPKG="$FPTN_TEST_OPKG" python3 -m unittest discover -s tests -v
