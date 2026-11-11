@@ -195,9 +195,9 @@ class Repo:
                 if name not in export_only:
                     copied.add(name.rstrip('/'))
         selected = {p: item[1] for p, item in self.tree(ref).items()
-                    if p in exact or p.startswith(('src/', 'profiles/', '.conan/', 'depends/', 'deploy/')) or
+                    if not p.endswith('.md') and (p in exact or p.startswith(('src/', 'profiles/', '.conan/', 'depends/', 'deploy/')) or
                     (p.startswith('scripts/prepare-') and p.endswith('.py')) or
-                    any(p == name or p.startswith(name + '/') for name in copied)}
+                    any(p == name or p.startswith(name + '/') for name in copied))}
         return checksum(json.dumps(selected, sort_keys=True).encode())
 
     def manifest(self, ref):

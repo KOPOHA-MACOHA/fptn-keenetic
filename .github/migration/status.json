@@ -1,16 +1,20 @@
 {
   "schema": 1,
-  "phase": "ready-for-repository-rename",
+  "phase": "complete",
   "repositoryId": 1453702975,
   "upstreamRevision": "a389bee62da930807c3bc85284ee4976e9c7e08f",
   "legacy": {
     "repositoryId": 1432556444,
     "lastMainRevision": "efbf0d550f9a03c437ff03714cbecc9d6f5b6f22",
-    "archiveName": "KOPOHA-MACOHA/fptn-keenetic-test"
+    "archiveName": "KOPOHA-MACOHA/fptn-keenetic-test",
+    "historicalRepository": "KOPOHA-MACOHA/fptn-keenetic-test",
+    "markedHistoricalCommit": "519734a3679c86cb6f42551dc3d7e829e1d67b25",
+    "obsoleteScheduledUpdaterSkipped": true
   },
   "clientValidation": {
-    "revision": "f069a726a1d25b5bcbff48756f4a4969f9bc4cec",
-    "runId": 42992353429,
+    "revision": "463469320ae4bfef7f96018de66be88be3ae9acb",
+    "mipsRunId": 43005482182,
+    "armRunId": 43005482184,
     "platforms": [
       "mipsel-mips32r2-softfloat",
       "aarch64",
@@ -20,9 +24,9 @@
     "dependenciesRebuilt": false
   },
   "runtimeValidation": {
-    "revision": "ed1e90ff54222d07420fff9162de105a7536474c",
-    "runId": 42993467275,
-    "tests": 358,
+    "revision": "463469320ae4bfef7f96018de66be88be3ae9acb",
+    "runId": 43005482094,
+    "tests": 365,
     "result": "success"
   },
   "releaseTransfer": {
@@ -39,7 +43,6 @@
   "legacyTagsChecked": 64,
   "historicalInstallerMatches": true,
   "updateChannelMatches": true,
-  "renamingAllowed": true,
   "historyCleanup": {
     "runId": 43001124635,
     "schema": 1,
@@ -50,14 +53,45 @@
     "publicDownloadChecks": 10,
     "historicalActionsReadable": true
   },
-  "nextOperatorAction": [
-    {
-      "from": "KOPOHA-MACOHA/fptn-keenetic",
-      "to": "KOPOHA-MACOHA/fptn-keenetic-test"
-    },
-    {
-      "from": "KOPOHA-MACOHA/fptn-keenetic-next",
-      "to": "KOPOHA-MACOHA/fptn-keenetic"
-    }
-  ]
+  "repository": "KOPOHA-MACOHA/fptn-keenetic",
+  "renamingCompleted": true,
+  "publication": {
+    "runtimeRevision": "48a4ceb512ca91f6cb9fc051f9469e45ba732b32",
+    "runId": 43006941055,
+    "userReleaseRunId": 43008057868,
+    "latest": "v0.18.4-655",
+    "uiVersion": "0.18.4",
+    "clientVersion": "0.8.0",
+    "dependencyReuseRunId": 43006940838
+  },
+  "canonicalVerification": {
+    "runId": 43008563685,
+    "schema": 1,
+    "canonicalRepositoryId": 1453702975,
+    "archiveRepositoryId": 1432556444,
+    "parent": "fptn-project/fptn",
+    "runtimeRevision": "48a4ceb512ca91f6cb9fc051f9469e45ba732b32",
+    "historicalRuntimeProofValid": true,
+    "historicalReleases": 64,
+    "publicMetadataChecks": 10,
+    "pinnedInstallerChecksumValid": true
+  },
+  "legacyEvidenceVerification": {
+    "runId": 43002941266,
+    "schema": 1,
+    "canonicalRepositoryId": 1453702975,
+    "archiveRepositoryId": 1432556444,
+    "parent": "fptn-project/fptn",
+    "runtimeRevision": "dd99a1ff320891b37651291c106a86e5a22778d4",
+    "historicalRuntimeProofValid": true,
+    "historicalReleases": 64,
+    "publicMetadataChecks": 10,
+    "pinnedInstallerChecksumValid": true
+  },
+  "finalTrackingTests": {
+    "sourceRunId": 43008563685,
+    "buildInputTests": 3,
+    "publicationTests": 27,
+    "markdownIgnoredLikeMipsCi": true
+  }
 }

@@ -38,3 +38,24 @@ class ForkBuildInputsTest(unittest.TestCase):
         workflow = yaml.safe_load((ROOT/'.github/workflows/build-platforms.yml').read_text())
         events = workflow.get('on', workflow.get(True))
         self.assertIn('deploy/**', events['push']['paths'])
+
+    def test_documentation_change_matches_the_mips_workflow_ignore_policy(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            def git(*args):
+                return subprocess.check_output(['git', '-C', str(root), *args], text=True).strip()
+            git('init', '-q')
+            git('config', 'user.name', 'Fixture')
+            git('config', 'user.email', 'fixture@example.invalid')
+            (root/'Dockerfile').write_text('FROM scratch\n')
+            document = root/'deploy/README.md'
+            document.parent.mkdir()
+            document.write_text('Initial deployment documentation\n')
+            git('add', '.')
+            git('commit', '-qm', 'initial')
+            repo = pub.Repo(root)
+            before = repo.client_key(git('rev-parse', 'HEAD'))
+            document.write_text('Updated deployment documentation\n')
+            git('add', '.')
+            git('commit', '-qm', 'documentation only')
+            self.assertEqual(before, repo.client_key(git('rev-parse', 'HEAD')))
