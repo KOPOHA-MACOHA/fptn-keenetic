@@ -21,6 +21,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
         with:
+          fetch-depth: 0
           ref: main
       - id: source
         run: echo "sha=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
@@ -36,6 +37,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
         with:
+          fetch-depth: 0
           ref: ${{ needs.prepare.outputs.source-sha }}
       - uses: docker/setup-buildx-action@v3
       - name: Require actual cache restore on a different runner
@@ -43,13 +45,17 @@ jobs:
         uses: ./.github/actions/dependency-image
         with:
           require-hit: 'true'
+      - name: Export committed fork sources
+        run: python3 scripts/export-fork-source.py out/fork-source
       - name: Compile native client without Conan or dependency stages
         uses: docker/build-push-action@v6
         with:
           context: .
           target: client-export
           build-args: DEPENDENCIES_IMAGE=prepared-dependencies
-          build-contexts: prepared-dependencies=${{ steps.dependencies-image.outputs.context }}
+          build-contexts: |
+            prepared-dependencies=${{ steps.dependencies-image.outputs.context }}
+            fork-source=./out/fork-source
           outputs: type=local,dest=out/client
       - uses: actions/upload-artifact@v4
         with:

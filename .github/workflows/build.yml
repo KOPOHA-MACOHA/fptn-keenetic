@@ -80,6 +80,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
         with:
+          fetch-depth: 0
           ref: ${{ inputs.source-ref || github.sha }}
           persist-credentials: false
       - name: Prepare PHP auth tests
@@ -115,6 +116,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
         with:
+          fetch-depth: 0
           ref: ${{ inputs.source-ref || github.sha }}
           persist-credentials: false
       - uses: actions/download-artifact@v4
@@ -145,6 +147,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
         with:
+          fetch-depth: 0
           ref: ${{ inputs.source-ref || github.sha }}
           persist-credentials: false
       - uses: docker/setup-buildx-action@v3
@@ -153,13 +156,17 @@ jobs:
         uses: ./.github/actions/dependency-image
         with:
           publish: 'true'
+      - name: Export committed fork sources
+        run: python3 scripts/export-fork-source.py out/fork-source
       - name: Cross-build FPTN CLI
         uses: docker/build-push-action@v6
         with:
           context: .
           target: client-export
           build-args: DEPENDENCIES_IMAGE=prepared-dependencies
-          build-contexts: prepared-dependencies=${{ steps.dependencies-image.outputs.context }}
+          build-contexts: |
+            prepared-dependencies=${{ steps.dependencies-image.outputs.context }}
+            fork-source=./out/fork-source
           outputs: type=local,dest=out/client
       - uses: actions/upload-artifact@v4
         with:

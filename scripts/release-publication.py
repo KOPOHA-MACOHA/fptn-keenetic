@@ -171,7 +171,8 @@ class Repo:
                  'scripts/fix-static-libgcc.py', 'scripts/fix-platform-libgcc.py',
                  'scripts/check-cross-includes.py', 'scripts/verify-elf.py',
                  'scripts/verify-platform-elf.py', 'scripts/check-probe-mode.sh',
-                 'scripts/render-platform.py', 'scripts/platform-dependency-key.py'}
+                 'scripts/render-platform.py', 'scripts/platform-dependency-key.py',
+                 'scripts/export-fork-source.py', 'CMakeLists.txt', 'conanfile.py'}
         # Discover new build inputs added by future COPY instructions too. These
         # four existing files are export-only material, not compiled into the ELF.
         export_only = {'scripts/run-connect-test.sh', 'docs/tunnel-test.md',
@@ -189,7 +190,7 @@ class Repo:
                 if name not in export_only:
                     copied.add(name.rstrip('/'))
         selected = {p: item[1] for p, item in self.tree(ref).items()
-                    if p in exact or p.startswith(('src/', 'profiles/')) or
+                    if p in exact or p.startswith(('src/', 'profiles/', '.conan/', 'depends/')) or
                     (p.startswith('scripts/prepare-') and p.endswith('.py')) or
                     any(p == name or p.startswith(name + '/') for name in copied)}
         return checksum(json.dumps(selected, sort_keys=True).encode())

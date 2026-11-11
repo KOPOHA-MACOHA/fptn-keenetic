@@ -1,30 +1,36 @@
-# Keenetic fork migration — preparation branch
+# Keenetic fork migration — staging branch
 
-This branch starts at upstream FPTN revision
-`a389bee62da930807c3bc85284ee4976e9c7e08f`, the exact revision used by the
-currently released Keenetic client. It does not upgrade the protocol or dependencies.
+This is a real GitHub fork of `fptn-project/fptn`. The integration starts at
+`a389bee62da930807c3bc85284ee4976e9c7e08f`, the exact upstream revision used by
+the released Keenetic client. Upstream sources keep their original paths.
+Keenetic scripts, panel, profiles, and tests are added at their existing paths,
+so historical installer and update URLs do not need a directory migration.
+Both the upstream history and the full adaptation history are preserved.
 
-The migration imports the complete adaptation history from
-`KOPOHA-MACOHA/fptn-keenetic` at `efbf0d550f9a03c437ff03714cbecc9d6f5b6f22`.
-Its working tree is preserved byte for byte under `keenetic/`; upstream source
-paths remain at the repository root. Both histories are parents of the import.
-The upstream workflow is archived under `.github/upstream-workflows/` because
-it requires the upstream project's self-hosted runners and publication secrets.
-The imported adaptation workflows remain inactive inside `keenetic/.github/`.
+The dependency-stage Dockerfile prefix, source locks, and all three dependency
+image keys are unchanged. `export-fork-source.py` exports committed local fork
+sources for the client stage. Changes to recipes and dependency CMake files are
+rejected until the upstream baseline and reviewed locks are updated together.
+The release fingerprint includes the original CMake and dependency inputs too.
 
-**This branch is not an installation or update channel. Do not rename either
-repository or install from this branch yet.** Existing releases, feeds, caches,
-update URLs, and the working repository are unchanged.
+The upstream CI workflow is archived under `.github/upstream-workflows/` because
+it requires upstream-owned self-hosted runners and publication secrets.
+The migration validation workflow runs the full Keenetic runtime suite and
+compiles the client for MIPS, ARM64 and ARMv7 using existing verified snapshots.
+It fails when a snapshot is unavailable; it never rebuilds dependencies.
+It does not publish releases, change the old repository or contact routers/VPNs.
 
-Remaining migration gates:
+**Not an installation or update channel yet. Do not rename either repository.**
 
-1. Connect the Keenetic build to the checked-out upstream sources, retaining
-   the exact dependency image keys and restoring the existing verified caches.
-2. Adapt active workflow paths and publication checks to the combined repository.
-3. Preserve historical raw URLs and tags, transfer release assets and feeds,
-   and account explicitly for Actions evidence that belongs to the old repository.
-4. Test all three architectures and legacy-to-fork installation/update paths.
-5. Switch repository names and the default branch only after those checks pass.
+Remaining cutover gates:
 
-The preparation workflow validates the imported runtime suite. It does not
-compile a new client, publish releases, alter routers, or write the old repository.
+1. Confirm runtime checks and all three offline compilation/emulation jobs.
+2. Preserve old tags and release assets, indexes and update-channel references.
+3. Verify installation/update paths against the fork and account explicitly for
+   Actions run evidence that remains attached to the old repository.
+4. Select the prepared default branch, then switch names only after these gates.
+
+Stable upstream updates remain reviewed draft PRs. A source-lock update alone
+cannot replace checked-out fork sources: the exporter rejects a new baseline
+that has not actually been merged into the fork. A dependency lock refresh is
+still required before compiling an updated baseline; nothing is auto-merged.

@@ -96,3 +96,9 @@ Temporary Items
 !deploy/openwrt/data/luci/usr/share/luci/menu.d/*
 !deploy/openwrt/data/luci/usr/share/rpcd/acl.d/
 !deploy/openwrt/data/luci/usr/share/rpcd/acl.d/*
+
+# Keenetic build artifacts
+out/
+upstream/
+__pycache__/
+*.pyc

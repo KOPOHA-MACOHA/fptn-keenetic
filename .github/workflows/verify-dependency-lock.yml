@@ -29,6 +29,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
         with:
+          fetch-depth: 0
           persist-credentials: false
       - name: Verify lock contracts before fetching build data
         run: python3 -m unittest discover -s tests -p test_dependency_lock.py -v
@@ -54,6 +55,8 @@ jobs:
           uri=$(python3 scripts/dependency-image.py unpack "$RUNNER_TEMP/arm-deps/dependencies.tar" "$RUNNER_TEMP/arm-layout")
           echo "context=$uri" >> "$GITHUB_OUTPUT"
           echo "key=$key" >> "$GITHUB_OUTPUT"
+      - name: Export committed fork sources
+        run: python3 scripts/export-fork-source.py out/fork-source
       - name: Validate the graph and tools, compile CLI, verify ABI and emulate offline modes
         uses: docker/build-push-action@v6
         with:
@@ -61,7 +64,9 @@ jobs:
           file: ${{ matrix.platform == 'mipsel-mips32r2-softfloat' && 'Dockerfile' || 'ports/generated/Dockerfile' }}
           target: client-export
           build-args: DEPENDENCIES_IMAGE=prepared-dependencies
-          build-contexts: prepared-dependencies=${{ steps.mips.outputs.context || steps.arm.outputs.context }}
+          build-contexts: |
+            prepared-dependencies=${{ steps.mips.outputs.context || steps.arm.outputs.context }}
+            fork-source=./out/fork-source
           outputs: type=local,dest=out/locked-client
           provenance: false
           sbom: false

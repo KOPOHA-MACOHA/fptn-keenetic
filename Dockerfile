@@ -94,6 +94,11 @@ WORKDIR /work/upstream
 
 # CI overrides this FROM with an integrity-checked OCI snapshot, not a cache hint.
 FROM ${DEPENDENCIES_IMAGE} AS client
+# Compile this fork's committed sources, rather than the original cached checkout.
+# Only the client stage changes; dependency-image input keys remain unchanged.
+RUN rm -rf /work/upstream && mkdir /work/upstream
+COPY --from=fork-source / /work/upstream/
+RUN python /work/prepare-source.py /work/upstream /work/sources.lock.json
 # Restored OCI snapshots skip dependencies above; verify their locks here too.
 # This offline guard never installs or rebuilds Conan packages.
 COPY build-locks /work/build-locks

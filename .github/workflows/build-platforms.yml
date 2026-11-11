@@ -4,6 +4,11 @@ on:
     branches: [main, ports/build]
     paths:
       - 'Dockerfile'
+      - 'CMakeLists.txt'
+      - 'conanfile.py'
+      - '.conan/**'
+      - 'depends/**'
+      - 'scripts/export-fork-source.py'
       - 'sources.lock.json'
       - 'profiles/**'
       - 'src/**'
@@ -40,6 +45,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
         with:
+          fetch-depth: 0
           persist-credentials: false
       - name: Render pinned SDK and ABI configuration
         id: key
@@ -93,6 +99,8 @@ jobs:
           key: port-dependencies-v1-${{ steps.key.outputs.key }}
       - name: Preserve the verified image outside the disposable Actions cache
         run: python3 scripts/arm-dependency-release.py publish '${{ matrix.platform }}' '${{ steps.key.outputs.key }}' "$RUNNER_TEMP/port-deps/dependencies.tar"
+      - name: Export committed fork sources
+        run: python3 scripts/export-fork-source.py out/fork-source
       - name: Build client and decoder, verify ELF and run probe-only under QEMU
         uses: docker/build-push-action@v6
         with:
@@ -100,7 +108,9 @@ jobs:
           file: ports/generated/Dockerfile
           target: platform-export
           build-args: DEPENDENCIES_IMAGE=prepared-dependencies
-          build-contexts: prepared-dependencies=${{ steps.context.outputs.uri }}
+          build-contexts: |
+            prepared-dependencies=${{ steps.context.outputs.uri }}
+            fork-source=./out/fork-source
           outputs: type=local,dest=out/port
           cache-from: type=gha,scope=port-${{ matrix.platform }}
           cache-to: type=gha,mode=max,scope=port-${{ matrix.platform }}
