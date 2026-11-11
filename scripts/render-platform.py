@@ -27,7 +27,7 @@ probe=probe[:a]+('static_assert(sizeof(void*) == '+('8' if platform=='aarch64' e
 probe=probe.replace('MIPS32 little-endian soft-float',platform+' little-endian')
 (out/'probe.cpp').write_text(probe)
 text+='''
-FROM toolchain AS token-decoder
+FROM ${DEPENDENCIES_IMAGE} AS token-decoder
 RUN curl -fL --retry 3 https://github.com/google/brotli/archive/028fb5a23661f123017c060daa546b55cf4bde29.tar.gz -o /tmp/brotli.tar.gz && \\
     mkdir /work/brotli && tar -xzf /tmp/brotli.tar.gz --strip-components=1 -C /work/brotli && \\
     cmake -S /work/brotli -B /work/decoder-build -DCMAKE_SYSTEM_NAME=Linux \\
