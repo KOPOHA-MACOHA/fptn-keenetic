@@ -29,8 +29,7 @@ jobs:
           persist-credentials: false
       - name: Prepare runtime integration tests
         run: |
-          sudo apt-get update -qq
-          sudo apt-get install -y -qq php-cgi lighttpd libboost-dev libspdlog-dev libfmt-dev python3-yaml iproute2 iptables libarchive-dev libcurl4-openssl-dev pkg-config
+          sh scripts/prepare-ci-tests.sh php-cgi lighttpd libboost-dev libspdlog-dev libfmt-dev python3-yaml iproute2 iptables libarchive-dev libcurl4-openssl-dev pkg-config
       - name: Build the pinned native opkg test tool
         run: sh tests/build-opkg.sh
       - name: Run runtime, panel and isolated kernel checks

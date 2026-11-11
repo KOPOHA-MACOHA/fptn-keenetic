@@ -10,6 +10,7 @@ on:
       - 'depends/**'
       - 'deploy/**'
       - 'scripts/export-fork-source.py'
+      - 'scripts/dependency-reuse.py'
       - 'sources.lock.json'
       - 'profiles/**'
       - 'src/**'
