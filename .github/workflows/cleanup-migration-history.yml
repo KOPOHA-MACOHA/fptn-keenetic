@@ -1,0 +1,28 @@
+name: Clean verified migration staging refs
+on:
+  push:
+    branches: [migration/cleanup]
+    paths: ['.github/migration/start-cleanup']
+permissions:
+  contents: read
+jobs:
+  cleanup:
+    if: github.repository == 'KOPOHA-MACOHA/fptn-keenetic-next'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    permissions:
+      contents: write
+      actions: read
+    env:
+      GH_TOKEN: ${{ github.token }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Verify copied tags and remove only the unchanged temporary refs
+        run: python3 .github/scripts/cleanup-migration-history.py
+      - uses: actions/upload-artifact@v4
+        with:
+          name: migration-history-cleanup
+          path: ${{ runner.temp }}/history-cleanup.json
+          if-no-files-found: error
