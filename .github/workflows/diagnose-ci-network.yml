@@ -1,0 +1,24 @@
+name: Diagnose CI package network
+on:
+  push:
+    branches: [maintenance/ci-network-probe]
+permissions:
+  contents: read
+jobs:
+  network:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 3
+    steps:
+      - name: Check public DNS and HTTPS without changing the runner
+        run: |
+          python3 - <<'PY'
+          import os,subprocess
+          print('Configured proxy variable names:',','.join(k for k in ('http_proxy','https_proxy','HTTP_PROXY','HTTPS_PROXY') if os.environ.get(k)),flush=True)
+          for host in ('github.com','archive.ubuntu.com','azure.archive.ubuntu.com','mirrors.edge.kernel.org','dns.google'):
+              print('DNS:',host,flush=True)
+              subprocess.run(['timeout','8','getent','ahostsv4',host],check=False)
+          for url in ('https://archive.ubuntu.com/ubuntu/dists/noble/InRelease','https://dns.google/resolve?name=archive.ubuntu.com&type=A'):
+              print('HTTPS:',url,flush=True)
+              result=subprocess.run(['curl','-fsS','--connect-timeout','5','--max-time','12',url],capture_output=True,text=True)
+              print('Exit:',result.returncode,'Response:',result.stdout[:1200],flush=True)
+          PY
