@@ -1,0 +1,55 @@
+name: Prepare Keenetic fork migration
+on:
+  push:
+    branches: [migration/keenetic]
+    paths:
+      - '.github/scripts/import-keenetic.py'
+      - '.github/workflows/migrate-keenetic.yml'
+permissions:
+  contents: read
+concurrency:
+  group: prepare-keenetic-migration
+  cancel-in-progress: false
+jobs:
+  import:
+    if: github.repository == 'KOPOHA-MACOHA/fptn-keenetic-next'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: migration/keenetic
+          fetch-depth: 0
+      - name: Import the pinned adaptation and original history
+        id: import
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "$GITHUB_SHA"
+          git fetch --no-tags https://github.com/KOPOHA-MACOHA/fptn-keenetic.git efbf0d550f9a03c437ff03714cbecc9d6f5b6f22
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          python3 .github/scripts/import-keenetic.py | tee "$RUNNER_TEMP/migration.json"
+          git merge-base --is-ancestor a389bee62da930807c3bc85284ee4976e9c7e08f HEAD
+          git merge-base --is-ancestor efbf0d550f9a03c437ff03714cbecc9d6f5b6f22 HEAD
+          git diff --exit-code efbf0d550f9a03c437ff03714cbecc9d6f5b6f22^{tree} HEAD:keenetic
+      - name: Prepare runtime checks without compiling client dependencies
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq php-cgi lighttpd libboost-dev libspdlog-dev libfmt-dev python3-yaml iproute2 iptables libarchive-dev libcurl4-openssl-dev pkg-config
+      - name: Validate the imported runtime and panel
+        working-directory: keenetic
+        run: |
+          set -euo pipefail
+          sh tests/build-opkg.sh
+          python3 scripts/package-web.py --check
+          python3 -m compileall -q scripts
+          sudo --preserve-env=PATH env FPTN_REQUIRE_NETNS=1 FPTN_TEST_OPKG="$FPTN_TEST_OPKG" python3 -m unittest discover -s tests -v
+      - name: Publish only the validated migration branch
+        run: git push origin HEAD:refs/heads/migration/keenetic
+      - uses: actions/upload-artifact@v4
+        with:
+          name: keenetic-migration-provenance
+          path: ${{ runner.temp }}/migration.json
+          if-no-files-found: error
