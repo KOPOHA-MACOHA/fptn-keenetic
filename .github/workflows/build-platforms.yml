@@ -55,15 +55,6 @@ jobs:
           echo "key=$(python3 scripts/platform-dependency-key.py ports/generated)" >> "$GITHUB_OUTPUT"
           mkdir -p "$RUNNER_TEMP/port-deps"
       - uses: docker/setup-buildx-action@v3
-      - name: Compile and emulate C++20/threads/atomic64/coroutines probe
-        uses: docker/build-push-action@v6
-        with:
-          context: .
-          file: ports/generated/Dockerfile
-          target: probe-export
-          outputs: type=local,dest=out/probe
-          cache-from: type=gha,scope=port-${{ matrix.platform }}
-          cache-to: type=gha,mode=max,scope=port-${{ matrix.platform }}
       - id: restore
         uses: actions/cache/restore@v4
         with:
@@ -93,6 +84,17 @@ jobs:
         run: |
           uri=$(python3 scripts/dependency-image.py unpack "$RUNNER_TEMP/port-deps/dependencies.tar" "$RUNNER_TEMP/port-layout")
           echo "uri=$uri" >> "$GITHUB_OUTPUT"
+      - name: Compile and emulate C++20/threads/atomic64/coroutines probe
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: ports/generated/Dockerfile
+          target: prepared-probe-export
+          build-args: DEPENDENCIES_IMAGE=prepared-dependencies
+          build-contexts: prepared-dependencies=${{ steps.context.outputs.uri }}
+          outputs: type=local,dest=out/probe
+          cache-from: type=gha,scope=port-${{ matrix.platform }}
+          cache-to: type=gha,mode=max,scope=port-${{ matrix.platform }}
       - if: steps.restore.outputs.cache-hit != 'true'
         uses: actions/cache/save@v4
         with:

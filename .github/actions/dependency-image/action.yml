@@ -7,6 +7,9 @@ inputs:
   require-hit:
     description: Fail rather than rebuilding when verifying cross-job reuse.
     default: 'false'
+  restore-only:
+    description: Refuse dependency compilation if neither cache nor persistent snapshot is available.
+    default: 'false'
 outputs:
   context:
     description: Verified OCI build-context URI.
@@ -44,6 +47,12 @@ runs:
         GH_TOKEN: ${{ github.token }}
         GH_REPO: ${{ github.repository }}
       run: python3 scripts/arm-dependency-release.py restore mipsel-mips32r2-softfloat '${{ steps.key.outputs.key }}' "$RUNNER_TEMP/fptn-dependency-cache/dependencies.tar"
+    - name: Refuse a cold rebuild when a prepared image is required
+      if: inputs.restore-only == 'true' && steps.restore.outputs.cache-hit != 'true' && steps.release-dependencies.outputs.restored != 'true'
+      shell: bash
+      run: |
+        echo 'Prepared dependency snapshot is required; refusing a cold dependency build.' >&2
+        exit 1
     - id: seed
       if: steps.restore.outputs.cache-hit != 'true' && steps.release-dependencies.outputs.restored != 'true'
       shell: bash

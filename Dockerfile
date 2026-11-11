@@ -159,3 +159,19 @@ RUN sh /work/check-probe-mode.sh
 
 FROM scratch AS client-export
 COPY --from=client /out/ /
+
+# Offline probes share the verified toolchain snapshot with the client.
+FROM ${DEPENDENCIES_IMAGE} AS prepared-probe
+COPY src/platform-probe.cpp /work/platform-probe.cpp
+RUN mkdir -p /out && \
+    mipsel-openwrt-linux-musl-g++ -std=c++20 -Os -march=mips32r2 -mabi=32 \
+      -msoft-float -static -pthread /work/platform-probe.cpp -latomic -o /out/fptn-platform-probe && \
+    mipsel-openwrt-linux-musl-strip /out/fptn-platform-probe && \
+    python /work/verify-elf.py /out/fptn-platform-probe && \
+    timeout 30 qemu-mipsel /out/fptn-platform-probe && \
+    cp /work/sources.lock.json /out/ && \
+    cd /out && sha256sum fptn-platform-probe sources.lock.json > SHA256SUMS
+
+FROM scratch AS prepared-probe-export
+COPY --from=prepared-probe /out/ /
+
