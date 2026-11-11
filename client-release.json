@@ -1,7 +1,7 @@
 {
   "schema": 1,
   "platform": "mipsel-mips32r2-softfloat",
-  "buildRevision": "cd68d31215576185d51b77f31a568356dd562a09",
+  "buildRevision": "463469320ae4bfef7f96018de66be88be3ae9acb",
   "sha256": "352221d0dce4b0966d06f108daf62920facad9d1b004b2be89f8d6bcbe7bf0fb",
   "clientVersion": "0.8.0",
   "upstreamRevision": "a389bee62da930807c3bc85284ee4976e9c7e08f",
