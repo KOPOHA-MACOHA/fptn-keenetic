@@ -150,6 +150,12 @@ class FrontendTest(unittest.TestCase):
     def test_asset_urls_and_payload_checksums_match_actual_files(self):
         import sys
         subprocess.run([sys.executable,str(ROOT/'scripts/package-web.py'),'--check'],check=True,capture_output=True)
+        import re
+        version=re.search(r"const UI_VERSION = '([^']+)'",(ROOT/'web/app.js').read_text()).group(1)
+        installer=(ROOT/'scripts/install-web-ui.sh').read_text()
+        self.assertIn('data-ui-version="'+version+'"',installer)
+        self.assertIn('uiVersion:"'+version+'"',installer)
+
 
     def test_entry_renders_without_path_or_external_utilities(self):
         sh=shutil.which('sh')
