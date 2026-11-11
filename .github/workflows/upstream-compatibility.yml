@@ -1,0 +1,118 @@
+name: Validate upstream sources
+on:
+  push:
+    branches: [maintenance/upstream-updates]
+  workflow_call:
+    inputs:
+      source-ref:
+        description: Exact merged candidate commit; never published
+        type: string
+        required: true
+  workflow_dispatch:
+    inputs:
+      source-ref:
+        description: Exact merged candidate commit; never published
+        type: string
+        required: true
+permissions:
+  contents: read
+  actions: read
+jobs:
+  runtime:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.source-ref || github.sha }}
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Prepare runtime integration tests
+        run: |
+          sh scripts/prepare-ci-tests.sh php-cgi lighttpd libboost-dev libspdlog-dev libfmt-dev python3-yaml iproute2 iptables libarchive-dev libcurl4-openssl-dev pkg-config
+      - name: Build the pinned native opkg test tool
+        run: sh tests/build-opkg.sh
+      - name: Run runtime, panel and isolated kernel checks
+        run: |
+          python3 scripts/package-web.py --check
+          sudo --preserve-env=PATH env FPTN_REQUIRE_NETNS=1 FPTN_TEST_OPKG="$FPTN_TEST_OPKG" python3 -m unittest discover -s tests -v
+  client:
+    strategy:
+      fail-fast: false
+      matrix:
+        platform: [mipsel-mips32r2-softfloat, aarch64, armv7-softfloat]
+    runs-on: ubuntu-24.04
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.source-ref || github.sha }}
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Check exact candidate and dependency review before downloads
+        env:
+          SOURCE_REF: ${{ inputs.source-ref || github.sha }}
+        run: |
+          python3 - <<'PY'
+          import json,os,re,subprocess
+          from pathlib import Path
+          ref=os.environ['SOURCE_REF']
+          if not re.fullmatch('[0-9a-f]{40}',ref):raise SystemExit('An exact source commit is required')
+          if subprocess.check_output(['git','rev-parse','HEAD'],text=True).strip()!=ref:raise SystemExit('Wrong source checkout')
+          meta=json.loads(Path('sources.upstream.json').read_text())
+          if meta.get('dependencyReview')=='refresh-required':raise SystemExit('Upstream dependency/CMake changes require a reviewed lock and SDK refresh; no cold build will run')
+          PY
+      - name: Select platform Dockerfile and exact dependency key
+        id: key
+        env:
+          PLATFORM: ${{ matrix.platform }}
+        run: |
+          set -eu
+          if [ "$PLATFORM" = mipsel-mips32r2-softfloat ]; then
+            key=$(python3 scripts/dependency-image.py key .)
+            file=Dockerfile
+          else
+            python3 scripts/render-platform.py . "$PLATFORM" ports/generated
+            key=$(python3 scripts/platform-dependency-key.py ports/generated)
+            file=ports/generated/Dockerfile
+          fi
+          echo "key=$key" >> "$GITHUB_OUTPUT"
+          echo "file=$file" >> "$GITHUB_OUTPUT"
+      - uses: docker/setup-buildx-action@v3
+      - name: Restore reviewed immutable dependency SDK; never build Conan
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          PLATFORM: ${{ matrix.platform }}
+          KEY: ${{ steps.key.outputs.key }}
+        run: |
+          set -eu
+          python3 scripts/arm-dependency-release.py restore "$PLATFORM" "$KEY" "$RUNNER_TEMP/upstream-deps/dependencies.tar"
+          test -s "$RUNNER_TEMP/upstream-deps/dependencies.tar" || { echo 'Reviewed SDK missing; no cold rebuild allowed' >&2; exit 1; }
+      - name: Verify every OCI blob and export committed fork sources
+        id: context
+        run: |
+          set -eu
+          uri=$(python3 scripts/dependency-image.py unpack "$RUNNER_TEMP/upstream-deps/dependencies.tar" "$RUNNER_TEMP/upstream-layout")
+          echo "uri=$uri" >> "$GITHUB_OUTPUT"
+          python3 scripts/export-fork-source.py out/fork-source
+      - name: Compile client; verify ELF and offline CLI under QEMU
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: ${{ steps.key.outputs.file }}
+          target: client-export
+          build-args: |
+            DEPENDENCIES_IMAGE=prepared-dependencies
+            DEPENDENCIES_CONTEXT=${{ steps.context.outputs.uri }}
+          build-contexts: |
+            prepared-dependencies=${{ steps.context.outputs.uri }}
+            fork-source=./out/fork-source
+          outputs: type=local,dest=out/client
+          cache-from: type=gha,scope=upstream-${{ matrix.platform }}
+          cache-to: type=gha,mode=max,scope=upstream-${{ matrix.platform }}
+      - uses: actions/upload-artifact@v4
+        with:
+          name: upstream-client-${{ matrix.platform }}
+          path: out/client/
+          if-no-files-found: error

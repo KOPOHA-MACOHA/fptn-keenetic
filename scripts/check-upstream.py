@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """Propose stable FPTN upgrades without editing main or moving existing branches."""
 import base64
+import importlib.util
 import json
 import os
 from pathlib import Path
@@ -74,7 +75,14 @@ def read_lock(api, repository, ref):
     return lock
 
 
-def propose(api, run_url):
+def prepare_entries(root, main, candidate, tag):
+    spec = importlib.util.spec_from_file_location('merge_upstream', Path(__file__).with_name('merge-upstream.py'))
+    merger = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(merger)
+    return merger.merge_entries(root or Path(__file__).resolve().parents[1], main, candidate, tag)
+
+
+def propose(api, run_url, root=None):
     release = stable_release(api.get(f'/repos/{UPSTREAM}/releases?per_page=100'))
     tag = release['tag_name']
     candidate = valid_sha(api.get(f'/repos/{UPSTREAM}/commits/{urllib.parse.quote(tag, safe="")}')['sha'])
@@ -83,7 +91,7 @@ def propose(api, run_url):
     before = lock['fptn']
     comparison = api.get(f'/repos/{UPSTREAM}/compare/{before}...{candidate}')
     status = comparison['status']
-    base_result = {'changed':False, 'release':tag, 'revision':candidate, 'source_sha':'', 'pr_url':''}
+    base_result = {'changed':False, 'release':tag, 'revision':candidate, 'source_sha':'', 'pr_url':'', 'build_ready':False}
     if status == 'identical':
         return {**base_result, 'message':f'Already using stable FPTN {tag} ({candidate[:12]}).'}
     if status == 'behind':
@@ -100,21 +108,29 @@ def propose(api, run_url):
     if existing:
         head = valid_sha(existing['object']['sha'])
         # Resume after a branch was created but PR creation failed. Never rewrite it.
-        if read_lock(api, REPOSITORY, head)['fptn'] != candidate:
+        ancestry = api.get(f'/repos/{REPOSITORY}/compare/{candidate}...{head}')
+        if ancestry['status'] not in ('ahead', 'identical') or read_lock(api, REPOSITORY, head)['fptn'] != candidate:
             raise ValueError('Existing update branch has different sources; preserving it for review')
     else:
         tree = api.get(f'/repos/{REPOSITORY}/git/commits/{main}')['tree']['sha']
-        updated = {**lock, 'fptn':candidate}
-        metadata = {'schema':1, 'repository':UPSTREAM, 'release':tag, 'revision':candidate}
-        entries = [{'path':name, 'mode':'100644', 'type':'blob', 'content':json.dumps(value, indent=2)+'\n'}
-                   for name,value in [('sources.lock.json',updated),('sources.upstream.json',metadata)]]
+        entries, ready = prepare_entries(root, main, candidate, tag)
+        for entry in entries:
+            if 'data' in entry:
+                entry['sha'] = api.post(f'/repos/{REPOSITORY}/git/blobs',
+                    {'encoding':'base64', 'content':entry.pop('data')})['sha']
         tree = api.post(f'/repos/{REPOSITORY}/git/trees', {'base_tree':tree,'tree':entries})['sha']
         head = valid_sha(api.post(f'/repos/{REPOSITORY}/git/commits',
-            {'message':f'Update FPTN upstream to {tag}', 'tree':tree,'parents':[main]})['sha'])
+            {'message':f'Update FPTN upstream to {tag}', 'tree':tree,'parents':[main,candidate]})['sha'])
         api.post(f'/repos/{REPOSITORY}/git/refs', {'ref':'refs/heads/'+branch,'sha':head})
+    if existing:
+        value = api.get(f'/repos/{REPOSITORY}/contents/sources.upstream.json?ref={head}')
+        ready = json.loads(base64.b64decode(value['content'])).get('buildReady') is True
+    dependency_note = ('Dependency recipes and CMake inputs are unchanged; the reviewed SDK snapshots are reused.'
+                       if ready else 'Dependency/CMake changes require an explicit lock and SDK refresh. Automatic cold dependency builds are disabled for this validation.')
     body = (f'Update original FPTN from `{before}` to stable [{tag}]'
             f'(https://github.com/{UPSTREAM}/releases/tag/{tag}) (`{candidate}`).\n\n'
-            'The four pinned dependency revisions are preserved. Keenetic adaptations, '
+            'This PR merges the actual upstream source tree and retains both Git parents. '
+            f'{dependency_note} The four pinned dependency revisions are preserved. Keenetic adaptations, '
             'routing ownership and router settings are unchanged.\n\n'
             f'Validation runs against this exact PR commit: {run_url}\n\n'
             'The scheduled workflow calls the build explicitly because PRs created by '
@@ -123,7 +139,7 @@ def propose(api, run_url):
             'and publishing a new web update catalog remain separate steps. No automatic merge or deployment.')
     pull = api.post(f'/repos/{REPOSITORY}/pulls', {'title':f'Update original FPTN to {tag}',
         'head':branch,'base':'main','body':body,'draft':True})
-    return {**base_result, 'changed':True, 'source_sha':head, 'pr_url':pull['html_url'],
+    return {**base_result, 'changed':True, 'build_ready':ready, 'source_sha':head, 'pr_url':pull['html_url'],
             'message':'Created draft PR; compatibility checks and the client build will run next.'}
 
 
@@ -141,7 +157,7 @@ def main():
     print(json.dumps(result))
     if os.environ.get('GITHUB_OUTPUT'):
         with open(os.environ['GITHUB_OUTPUT'], 'a') as stream:
-            for key in ('changed','source_sha','pr_url'):
+            for key in ('changed','source_sha','pr_url','build_ready'):
                 value = result[key]
                 stream.write(f'{key}={str(value).lower() if isinstance(value,bool) else value}\n')
     if os.environ.get('GITHUB_STEP_SUMMARY'):

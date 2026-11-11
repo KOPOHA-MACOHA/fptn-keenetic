@@ -10,6 +10,7 @@ on:
       - 'depends/**'
       - 'deploy/**'
       - 'scripts/export-fork-source.py'
+      - 'scripts/dependency-reuse.py'
       - 'sources.lock.json'
       - 'profiles/**'
       - 'src/**'
@@ -68,6 +69,11 @@ jobs:
         id: import-dependencies
         if: steps.restore.outputs.cache-hit != 'true' && steps.release-dependencies.outputs.restored != 'true'
         run: python3 scripts/import-dependency-image.py '${{ matrix.platform }}' '${{ steps.key.outputs.key }}' "$RUNNER_TEMP/port-deps/dependencies.tar"
+      - name: Refuse cold dependency compilation for a source-only SDK reuse plan
+        if: hashFiles('build-locks/source-reuse.json') != '' && steps.restore.outputs.cache-hit != 'true' && steps.release-dependencies.outputs.restored != 'true'
+        run: |
+          echo 'Reviewed dependency snapshot missing; refresh SDK locks explicitly.' >&2
+          exit 1
       - name: Prepare dependencies only when both stores are missing
         if: steps.restore.outputs.cache-hit != 'true' && steps.release-dependencies.outputs.restored != 'true' && steps.import-dependencies.outputs.restored != 'true'
         uses: docker/build-push-action@v6
@@ -90,7 +96,9 @@ jobs:
           context: .
           file: ports/generated/Dockerfile
           target: prepared-probe-export
-          build-args: DEPENDENCIES_IMAGE=prepared-dependencies
+          build-args: |
+            DEPENDENCIES_IMAGE=prepared-dependencies
+            DEPENDENCIES_CONTEXT=${{ steps.context.outputs.uri }}
           build-contexts: prepared-dependencies=${{ steps.context.outputs.uri }}
           outputs: type=local,dest=out/probe
           cache-from: type=gha,scope=port-${{ matrix.platform }}
@@ -110,7 +118,9 @@ jobs:
           context: .
           file: ports/generated/Dockerfile
           target: platform-export
-          build-args: DEPENDENCIES_IMAGE=prepared-dependencies
+          build-args: |
+            DEPENDENCIES_IMAGE=prepared-dependencies
+            DEPENDENCIES_CONTEXT=${{ steps.context.outputs.uri }}
           build-contexts: |
             prepared-dependencies=${{ steps.context.outputs.uri }}
             fork-source=./out/fork-source
