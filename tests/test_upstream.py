@@ -4,6 +4,7 @@ import importlib.util
 import json
 from pathlib import Path
 import unittest
+from unittest.mock import patch
 
 ROOT=Path(__file__).resolve().parents[1]
 spec=importlib.util.spec_from_file_location('upstream',ROOT/'scripts/check-upstream.py')
@@ -21,6 +22,7 @@ class FakeGitHub:
         if path.startswith('/repos/fptn-project/fptn/commits/'):return {'sha':B}
         if '/compare/' in path:return {'status':self.status,'ahead_by':1 if self.status=='ahead' else 0}
         if '/git/ref/heads/main' in path:return {'object':{'sha':C}}
+        if '/contents/sources.upstream.json?' in path:return {'content':base64.b64encode(b'{"buildReady":true}').decode()}
         if '/contents/sources.lock.json?' in path:
             lock=self.branch_lock if path.endswith(D) and self.branch_lock else self.lock
             raw=json.dumps(lock).encode();return {'encoding':'base64','size':len(raw),'content':base64.b64encode(raw).decode()}
@@ -31,6 +33,7 @@ class FakeGitHub:
     def post(self,path,body):
         assert path.startswith('/repos/KOPOHA-MACOHA/fptn-keenetic/')
         self.writes.append((path,body))
+        if path.endswith('/git/blobs'):return {'sha':C}
         if path.endswith('/git/trees'):return {'sha':C}
         if path.endswith('/git/commits'):return {'sha':D}
         if path.endswith('/git/refs'):return {}
@@ -38,6 +41,12 @@ class FakeGitHub:
         raise AssertionError(path)
 
 class UpstreamTest(unittest.TestCase):
+    def setUp(self):
+        self.merger=patch.object(upstream,'prepare_entries',return_value=([
+            {'path':'src/client.cpp','mode':'100644','type':'blob','data':base64.b64encode(b'// merged sources').decode()},
+            {'path':'sources.lock.json','mode':'100644','type':'blob','data':base64.b64encode(json.dumps({'fptn':B}).encode()).decode()}],True))
+        self.merger.start();self.addCleanup(self.merger.stop)
+
     def test_stable_release_selection_excludes_previews_drafts_and_non_versions(self):
         entries=[{'tag_name':tag,'draft':draft,'prerelease':pre} for tag,draft,pre in
                  [('0.4.6',False,False),('v0.4.10',False,False),('0.4.9',False,False),('1.0.0',True,False),('2.0.0',False,True),('3.0.0-rc1',False,False),('main',False,False)]]
@@ -53,14 +62,15 @@ class UpstreamTest(unittest.TestCase):
         api=FakeGitHub();api.lock['boringssl']='main'
         with self.assertRaises(ValueError):upstream.propose(api,'run')
         self.assertEqual(api.writes,[])
-    def test_new_release_changes_only_source_lock_and_metadata_in_new_branch(self):
+    def test_new_release_contains_sources_and_both_merge_parents(self):
         api=FakeGitHub();result=upstream.propose(api,'https://example.test/run')
         self.assertTrue(result['changed']);self.assertEqual(result['source_sha'],D)
-        tree=api.writes[0][1];self.assertEqual(tree['base_tree'],C)
-        self.assertEqual([x['path'] for x in tree['tree']],['sources.lock.json','sources.upstream.json'])
-        lock=json.loads(tree['tree'][0]['content']);self.assertEqual(lock,{**api.lock,'fptn':B})
-        ref=api.writes[2][1];self.assertEqual(ref['sha'],D);self.assertTrue(ref['ref'].startswith('refs/heads/auto/upstream-0.4.7-'))
-        pr=api.writes[3][1];self.assertTrue(pr['draft']);self.assertEqual(pr['base'],'main');self.assertIn('https://example.test/run',pr['body'])
+        writes={path.rsplit('/',1)[-1]:body for path,body in api.writes}
+        self.assertEqual([x['path'] for x in writes['trees']['tree']],['src/client.cpp','sources.lock.json'])
+        self.assertEqual(writes['commits']['parents'],[C,B])
+        self.assertEqual(writes['refs']['sha'],D)
+        self.assertTrue(writes['pulls']['draft']);self.assertEqual(writes['pulls']['base'],'main')
+        self.assertIn('https://example.test/run',writes['pulls']['body'])
     def test_existing_open_or_closed_pr_does_not_rebuild_or_overwrite(self):
         for state in ['open','closed']:
             api=FakeGitHub();api.pulls=[{'state':state,'html_url':'https://example.test/pr'}]
@@ -79,7 +89,12 @@ class UpstreamTest(unittest.TestCase):
             self.assertEqual(workflow.count('uses: actions/checkout@v4'),workflow.count('ref: ${{ inputs.source-ref || github.sha }}'))
         self.assertIn("if: inputs.source-ref == '' && github.event_name == 'push'",build)
         checker=(ROOT/'.github/workflows/check-upstream.yml').read_text()
-        self.assertIn('uses: ./.github/workflows/build.yml',checker);self.assertIn('uses: ./.github/workflows/check-runtime.yml',checker)
+        self.assertIn('uses: ./.github/workflows/upstream-compatibility.yml',checker)
+        validation=(ROOT/'.github/workflows/upstream-compatibility.yml').read_text()
+        self.assertIn('platform: [mipsel-mips32r2-softfloat, aarch64, armv7-softfloat]',validation)
+        self.assertNotIn('contents: write',validation)
+        self.assertNotIn('gh release create',validation)
+        self.assertNotIn('target: dependency-image',validation)
     def test_real_api_refuses_writes_to_other_repositories(self):
         with self.assertRaises(ValueError):upstream.GitHub('secret').post('/repos/fptn-project/fptn/pulls',{})
         with self.assertRaises(ValueError):upstream.GitHub('secret').post('/repos/other/project/git/refs',{})

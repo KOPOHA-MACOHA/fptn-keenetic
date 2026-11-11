@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 """Export the committed fork sources for the client stage, reusing locked dependencies."""
+import importlib.util
 import io
 import json
 from pathlib import Path
@@ -27,8 +28,11 @@ def export(root, destination):
     destination.mkdir(parents=True, exist_ok=False)
     with tarfile.open(fileobj=io.BytesIO(git('archive', revision, '--', *SOURCE_PATHS))) as archive:
         archive.extractall(destination, filter='data')
+    spec = importlib.util.spec_from_file_location('dependency_reuse', Path(__file__).with_name('dependency-reuse.py'))
+    reuse = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(reuse)
     (destination/'FORK-SOURCE.json').write_text(json.dumps({
-        'schema': 1, 'repositoryRevision': revision, 'upstreamRevision': upstream,
+        'schema': 1, 'repositoryRevision': revision, 'upstreamRevision': upstream, 'dependencyPaths': reuse.tracked_dependencies(root),
     }, indent=2) + '\n')
     print('Exported committed fork sources: ' + revision)
 

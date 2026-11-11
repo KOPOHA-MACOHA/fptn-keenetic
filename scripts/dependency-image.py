@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 """Content key and integrity checks for the reusable dependency OCI image."""
+import importlib.util
 import hashlib
 import json
 import pathlib
@@ -17,9 +18,15 @@ def cache_key(root):
     dockerfile = (root / 'Dockerfile').read_text()
     if dockerfile.count(MARKER) != 1:
         raise ValueError('Missing/duplicate dependency image boundary')
+    source_lock = (root/'sources.lock.json').read_bytes()
+    if (root/'build-locks/source-reuse.json').exists():
+        spec = importlib.util.spec_from_file_location('dependency_reuse', root/'scripts/dependency-reuse.py')
+        reuse = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(reuse)
+        source_lock = reuse.cached_sources(root)
     prefix = dockerfile.split(MARKER)[0].encode()
     digest = hashlib.sha256(b'fptn-dependency-image-v1\0')
-    for name, data in [('Dockerfile.dependencies', prefix), *[(name, (root/name).read_bytes()) for name in INPUTS]]:
+    for name, data in [('Dockerfile.dependencies', prefix), *[(name, source_lock if name == "sources.lock.json" else (root/name).read_bytes()) for name in INPUTS]]:
         digest.update(name.encode() + b'\0' + len(data).to_bytes(8, 'big') + data)
     return digest.hexdigest()
 

@@ -96,12 +96,18 @@ WORKDIR /work/upstream
 FROM ${DEPENDENCIES_IMAGE} AS client
 # Compile this fork's committed sources, rather than the original cached checkout.
 # Only the client stage changes; dependency-image input keys remain unchanged.
-RUN rm -rf /work/upstream && mkdir /work/upstream
-COPY --from=fork-source / /work/upstream/
-RUN python /work/prepare-source.py /work/upstream /work/sources.lock.json
-# Restored OCI snapshots skip dependencies above; verify their locks here too.
-# This offline guard never installs or rebuilds Conan packages.
-COPY build-locks /work/build-locks
+COPY --from=fork-source / /work/candidate-source/
+COPY sources.lock.json /work/candidate.sources.lock.json
+COPY build-locks /work/candidate-build-locks
+COPY profiles/mipsel-softfloat /work/candidate.profile
+COPY scripts/dependency-reuse.py /work/dependency-reuse.py
+RUN python /work/prepare-source.py /work/candidate-source /work/candidate.sources.lock.json && \
+    python /work/dependency-reuse.py audit /work && \
+    rm -rf /work/upstream /work/build-locks && \
+    mv /work/candidate-source /work/upstream && \
+    mv /work/candidate-build-locks /work/build-locks && \
+    mv /work/candidate.sources.lock.json /work/sources.lock.json
+# Validate exact tools and the complete offline Conan graph after the SDK audit.
 COPY scripts/dependency-lock.py /work/dependency-lock.py
 RUN python /work/dependency-lock.py check /work/build-locks
 COPY scripts/check-cross-includes.py /work/check-cross-includes.py

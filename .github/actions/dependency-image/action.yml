@@ -48,7 +48,7 @@ runs:
         GH_REPO: ${{ github.repository }}
       run: python3 scripts/arm-dependency-release.py restore mipsel-mips32r2-softfloat '${{ steps.key.outputs.key }}' "$RUNNER_TEMP/fptn-dependency-cache/dependencies.tar"
     - name: Refuse a cold rebuild when a prepared image is required
-      if: inputs.restore-only == 'true' && steps.restore.outputs.cache-hit != 'true' && steps.release-dependencies.outputs.restored != 'true'
+      if: (inputs.restore-only == 'true' || hashFiles('build-locks/source-reuse.json') != '') && steps.restore.outputs.cache-hit != 'true' && steps.release-dependencies.outputs.restored != 'true'
       shell: bash
       run: |
         echo 'Prepared dependency snapshot is required; refusing a cold dependency build.' >&2
