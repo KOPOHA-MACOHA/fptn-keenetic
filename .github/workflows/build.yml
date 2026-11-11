@@ -6,6 +6,8 @@ on:
       - '**/*.md'
       - 'web/**'
       - 'scripts/install-web-ui.sh'
+      - 'scripts/fptn-backup-retention.php'
+      - 'tests/test_backup_retention.py'
       - 'scripts/package-web.py'
       - 'scripts/fptn-native-service.sh'
       - 'scripts/fptn-web-auth.sh'
