@@ -1,5 +1,5 @@
 'use strict';
-const UI_VERSION = '0.18.4';
+const UI_VERSION = '0.18.5';
 const $ = id => document.getElementById(id);
 if (window.top !== window.self) { document.documentElement.replaceChildren(); throw new Error('Panel cannot be framed'); }
 let profiles={},clientCapabilities=null;
@@ -11,13 +11,15 @@ let authConfigured=true,authMode='panel',accountData=null,accountPending=false;
 let key=sessionStorage.getItem('fptn-ui-session')||'';
 let sessionReady=false;
 let pending=false,lastBusy=false,loaded=false,polling=false,timer,dirty=false,savedSnapshot='',versionMismatch=false;
+const POLL_IDLE_MS=20000,POLL_ACTIVE_MS=2000,POLL_RETRY_MS=10000;
+let pollTimer=null,pollRequested=false,commandSending=false,statusGeneration=0,lastRenderedStatus='';
 let savedFallback={enabled:false,profiles:[],domains:[],budget:60};
 let previewToken='',serverNames=[],favorites=new Set(),excluded=new Set(),lastData=null;
 const healthNodes=new Map();
 const fallbackProfiles=['fallback-profile-1','fallback-profile-2'];
 function notice(message,error=false){$('notice').textContent=message;$('notice').classList.toggle('error',error);$('notice').hidden=false;clearTimeout(timer);timer=setTimeout(()=>{$('notice').hidden=true;},error?14000:6500);}
 function showAuthLoading(){
-  sessionReady=false;$('login').hidden=true;$('dashboard').hidden=true;$('logout').hidden=true;
+  clearPollTimer();statusGeneration++;lastRenderedStatus='';sessionReady=false;$('login').hidden=true;$('dashboard').hidden=true;$('logout').hidden=true;
   $('auth-loading').hidden=false;$('auth-loading-message').textContent='Проверяем сессию…';$('auth-retry').hidden=true;
 }
 function showAuthError(error){showAuthLoading();$('auth-loading-message').textContent=error.message;$('auth-retry').hidden=false;}
@@ -35,12 +37,12 @@ async function initializePanel(){
 }
 
 async function api(query,body){
-  const controller=new AbortController();
+  const requestKey=key,controller=new AbortController();
   const timeout=setTimeout(()=>controller.abort(),15000);
   try{
-    const response=await fetch('api.cgi'+(query?'?'+query:''),{signal:controller.signal,method:body?'POST':'GET',cache:'no-store',credentials:'omit',headers:{Authorization:'Bearer '+key,...(body?{'Content-Type':'application/json'}:{})},...(body?{body:JSON.stringify(body)}:{})});
+    const response=await fetch('api.cgi'+(query?'?'+query:''),{signal:controller.signal,method:body?'POST':'GET',cache:'no-store',credentials:'omit',headers:{Authorization:'Bearer '+requestKey,...(body?{'Content-Type':'application/json'}:{})},...(body?{body:JSON.stringify(body)}:{})});
     let data;try{data=await response.json();}catch{throw new Error('Не удалось прочитать ответ панели. Обновите страницу.');}
-    if(response.status===401){loggedOut();throw new Error(data.error||'Войдите по логину и паролю.');}
+    if(response.status===401){if(key===requestKey)loggedOut();throw new Error(data.error||'Войдите по логину и паролю.');}
     if(!response.ok){const error=new Error(data.error||'Ошибка запроса');error.status=response.status;throw error;}return data;
   }catch(error){
     if(controller.signal.aborted)throw new Error('Панель не ответила за 15 секунд. Обновите страницу, чтобы проверить состояние.');
@@ -148,7 +150,11 @@ async function loadSettings(){
 }
 function applyStatus(data){
   if(!data.service||typeof data.service.state!=='string')throw new Error('Старая версия API. Обновите панель и управляющий скрипт.');
-  lastData=data;versionMismatch=data.uiVersion!==UI_VERSION;
+  lastData=data;
+  $('memory').textContent=data.rssKiB?'ОЗУ '+(data.rssKiB/1024).toFixed(1)+' МиБ':'';
+  const signature=JSON.stringify({...data,rssKiB:undefined});
+  if(signature===lastRenderedStatus){observeUpdate(data);setControls();return;}
+  lastRenderedStatus=signature;versionMismatch=data.uiVersion!==UI_VERSION;
   $('versions').textContent='Панель '+UI_VERSION+' · клиент Keenetic '+data.clientVersion+' · исходный FPTN '+(data.upstreamVersion||'не определён')+(data.clientBuildRevision?' · сборка '+data.clientBuildRevision.slice(0,7):'');
   $('version-mismatch').hidden=!versionMismatch;
   if(versionMismatch)$('version-mismatch-text').textContent='Версия страницы '+UI_VERSION+' отличается от API '+data.uiVersion+'. Обновите страницу.';
@@ -180,7 +186,6 @@ function applyStatus(data){
   const moving=data.portChange;$('port-transition').hidden=!moving;
   if(moving){$('port-link').href=moving.newOrigin;$('port-transition-text').textContent='Новый адрес: '+moving.newOrigin+'. Подтвердите до '+new Date(moving.deadline*1000).toLocaleTimeString('ru-RU');}
 
-  $('memory').textContent=data.rssKiB?'ОЗУ '+(data.rssKiB/1024).toFixed(1)+' МиБ':'';
   $('recover-operation').hidden=!data.operationState?.stale;
   const operations={'setup-interface':'Создание интерфейса FPTN',recover:'Восстановление управления',start:'Запуск клиента',stop:'Остановка клиента',restart:'Переподключение',save:'Применение настроек',check:'Проверка входа на серверы','change-port':'Смена порта панели','check-update':'Проверка обновлений',update:'Установка обновления'};
   if(data.busy&&data.operation==='check-update')$('update-status').textContent='Проверяем наличие обновлений…';
@@ -189,22 +194,44 @@ function applyStatus(data){
   observeUpdate(data);
   updateHealth();updateDirty();
 }
-function showOffline(error){if(updateWatch&&!updateWatch.finished)renderUpdate('Панель временно недоступна. Ожидаем восстановления связи…');lastData=null;$('status-title').textContent='Нет связи с панелью';$('status-message').textContent=error.message;$('indicator').className='dot';setControls();}
+function showOffline(error){lastRenderedStatus='';if(updateWatch&&!updateWatch.finished)renderUpdate('Панель временно недоступна. Ожидаем восстановления связи…');lastData=null;$('status-title').textContent='Нет связи с панелью';$('status-message').textContent=error.message;$('indicator').className='dot';setControls();}
+function clearPollTimer(){clearTimeout(pollTimer);pollTimer=null;}
+function pollDelay(){
+  if(lastData?.operationState?.stale&&!pending&&!commandSending)return POLL_IDLE_MS;
+  if(pending||lastBusy||accountPending||commandSending||(updateWatch&&!updateWatch.finished)||lastData?.portChange)return POLL_ACTIVE_MS;
+  if(!lastData)return POLL_RETRY_MS;
+  const service=lastData.service;
+  if(service?.state==='waiting-network')return POLL_RETRY_MS;
+  if(service?.state==='retrying'&&service.retryAt>0)return Math.max(POLL_ACTIVE_MS,Math.min(POLL_IDLE_MS,service.retryAt*1000-Date.now()));
+  return service&&(['starting','selecting','retrying','reconnecting'].includes(service.state)||(service.state==='running'&&!service.connected))?POLL_ACTIVE_MS:POLL_IDLE_MS;
+}
+function schedulePoll(delay=pollDelay()){
+  clearPollTimer();
+  if(!key||!sessionReady||document.hidden||polling||commandSending)return;
+  pollTimer=setTimeout(()=>{pollTimer=null;poll();},delay);
+}
 async function poll(){
-  if(!key||!sessionReady||polling)return;polling=true;
-  try{const data=await api('status');const finished=(lastBusy||pending)&&!data.busy&&data.result;lastBusy=data.busy;applyStatus(data);
+  if(!key||!sessionReady||document.hidden)return;
+  if(polling||commandSending||accountPending){pollRequested=true;return;}
+  clearPollTimer();pollRequested=false;polling=true;
+  const generation=statusGeneration,requestKey=key;
+  try{const data=await api('status');
+    // An older GET must not complete a newly submitted operation or a new session.
+    if(generation!==statusGeneration||requestKey!==key||!sessionReady)return;
+    const finished=(lastBusy||pending)&&!data.busy&&data.result;lastBusy=data.busy;applyStatus(data);
     if(finished){pending=false;notice(data.result.message,!data.result.ok);if(data.result.ok&&data.result.action==='save')await loadSettings();if(data.result.action==='check-update'||(data.result.action==='update'&&!data.result.ok))await loadUpdates();}
     setControls();
-  }catch(error){if(key)showOffline(error);}finally{polling=false;}
+  }catch(error){if(key===requestKey&&sessionReady&&generation===statusGeneration)showOffline(error);}
+  finally{polling=false;const requested=pollRequested;pollRequested=false;schedulePoll(requested?0:pollDelay());}
 }
 async function openPanel(){
-  const data=await api('status');sessionStorage.setItem('fptn-ui-session',key);sessionReady=true;$('password').value='';$('auth-loading').hidden=true;$('login').hidden=true;$('dashboard').hidden=false;$('logout').hidden=false;lastBusy=data.busy;applyStatus(data);
+  const data=await api('status');sessionStorage.setItem('fptn-ui-session',key);sessionReady=true;$('password').value='';$('auth-loading').hidden=true;$('login').hidden=true;$('dashboard').hidden=false;$('logout').hidden=false;lastBusy=data.busy;applyStatus(data);schedulePoll();
   try{await loadSettings();}catch(error){notice(error.message,true);$('settings-error').hidden=false;$('settings-error').textContent='Список серверов не загружен: '+error.message;}
   if(!key)return;
   try{await loadUpdates();}catch(error){notice(error.message,true);}
   if(!key)return;
   try{await loadAccount();}catch(error){notice(error.message,true);}
-  setControls();
+  setControls();schedulePoll();
 }
 function showAccountMode(){
   const panel=$('account-mode').value==='panel';$('account-panel-fields').hidden=!panel;
@@ -226,7 +253,7 @@ $('account-form').addEventListener('submit',async event=>{
   else if(accountData.mode!=='entware')body.rootPassword=$('account-root-password').value;
   try{await api('account',body);if(body.mode==='panel')$('username').value=body.username;loggedOut();notice('Вход изменён. Войдите с новыми данными.');}
   catch(error){notice(error.message,true);}
-  finally{for(const id of ['account-current-password','account-password','account-confirm','account-root-password'])$(id).value='';accountPending=false;setControls();}
+  finally{for(const id of ['account-current-password','account-password','account-confirm','account-root-password'])$(id).value='';accountPending=false;setControls();schedulePoll();}
 });
 function updateLoginForm(){
   const root=(authConfigured?authMode:$('auth-choice').value)==='entware';
@@ -342,15 +369,15 @@ $('update-dialog').addEventListener('keydown',event=>{
 async function command(body){
   if(pending||versionMismatch||(updateWatch&&!updateWatch.finished)||(lastBusy&&!(body.action==='recover'&&lastData?.operationState?.canRecover)))return;
   if(body.action==='update')beginUpdate(updateInfo);
-  pending=true;setControls();
-  try{await api('',body);if(body.action==='update'&&!updateWatch?.finished){updateWatch.accepted=true;renderUpdate('Запрос принят. Ожидаем завершения установки…');}else if(body.action!=='check-update')notice('Операция запущена. Состояние обновляется автоматически.');await poll();}
+  pending=true;commandSending=true;statusGeneration++;clearPollTimer();setControls();
+  try{await api('',body);commandSending=false;if(body.action==='update'&&!updateWatch?.finished){updateWatch.accepted=true;renderUpdate('Запрос принят. Ожидаем завершения установки…');}else if(body.action!=='check-update')notice('Операция запущена. Состояние обновляется автоматически.');await poll();}
   catch(error){
     if(body.action==='update'&&updateWatch&&!updateWatch.finished){
       if(error.status){finishUpdate(false,error.message);}
       else{updateWatch.uncertain=true;renderUpdate('Ответ не получен. Запрос мог быть принят — ожидаем состояния панели…');}
     }else{pending=false;notice(error.message,true);}
     setControls();
-  }
+  }finally{commandSending=false;schedulePoll();}
 }
 document.querySelectorAll('[data-command]').forEach(button=>button.addEventListener('click',()=>command({action:button.dataset.command})));
 $('recover-operation').addEventListener('click',()=>command({action:'recover'}));
@@ -362,7 +389,7 @@ $('port-rollback').addEventListener('click',()=>command({action:'cancel-port'}))
 $('port-confirm').addEventListener('click',async()=>{try{await api('',{action:'confirm-port',id:lastData?.portChange?.id});notice('Новый адрес подтверждён. Дождитесь завершения перезапуска панели.');}catch(error){notice(error.message,true);}});
 $('download-diagnostics').addEventListener('click',async()=>{try{const data=await api('diagnostics');const blob=new Blob([JSON.stringify(data,null,2)+'\n'],{type:'application/json'});const url=URL.createObjectURL(blob);const a=document.createElement('a');a.href=url;a.download='fptn-diagnostics.json';a.click();setTimeout(()=>URL.revokeObjectURL(url),1000);}catch(error){notice(error.message,true);}});
 $('refresh-logs').addEventListener('click',async()=>{try{$('logs').textContent=(await api('logs')).log||'Журнал пока пуст.';}catch(error){notice(error.message,true);}});
-document.addEventListener('visibilitychange',()=>{if(!document.hidden)poll();});setInterval(()=>{if(!document.hidden)poll();},5000);
+document.addEventListener('visibilitychange',()=>{clearPollTimer();if(!document.hidden)poll();});
 $('auth-retry').addEventListener('click',initializePanel);
 selectTab('status');fillProfiles();setControls();initializePanel();
 
