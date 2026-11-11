@@ -56,3 +56,45 @@ class ReleaseMigrationTest(unittest.TestCase):
             with self.assertRaises(ValueError):
                 mirror.mirror(Fake(), {'releases': []}, ROOT)
             execute.assert_not_called()
+
+
+class DraftResumeTest(unittest.TestCase):
+    def test_complete_draft_resumes_without_tag_lookup_or_reupload(self):
+        revision = 'a'*40
+        asset = {'id': 2, 'name': 'asset.tar', 'size': 1, 'digest': 'sha256:'+'b'*64}
+        release = {'id': 1, 'tag_name': 'v0.1.0', 'target_commitish': revision,
+                   'name': 'Fixture', 'body': '', 'prerelease': False, 'assets': [asset]}
+        current = {**release, 'id': 100, 'draft': True,
+                   'assets': [{**asset, 'id': 200}]}
+        writes = []
+        test_case = self
+        class Fake:
+            def call(self, method, repo, endpoint='', body=None, missing=False):
+                if method == 'PATCH':
+                    writes.append(endpoint)
+                    current.update(body)
+                    return current
+                test_case.assertEqual(method, 'GET')
+                if repo == mirror.SOURCE:
+                    if endpoint == '': return {'id': mirror.SOURCE_ID}
+                    if endpoint == '/branches/main': return {'commit': {'sha': revision}}
+                    if endpoint == '/releases/1': return release
+                elif endpoint == '':
+                    return {'id': mirror.TARGET_ID, 'fork': True, 'default_branch': 'main',
+                            'parent': {'full_name': 'fptn-project/fptn'}}
+                elif endpoint == '/releases?per_page=100': return [current]
+                elif endpoint == '/releases/100': return current
+                elif endpoint == '/releases/tags/v0.1.0':
+                    test_case.assertFalse(current['draft'])
+                    return current
+                raise AssertionError(endpoint)
+            def upload(self, *args):
+                raise AssertionError('A verified existing asset must not be uploaded again')
+        def execute(args, output=None):
+            return revision if args[1] == 'rev-parse' else ''
+        inventory = {'sourceRevision': revision, 'latest': 'v0.1.0', 'releases': [release]}
+        with tempfile.TemporaryDirectory() as directory, patch.dict(os.environ, {'GITHUB_REPOSITORY': mirror.TARGET}), patch.object(mirror, 'execute', side_effect=execute):
+            report = mirror.mirror(Fake(), inventory, Path(directory))
+        self.assertEqual(report['assets'], 1)
+        self.assertFalse(current['draft'])
+        self.assertEqual(len(writes), 2)

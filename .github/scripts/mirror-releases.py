@@ -114,6 +114,12 @@ def mirror(api, inventory, directory):
             raise ValueError('Target already has a different tag: '+tag)
         refspecs.append(local+':refs/tags/'+tag)
     execute(['git', 'push', 'origin', *refspecs])
+    prior_releases = api.call('GET', TARGET, '/releases?per_page=100')
+    by_tag = {}
+    for item in prior_releases:
+        if item['tag_name'] in by_tag:
+            raise ValueError('Duplicate target releases for tag: '+item['tag_name'])
+        by_tag[item['tag_name']] = item
     count = 0
     for release in inventory['releases']:
         tag = release['tag_name']
@@ -123,7 +129,7 @@ def mirror(api, inventory, directory):
         if ({n: (a['id'], a['size'], a['digest']) for n, a in live.items()} !=
                 {n: (a['id'], a['size'], a['digest']) for n, a in expected.items()}):
             raise ValueError('Source release changed after inventory: '+tag)
-        current = api.call('GET', TARGET, '/releases/tags/'+tag, missing=True)
+        current = by_tag.get(tag)
         if current is None:
             current = api.call('POST', TARGET, '/releases', {
                 'tag_name': tag, 'target_commitish': release['target_commitish'],
@@ -149,7 +155,7 @@ def mirror(api, inventory, directory):
                 raise ValueError('Downloaded asset checksum differs: '+tag+'/'+name)
             api.upload(current['id'], name, path)
             path.unlink()
-        verified = checked_assets(api.call('GET', TARGET, '/releases/tags/'+tag))
+        verified = checked_assets(api.call('GET', TARGET, '/releases/'+str(current['id'])))
         if ({n: (a['size'], a['digest']) for n, a in verified.items()} !=
                 {n: (a['size'], a['digest']) for n, a in expected.items()}):
             raise ValueError('Uploaded release verification failed: '+tag)

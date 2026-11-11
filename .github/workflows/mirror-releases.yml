@@ -22,6 +22,8 @@ jobs:
       - uses: actions/checkout@v4
         with:
           fetch-depth: 0
+      - name: Check release migration and draft resume contracts
+        run: python3 -m unittest discover -s tests -p test_release_migration.py -v
       - name: Verify tag creation from history imported by the authorized GitHub connection
         run: |
           git fetch --no-tags origin refs/heads/migration/history/v0.18.4-128
