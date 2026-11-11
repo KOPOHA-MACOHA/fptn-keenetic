@@ -1,0 +1,96 @@
+name: Capture existing dependency locks
+on:
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  capture:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    strategy:
+      fail-fast: false
+      matrix:
+        platform: [mipsel-mips32r2-softfloat, aarch64, armv7-softfloat]
+    env:
+      GH_TOKEN: ${{ github.token }}
+      GH_REPO: ${{ github.repository }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - id: inputs
+        run: |
+          set -euo pipefail
+          if [ '${{ matrix.platform }}' = mipsel-mips32r2-softfloat ]; then
+            echo "key=$(python3 scripts/dependency-image.py key .)" >> "$GITHUB_OUTPUT"
+          else
+            python3 scripts/render-platform.py . '${{ matrix.platform }}' ports/generated
+            echo "key=$(python3 scripts/platform-dependency-key.py ports/generated)" >> "$GITHUB_OUTPUT"
+          fi
+          mkdir -p "$RUNNER_TEMP/lock-deps"
+      - if: matrix.platform == 'mipsel-mips32r2-softfloat'
+        id: restore
+        uses: actions/cache/restore@v4
+        with:
+          path: ${{ runner.temp }}/lock-deps/dependencies.tar
+          key: fptn-deps-oci-v1-${{ steps.inputs.outputs.key }}
+          fail-on-cache-miss: false
+      - if: matrix.platform == 'mipsel-mips32r2-softfloat' && steps.restore.outputs.cache-hit != 'true'
+        run: |
+          python3 scripts/arm-dependency-release.py restore mipsel-mips32r2-softfloat '${{ steps.inputs.outputs.key }}' "$RUNNER_TEMP/lock-deps/dependencies.tar"
+          test -s "$RUNNER_TEMP/lock-deps/dependencies.tar"
+      - if: matrix.platform != 'mipsel-mips32r2-softfloat'
+        run: |
+          python3 scripts/arm-dependency-release.py restore '${{ matrix.platform }}' '${{ steps.inputs.outputs.key }}' "$RUNNER_TEMP/lock-deps/dependencies.tar"
+          test -s "$RUNNER_TEMP/lock-deps/dependencies.tar"
+      - uses: docker/setup-buildx-action@v3
+      - id: context
+        run: |
+          echo "uri=$(python3 scripts/dependency-image.py unpack "$RUNNER_TEMP/lock-deps/dependencies.tar" "$RUNNER_TEMP/lock-layout")" >> "$GITHUB_OUTPUT"
+          cat > "$RUNNER_TEMP/capture.Dockerfile" <<'DOCKER'
+          FROM prepared-dependencies AS capture
+          COPY scripts/capture-dependency-lock.sh /capture.sh
+          RUN --network=none sh /capture.sh
+          FROM scratch
+          COPY --from=capture /evidence/ /
+          DOCKER
+      - name: Read graph and tools offline without compiling dependencies
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: ${{ runner.temp }}/capture.Dockerfile
+          build-contexts: prepared-dependencies=${{ steps.context.outputs.uri }}
+          outputs: type=local,dest=out/locks
+          provenance: false
+          sbom: false
+      - uses: actions/upload-artifact@v4
+        with:
+          name: dependency-lock-${{ matrix.platform }}
+          path: out/locks/
+          if-no-files-found: error
+  evidence:
+    needs: capture
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: write
+    env:
+      GH_TOKEN: ${{ github.token }}
+      GH_REPO: ${{ github.repository }}
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: evidence
+          pattern: dependency-lock-*
+      - run: |
+          set -euo pipefail
+          cd evidence
+          for platform in mipsel-mips32r2-softfloat aarch64 armv7-softfloat; do
+            for name in conan.lock graph.json profiles.json tools.json; do
+              mv "dependency-lock-$platform/$name" "$platform-$name"
+            done
+          done
+          sha256sum ./*-*json ./*-*lock > SHA256SUMS
+          gh release create "dependency-lock-evidence-$GITHUB_SHA" ./*-*json ./*-*lock SHA256SUMS \
+            --target "$GITHUB_SHA" --prerelease --latest=false \
+            --title 'Dependency graph evidence from existing OCI snapshots' \
+            --notes 'Offline graph/tool capture from existing verified dependency images. No dependency compilation or router changes.'

@@ -1,0 +1,267 @@
+import base64
+import hashlib
+import json
+import os
+import pathlib
+import shutil
+import subprocess
+import tempfile
+import unittest
+
+ROOT = pathlib.Path(__file__).resolve().parents[1]
+
+
+class PhoneLauncherTest(unittest.TestCase):
+    def run_launcher(self, config, choice="", compressed=False, extra_env=None):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = pathlib.Path(tmp)
+            (root / "run-connect-test.sh").write_text((ROOT / "scripts/start-from-token.sh").read_text())
+            commands = root / "bin"
+            commands.mkdir()
+            mocks = {
+                "ip": '''#!/bin/sh
+[ -z "${FPTN_MOCK_TRACE:-}" ] || printf '%s\\n' "$*" >> "$FPTN_MOCK_TRACE"
+case "$*" in
+  *"link show"*) [ -f "$FPTN_MOCK_MARKER" ]; exit $? ;;
+  *"rule show"*)
+    echo '0: from all lookup local'
+    echo '100: from all fwmark 0xffffaaa lookup 4096'
+    [ "${FPTN_MOCK_OCCUPIED:-0}" != 1 ] || echo '50: from all lookup 4096'
+    ;;
+  *"route show table 30090"*) : ;;
+  *"route add"*|*"route del"*|*"rule add"*|*"rule del"*) : ;;
+  *) echo 'default via 100.64.0.2 dev eth2.2 metric 1000' ;;
+esac
+''',
+                "stty": '#!/bin/sh\n[ "$1" != "-g" ] || echo saved\nexit 0\n',
+                "nice": '#!/bin/sh\nshift 2\nexec "$@"\n',
+                "timeout": '#!/bin/sh\nshift 3\nexec "$@"\n',
+                "curl": '''#!/bin/sh
+[ -z "${FPTN_MOCK_TRACE:-}" ] || printf 'CURL %s\\n' "$*" >> "$FPTN_MOCK_TRACE"
+case "$*" in
+  *"bytes=5242880"*)
+    [ "${FPTN_MOCK_LOAD_FAIL:-0}" != 1 ] || exit 7
+    sleep 1
+    printf '200 5242880 524288 10.0\\n'
+    exit 0 ;;
+  *"bytes=1"*) printf '198.51.100.8'; exit 0 ;;
+esac
+vpn=0
+file=''
+case "$*" in *"--interface fptn0"*) vpn=1 ;; esac
+while [ "$#" -gt 0 ]; do
+  if [ "$1" = -o ]; then shift; file=$1; fi
+  shift
+done
+if [ "$vpn" = 1 ]; then
+  [ "${FPTN_MOCK_CURL_FAIL:-0}" != 1 ] || exit 7
+  printf '203.0.113.99' > "$file"
+else
+  printf '203.0.113.10' > "$file"
+  printf '198.51.100.4'
+fi
+''',
+            }
+            # Entware's default jq is the noregex variant. Reject any accidental
+            # use of regex functions even when tests run against Ubuntu jq-full.
+            real_awk = shutil.which("awk")
+            mocks["awk"] = ('#!/bin/sh\n'
+                'case "$*" in *"/proc/meminfo"*) if [ "${FPTN_MOCK_LOW_MEM:-0}" = 1 ]; then\n'
+                ' tick=$(cat "$FPTN_MOCK_TRACE.ticks" 2>/dev/null || echo 1000); tick=$((tick+400)); echo "$tick" > "$FPTN_MOCK_TRACE.ticks"\n'
+                ' echo "$tick 0 0 1024 10240 4 1"; exit 0; fi ;; esac\n'
+                'exec ' + real_awk + ' "$@"\n')
+            real_readlink = shutil.which("readlink")
+            # Fake client is a shell script, so its /proc/exe cannot identify it.
+            # Only in this test substitute PID 1 for exercising the sampler.
+            mocks["readlink"] = ('#!/bin/sh\n'
+                'case "$*" in "-f ./fptn-client-cli"|"/proc/1/exe") printf "%s/fptn-client-cli\\n" "$PWD"; exit 0 ;; esac\n'
+                'exec ' + real_readlink + ' "$@"\n')
+            real_jq = shutil.which("jq")
+            self.assertIsNotNone(real_jq)
+            mocks["jq"] = ('#!/bin/sh\n'
+                'case "$*" in *"test("*|*"match("*|*"sub("*) echo "regex unavailable" >&2; exit 3;; esac\n'
+                'exec ' + real_jq + ' "$@"\n')
+            for name, source in mocks.items():
+                (commands / name).write_text(source)
+                (commands / name).chmod(0o700)
+            (root / "fptn-client-cli").write_text('''#!/bin/sh
+if [ "$1" = --version ]; then echo 0.1.0; exit 0; fi
+while [ "$#" -gt 0 ]; do
+  if [ "$1" = --preferred-server ]; then shift; printf 'MOCK_SERVER=%s\\n' "$1"; fi
+  if [ "$1" = --sni ]; then shift; printf 'MOCK_SNI=%s\\n' "$1"; fi
+  if [ "$1" = --bypass-method ]; then shift; printf 'MOCK_METHOD=%s\\n' "$1"; fi
+  if [ "$1" = --connection-strategy ]; then shift; printf 'MOCK_STRATEGY=%s\\n' "$1"; fi
+  shift
+done
+printf 'MOCK_LOCALE=%s\\n' "$LC_ALL"
+if [ "${FPTN_DATA_TEST:-0}" = 1 ]; then
+  touch "$FPTN_MOCK_MARKER"
+  echo 'VPN SERVER IP: 203.0.113.106'
+  echo 'Connection #1 READY'
+  echo 'Connection #2 READY'
+  sleep 2
+fi
+''')
+            # Covers decoder plumbing; real Brotli is tested under QEMU in CI.
+            (root / "brotli").write_text("#!/bin/sh\ncat\n")
+            manifest = "".join(hashlib.sha256((root / p).read_bytes()).hexdigest() + "  " + p + "\n"
+                               for p in ["fptn-client-cli", "brotli"])
+            (root / "SHA256SUMS").write_text(manifest)
+            encoded = base64.b64encode(json.dumps(config).encode()).decode().rstrip("=")
+            token = ("fptnb:" if compressed else "fptn://") + encoded
+            result = subprocess.run(["sh", str(root / "run-connect-test.sh")],
+                input=token + "\n" + choice, text=True, capture_output=True,
+                env={**os.environ, **(extra_env or {}), "FPTN_MOCK_MARKER": str(root / "ready"),
+                     "FPTN_MOCK_TRACE": str(root / "trace"),
+                     "PATH": str(commands) + ":" + os.environ["PATH"]}, timeout=30)
+            self.assertNotIn(token, result.stdout + result.stderr)
+            self.assertNotIn("secret-password", result.stdout + result.stderr)
+            result.route_trace = (root / "trace").read_text()
+            result.leftover_directories = list(root.glob('fptn-data.*'))
+            return result
+
+    def test_plain_token_menu_and_selection(self):
+        result = self.run_launcher({"password": "secret-password", "servers": [{"name": "NL 1"}, {"name": "Германия"}]}, "2\n")
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn("1) NL 1", result.stdout)
+        self.assertIn("2) Германия", result.stdout)
+        self.assertIn("MOCK_SERVER=Германия", result.stdout)
+
+    def test_brotli_prefix_and_single_server(self):
+        result = self.run_launcher({"servers": [{"name": "NL 1"}]}, compressed=True)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn("MOCK_SERVER=NL 1", result.stdout)
+
+    def test_invalid_choice_reprompts_without_token_reentry(self):
+        result = self.run_launcher({"servers": [{"name": "NL"}, {"name": "DE"}]}, "99\n1\n")
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn("Такого номера нет", result.stdout)
+        self.assertIn("MOCK_SERVER=NL", result.stdout)
+
+    def test_empty_or_control_character_server_list_does_not_connect(self):
+        for servers in [[], [{"name": "bad\u001b[31m"}]]:
+            result = self.run_launcher({"servers": servers})
+            self.assertNotEqual(result.returncode, 0)
+            self.assertNotIn("MOCK_SERVER=", result.stdout)
+
+    def test_sni_and_method_overrides_and_portable_locale(self):
+        result = self.run_launcher({"servers": [{"name": "NL"}]}, extra_env={
+            "FPTN_SNI": "example.org", "FPTN_BYPASS_METHOD": "obfuscation",
+            "FPTN_CONNECTION_STRATEGY": "dual-rolling-tunnel", "LC_ALL": "invalid_LOCALE"})
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn("MOCK_SNI=example.org", result.stdout)
+        self.assertIn("MOCK_METHOD=obfuscation", result.stdout)
+        self.assertIn("MOCK_STRATEGY=dual-rolling-tunnel", result.stdout)
+        self.assertIn("MOCK_LOCALE=C", result.stdout)
+
+    def test_data_mode_adds_and_removes_only_its_test_route(self):
+        result = self.run_launcher({"servers": [{"name": "NL"}]}, extra_env={"FPTN_DATA_TEST": "1"})
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn('УСПЕХ: HTTPS-запрос', result.stdout)
+        self.assertIn('-4 route add table 30090 198.51.100.4/32 dev fptn0 proto 186', result.route_trace)
+        self.assertIn('-4 rule add priority 50 iif lo to 198.51.100.4/32 lookup 30090', result.route_trace)
+        self.assertIn('-4 rule del priority 50 iif lo to 198.51.100.4/32 lookup 30090', result.route_trace)
+        self.assertIn('-4 route del table 30090 198.51.100.4/32 dev fptn0 proto 186', result.route_trace)
+        self.assertNotIn('replace', result.route_trace)
+        self.assertEqual(result.leftover_directories, [])
+
+    def test_failed_vpn_request_still_removes_its_rule_and_route(self):
+        result = self.run_launcher({"servers": [{"name": "NL"}]}, extra_env={
+            "FPTN_DATA_TEST": "1", "FPTN_MOCK_CURL_FAIL": "1"})
+        self.assertNotEqual(result.returncode, 0)
+        self.assertNotIn('УСПЕХ:', result.stdout)
+        self.assertIn('-4 rule del priority 50', result.route_trace)
+        self.assertIn('-4 route del table 30090', result.route_trace)
+        self.assertEqual(result.leftover_directories, [])
+
+    def test_existing_policy_rule_is_never_modified(self):
+        result = self.run_launcher({"servers": [{"name": "NL"}]}, extra_env={
+            "FPTN_DATA_TEST": "1", "FPTN_MOCK_OCCUPIED": "1"})
+        self.assertNotEqual(result.returncode, 0)
+        self.assertNotIn('route add', result.route_trace)
+        self.assertNotIn('rule add', result.route_trace)
+        self.assertNotIn('rule del', result.route_trace)
+
+    def test_load_is_bounded_and_cleans_both_destinations(self):
+        result = self.run_launcher({"servers": [{"name": "NL"}]}, extra_env={"FPTN_LOAD_TEST": "1"})
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn('HTTP 200, получено 5242880 байт', result.stdout)
+        self.assertIn('[ИТОГ] до загрузки:', result.stdout)
+        self.assertIn('[ИТОГ] загрузка:', result.stdout)
+        self.assertIn('[ИТОГ] после загрузки:', result.stdout)
+        self.assertIn('FPTN средний', result.stdout)
+        self.assertIn('--limit-rate 512K --max-filesize 5242880', result.route_trace)
+        self.assertIn('--max-time 15', result.route_trace)
+        self.assertIn('--resolve speed.cloudflare.com:443:198.51.100.8', result.route_trace)
+        self.assertIn('rule del priority 50 iif lo to 198.51.100.8/32', result.route_trace)
+        self.assertIn('route del table 30090 198.51.100.8/32', result.route_trace)
+        self.assertNotIn('replace', result.route_trace)
+        self.assertEqual(result.leftover_directories, [])
+
+    def test_failed_download_cleans_load_route(self):
+        result = self.run_launcher({"servers": [{"name": "NL"}]}, extra_env={
+            "FPTN_LOAD_TEST": "1", "FPTN_MOCK_LOAD_FAIL": "1"})
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn('Загрузка не завершена', result.stderr)
+        self.assertIn('rule del priority 50 iif lo to 198.51.100.8/32', result.route_trace)
+        self.assertEqual(result.leftover_directories, [])
+
+    def test_low_available_memory_aborts_load_and_cleans_route(self):
+        result = self.run_launcher({"servers": [{"name": "NL"}]}, extra_env={
+            "FPTN_LOAD_TEST": "1", "FPTN_MOCK_LOW_MEM": "1"})
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn('Порог остановки:', result.stderr)
+        self.assertIn('route del table 30090 198.51.100.8/32', result.route_trace)
+        self.assertEqual(result.leftover_directories, [])
+
+
+class ResourceReaderTest(unittest.TestCase):
+    def test_proc_fields_with_spaces_parentheses_and_guest_ticks(self):
+        source = (ROOT / "scripts/start-from-token.sh").read_text()
+        reader = source.split("# BEGIN RESOURCE READER:", 1)[1].split("\n", 1)[1].split("# END RESOURCE READER", 1)[0]
+        with tempfile.TemporaryDirectory() as tmp:
+            root = pathlib.Path(tmp)
+            (root / "stat").write_text("cpu  100 20 30 400 50 6 7 8 90 91\ncpu0 1\ncpu1 1\n")
+            # Fields after comm start at state (original field 3).
+            fields = ["S"] + ["0"] * 19
+            fields[11], fields[12], fields[19] = "123", "45", "98765"
+            (root / "process").write_text("123 (odd ) name) " + " ".join(fields) + "\n")
+            (root / "status").write_text("VmRSS: 18356 kB\n")
+            (root / "meminfo").write_text("MemAvailable: 48192 kB\n")
+            result = subprocess.run(["sh", "-c", reader + '\nfptn_read_sample "$1" "$2" "$3" "$4"',
+                "test", *[str(root / f) for f in ["stat", "process", "status", "meminfo"]]],
+                text=True, capture_output=True, check=True)
+            self.assertEqual(result.stdout.strip(), "621 450 168 18356 48192 2 98765")
+
+    def run_intervals(self, idle_values):
+        source = (ROOT / 'scripts/start-from-token.sh').read_text()
+        functions = source.split('    fptn_phase_start() {', 1)[1].split("    echo '[НАГРУЗКА] CPU общий", 1)[0]
+        functions = 'fptn_phase_start() {' + functions
+        samples = ['1000 500 100 18000 48000 4 9']
+        for i, idle in enumerate(idle_values):
+            samples.append(f'{1400+400*i} {idle} {140+4*i} 18000 48000 4 9')
+        with tempfile.NamedTemporaryFile(mode='w') as fixture:
+            fixture.write('\n'.join(samples) + '\n'); fixture.flush()
+            shell = '''set -eu
+exec 3<"$1"
+fptn_snapshot() { IFS= read -r row <&3; printf '%s\\n' "$row"; }
+sleep() { :; }
+FPTN_START=''; FPTN_RSS_PEAK=0; FPTN_MEM_MIN=2147483647; FPTN_BUSY=0; FPTN_ABORT=0; FPTN_PHASE=test
+''' + functions + '''
+fptn_phase_start
+for interval in 1 2 3; do fptn_sample_interval; done
+fptn_phase_summary
+printf 'ABORT=%s\\n' "$FPTN_ABORT"
+'''
+            return subprocess.run(['sh', '-c', shell, 'test', fixture.name], text=True, capture_output=True, check=True)
+
+    def test_single_spike_is_distinct_from_average_and_does_not_abort(self):
+        result = self.run_intervals([520, 880, 1240])
+        self.assertIn('общий CPU средний 38.3% / пик 95.0%', result.stdout)
+        self.assertIn('FPTN средний 4.0% / пик 10.0%', result.stdout)
+        self.assertIn('ABORT=0', result.stdout)
+
+    def test_three_high_cpu_intervals_trigger_stop(self):
+        result = self.run_intervals([520, 540, 560])
+        self.assertIn('ABORT=1', result.stdout)
+        self.assertIn('Порог остановки:', result.stderr)

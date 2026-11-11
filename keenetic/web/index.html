@@ -1,0 +1,171 @@
+<!doctype html>
+<html lang="ru" data-ui-version="0.18.4">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="color-scheme" content="dark">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self'; style-src 'self'; connect-src 'self'; img-src 'self'; object-src 'none'; base-uri 'none'; form-action 'self'; frame-src 'none'">
+  <title>FPTN · Keenetic</title>
+  <link rel="icon" type="image/svg+xml" href="favicon.svg?v=0.18.4-2d98e1c70c18">
+  <link rel="stylesheet" href="style.css?v=0.18.4-ceb7523ab67a">
+  <script src="app.js?v=0.18.4-eb9dd5168e35" defer></script>
+</head>
+<body>
+  <div id="panel-shell" class="shell">
+    <header><a class="brand" href="./"><span class="mark">F</span><span>FPTN <small>KEENETIC</small></span></a><button id="logout" class="quiet" hidden>Выйти</button></header>
+    <p id="versions" class="version-line">Панель 0.18.4 · версия клиента появится после входа</p>
+    <div id="version-mismatch" class="banner error-banner" hidden><span id="version-mismatch-text"></span><button id="reload-ui" type="button">Обновить страницу</button></div>
+    <section id="auth-loading" class="card login" role="status" aria-live="polite">
+      <h1>FPTN</h1><p id="auth-loading-message">Проверяем сессию…</p>
+      <button id="auth-retry" type="button" hidden>Повторить</button>
+    </section>
+    <section id="login" class="card login" hidden>
+      <span class="eyebrow">ЛОКАЛЬНАЯ ПАНЕЛЬ</span>
+      <h1 id="login-title">Управление подключением</h1>
+      <p id="login-description">Проверяем настройки входа…</p>
+      <form id="login-form">
+        <div id="auth-choice-wrap" hidden><div class="form-row"><label for="auth-choice">Способ входа</label><select id="auth-choice"><option value="panel">Создать логин и пароль панели</option><option id="auth-root-option" value="entware">Использовать root Entware</option></select></div><p id="root-unavailable" class="hint" hidden>У root Entware нет доступного пароля. Создайте отдельную учётную запись панели.</p></div>
+        <div class="form-row"><label for="username">Логин</label><input id="username" type="text" autocomplete="username" required maxlength="64"></div>
+        <div class="form-row"><label id="password-label" for="password">Пароль</label><input id="password" type="password" autocomplete="current-password" required maxlength="256"></div>
+        <div id="confirm-wrap" hidden><div class="form-row"><label for="confirm-password">Повторите пароль</label><input id="confirm-password" type="password" autocomplete="new-password" maxlength="72"></div></div>
+        <button id="login-submit" class="primary" type="submit" disabled>Продолжить</button>
+      </form>
+    </section>
+    <main id="dashboard" hidden>
+      <div class="heading"><div><span class="eyebrow">KEENETIC · FPTN</span><h1>FPTN</h1></div><span class="tag">FPTN для Keenetic</span></div>
+      <section id="updates" class="card update-card"><h2>Обновления</h2>
+        <p id="update-status" class="hint">Нажмите «Проверить обновления», чтобы узнать о новом выпуске.</p>
+        <div class="actions"><button id="check-update" type="button">Проверить обновления</button>
+        <button id="install-update" type="button" hidden>Установить обновление</button></div>
+        <p class="hint">Обновление устанавливается с резервной копией. После завершения перезагрузите панель.</p>
+      </section>
+      <nav class="tabs" aria-label="Разделы FPTN">
+        <button id="tab-status" type="button" aria-controls="view-status">Состояние</button>
+        <button id="tab-settings" type="button" aria-controls="view-settings">Настройки</button>
+        <button id="tab-system" type="button" aria-controls="view-system">Панель и вход</button>
+        <button id="tab-logs" type="button" aria-controls="view-logs">Журнал</button>
+      </nav>
+      <section id="onboarding" class="card" hidden>
+        <h2>Первоначальная настройка</h2>
+        <p id="onboarding-message"></p>
+        <button id="setup-interface" type="button">Создать и сохранить интерфейс FPTN</button>
+        <p id="setup-interface-help" class="hint">Создаётся первый свободный OpkgTun. Уже выбранный интерфейс сохраняется. Кнопка также сохраняет текущую конфигурацию Keenetic, включая другие ещё не сохранённые изменения. DNS и общий выход в интернет не переключаются.</p>
+      </section>
+      <section id="view-status" aria-labelledby="tab-status">
+      <section class="card overview">
+        <div class="status-heading"><span id="indicator" class="dot"></span><h2 id="status-title">Проверяем состояние…</h2><span id="memory" class="memory"></span></div>
+        <p id="status-message" class="status-text"></p><p id="effective-connection" class="hint"></p>
+        <p class="current-server"><span id="active-server-label">Сервер</span>: <strong id="active-server">Нет активного сервера</strong></p>
+        <p id="selection-summary" class="hint"></p><p id="switch-summary" class="hint"></p><p id="health-status" class="hint"></p>
+        <p id="operation" class="operation" hidden></p><button id="recover-operation" type="button" hidden>Восстановить управление</button>
+        <div class="actions"><button id="start" class="primary" data-command="start">Запустить</button><button id="stop" data-command="stop">Остановить</button><button id="restart" data-command="restart">Переподключить</button></div>
+        <p class="hint">Состояние туннеля FPTN обновляется автоматически. Доступность отдельных сайтов зависит также от маршрутов Keenetic.</p>
+        <p id="autostart-state" class="hint"></p><button id="autostart-toggle" type="button">Включить автозапуск</button>
+        <details><summary>Техническое состояние</summary><pre id="status-text"></pre></details>
+      </section>
+
+      </section>
+      <section id="view-settings" aria-labelledby="tab-settings" hidden>
+      <div id="unsaved" class="banner" role="status" hidden><strong>Есть несохранённые изменения</strong><span id="unsaved-text"></span></div>
+      <div class="columns">
+        <section class="card">
+          <div class="section-heading"><span class="step">01</span><h2>Сервер и токен</h2></div>
+          <div id="token-details" class="token-editor"><h3 id="token-summary">Заменить токен</h3><p id="token-help" class="hint">Текущий токен сохранён на роутере и не возвращается в браузер.</p><div class="form-row"><label for="token">Токен FPTN</label><textarea id="token" rows="3" spellcheck="false" autocomplete="off" placeholder="fptnb:…"></textarea></div><div class="actions"><button id="preview" type="button">Прочитать серверы</button></div><p class="hint">Сначала прочитайте серверы, затем сохраните настройки.</p></div>
+          <div class="form-row"><label for="selection-mode">Выбор сервера</label><select id="selection-mode"><option value="manual">Указать сервер</option><option value="auto">Автоматически · избранные сначала</option></select></div>
+          <div id="manual-server"><div class="form-row"><label for="server">Предпочтительный сервер</label><select id="server" form="settings-form" required></select></div></div>
+          <p class="hint">Это сохранённое предпочтение, а не фактическое подключение. При обрыве — автовыбор: сначала избранные, затем остальные. Выбирается сервер с наименьшим временем успешного входа.</p>
+          <div class="server-list-heading"><h3>Избранные и исключения</h3><span id="server-count" class="hint"></span></div>
+          <p class="hint">★ — избранный, × — исключённый. Исключённые серверы не проверяются. Списки применятся после сохранения.</p>
+          <div id="server-list" class="server-list"></div>
+          <p id="settings-error" class="error-text" hidden></p>
+          <button id="check-servers" type="button" class="check-button">Проверить серверы</button>
+          <p id="check-summary" class="hint">Серверы ещё не проверены.</p>
+
+        </section>
+        <section class="card">
+          <div class="section-heading"><span class="step">02</span><h2>Параметры подключения</h2></div>
+          <form id="settings-form">
+            <div class="form-row"><label for="strategy">Стратегия подключения</label><select id="strategy"></select></div>
+            <div class="form-row"><label for="mode">Метод обхода блокировок</label><select id="mode"><option value="obfuscation">Маскировка трафика · обфускация</option><option value="sni">Подмена домена · SNI + Reality</option></select></div>
+            <div id="sni-fields" hidden>
+              <div class="form-row"><label for="browser">Браузер</label><select id="browser"></select></div>
+              <div class="form-row"><label for="profile">Версия профиля</label><select id="profile"></select></div>
+              <div class="form-row"><label for="sni">Домен SNI</label><input id="sni" type="text" value="google.com" maxlength="253" spellcheck="false" autocomplete="off" placeholder="example.com"></div>
+              <p class="hint">Автоподбор появится в отдельном обновлении. Сейчас укажите домен вручную.</p>
+            </div>
+            <details><summary>Резервные методы для избранных</summary>
+              <label class="fallback-check"><input id="fallback-enabled" type="checkbox"> Подбирать метод при отказе избранных</label>
+              <p class="hint">Сначала текущие настройки, затем разрешённые запасные методы на избранных, потом остальные серверы. Известное устойчивое сочетание пробуется первым. Исключённые серверы не проверяются.</p>
+              <div id="fallback-fields" hidden>
+                <label>Запасные SNI-профили · выберите до двух</label>
+                <div class="form-row"><label for="fallback-profile-1">Первый запасной профиль</label><select id="fallback-profile-1"></select></div>
+                <div class="form-row"><label for="fallback-profile-2">Второй запасной профиль</label><select id="fallback-profile-2"></select></div>
+                <div class="form-row"><label for="fallback-domains">До двух SNI · по одному на строке</label><textarea id="fallback-domains" rows="2" autocomplete="off" spellcheck="false"></textarea></div>
+                <div class="form-row"><label for="fallback-budget">Лимит перебора на избранных</label><select id="fallback-budget"><option value="30">30 секунд</option><option value="60">60 секунд</option><option value="90">90 секунд</option><option value="120">120 секунд</option></select></div>
+                <p class="hint">Для 1–8 разрешённых избранных. После лимита — обычный выбор остальных серверов. Обфускация проверяется автоматически; двойной/тройной туннель не меняется. Это реальные попытки FPTN, а не массовый поиск доменов.</p>
+              </div>
+            </details>
+            <details><summary>Автоматическая проверка связи</summary>
+              <label class="fallback-check"><input id="health-enabled" type="checkbox"> Проверять передачу через туннель</label>
+              <p id="health-unsupported" class="hint" hidden>Для этой проверки требуется обновление клиента.</p>
+              <div class="form-row"><label for="health-interval">Интервал, секунд</label><input id="health-interval" type="number" min="30" max="3600" step="1" value="60"></div>
+              <div class="form-row"><label for="health-timeout">Ожидание ответа от одного адреса, секунд</label><input id="health-timeout" type="number" min="2" max="15" step="1" value="5"></div>
+              <div class="form-row"><label for="health-failures">Неудачных проверок до переключения</label><input id="health-failures" type="number" min="2" max="10" step="1" value="3"></div>
+              <p class="hint">Маленький DNS-запрос корневой зоны к 1.1.1.1 через FPTN, при ошибке — к 8.8.8.8. Это отдельная проверка передачи, настройки DNS не меняются. При достижении порога проверяется ответ через исходящий интерфейс: без него автоматическая смена по этой проверке откладывается. Проверка UDP не гарантирует работу всех сайтов или IPv6. Интервал отсчитывается после завершения проверки.</p>
+            </details>
+            <details class="transport-options"><summary>Дополнительные параметры</summary>
+              <label class="fallback-check"><input id="ipv6" type="checkbox"> IPv6 через FPTN · экспериментально</label>
+              <p class="hint">Требует IPv6 в локальной сети Keenetic, IPv6 NAT в ядре, ip6tables Entware и MTU от 1280. Добавляет адрес только интерфейсу FPTN и отдельное правило NAT66 для направленного в него трафика. Доменные и CIDR-маршруты IPv6 задаются в Keenetic. По умолчанию выключено.</p>
+              <div class="form-row"><label for="mtu-mode">MTU туннеля</label><select id="mtu-mode"><option id="mtu-auto-option" value="auto">Как в Keenetic</option><option value="custom">Задать вручную</option></select></div>
+              <div id="mtu-custom" hidden><div class="form-row"><label for="mtu">Значение MTU</label><input id="mtu" type="number" min="576" max="65535" step="1" value="1420"></div></div>
+              <p class="hint">«Как в Keenetic» использует текущее значение интерфейса FPTN. Значение по умолчанию оригинального FPTN — 1420. Вручную можно задать 576–65535 только для интерфейса FPTN.</p>
+              <div class="form-row"><label for="out-interface">Исходящий интерфейс</label><input id="out-interface" maxlength="15" autocomplete="off" spellcheck="false" placeholder="Автоматически"></div>
+              <p class="hint">Необязательно: системное имя, например eth2.2. Пусто — обычное подключение к интернету. Поддерживаются Ethernet и PPPoE без отдельного шлюза. При отсутствии выбранного подключения служба ждёт его восстановления. В автоматическом режиме следует смене WAN.</p>
+            </details>
+            <button id="save" class="primary wide" type="submit">Сохранить настройки</button>
+            <p id="save-help" class="hint">Сохранение не запускает остановленную службу.</p>
+          </form>
+        </section>
+      </div>
+
+
+      </section>
+      <section id="view-system" aria-labelledby="tab-system" hidden>
+      <section class="card"><h2>Адрес панели</h2>
+        <p id="panel-address" class="hint"></p>
+        <form id="port-form"><div class="form-row"><label for="panel-port">TCP-порт</label><input id="panel-port" type="number" min="1" max="65535" step="1" required></div><button id="port-save" type="submit">Изменить порт</button></form>
+        <p class="hint">VPN продолжит работать. При применении общий lighttpd перезапускается: другие его панели могут кратковременно потерять связь.</p>
+        <div id="port-transition" class="banner" hidden><span id="port-transition-text"></span><a id="port-link" href="/">Открыть новый адрес</a><button id="port-confirm" type="button" hidden>Подтвердить новый порт</button><button id="port-rollback" type="button" hidden>Вернуть прежний порт</button><span>На новом адресе войдите в панель и подтвердите смену. Без подтверждения автоматически вернётся прежний порт.</span></div>
+      </section>
+      <section class="card"><h2>Вход в панель</h2><p id="account-current" class="hint"></p>
+        <details><summary>Изменить способ входа или пароль</summary>
+          <form id="account-form">
+            <div class="form-row"><label for="account-current-password">Текущий пароль входа</label><input id="account-current-password" type="password" autocomplete="current-password" required maxlength="256"></div>
+            <div class="form-row"><label for="account-mode">Способ входа</label><select id="account-mode"><option value="panel">Отдельный логин и пароль</option><option id="account-root-option" value="entware">root Entware</option></select></div>
+            <div id="account-panel-fields"><div class="form-row"><label for="account-username">Новый логин</label><input id="account-username" autocomplete="username" maxlength="64"></div><div class="form-row"><label for="account-password">Новый пароль панели</label><input id="account-password" type="password" autocomplete="new-password" maxlength="72"></div><div class="form-row"><label for="account-confirm">Повторите новый пароль</label><input id="account-confirm" type="password" autocomplete="new-password" maxlength="72"></div></div>
+            <div id="account-root-fields" hidden><div class="form-row"><label for="account-root-password">Существующий пароль root Entware</label><input id="account-root-password" type="password" autocomplete="off" maxlength="256"></div></div>
+            <p class="hint">После сохранения все сессии завершатся. VPN продолжит работать. Пароль самого root Entware здесь не меняется.</p>
+            <button id="account-save" type="submit">Сохранить вход и выйти</button>
+          </form>
+        </details>
+      </section>
+      </section>
+      <section id="view-logs" aria-labelledby="tab-logs" hidden>
+      <section class="card"><div class="section-heading log-heading"><h2>Журнал службы</h2><button id="refresh-logs" class="quiet">Обновить</button></div><div class="actions log-actions"><button id="download-diagnostics" type="button">Скачать обезличенный отчёт</button></div><pre id="logs">Нажмите «Обновить», чтобы прочитать журнал.</pre></section>
+      </section>
+      <section class="routing footer-info"><div><h2>Маршрутизация</h2><p>Направляйте нужные домены и подсети средствами Keenetic или вашего менеджера маршрутизации. Интерфейс FPTN: <strong id="native-interface-name">OpkgTun</strong>.</p></div></section>
+      <footer>FPTN для Keenetic · Обновление состояния каждые 5 секунд</footer>
+    </main>
+    <div id="notice" role="status" aria-live="polite" hidden></div>
+  </div>
+  <div id="update-modal" class="modal-backdrop" hidden>
+    <section id="update-dialog" class="modal-card" role="dialog" aria-modal="true" aria-labelledby="update-title" aria-describedby="update-message" tabindex="-1">
+      <h2 id="update-title">Обновление FPTN</h2>
+      <div id="update-progress" class="indeterminate" role="progressbar" aria-label="Выполняется обновление"></div>
+      <p id="update-message" role="status" aria-live="polite">Отправляем запрос на обновление…</p>
+      <p id="update-detail" class="hint">Панель временно заблокирована. Дождитесь завершения операции.</p>
+      <div class="actions"><button id="update-reload" class="primary" type="button" hidden>Обновить страницу</button><button id="update-close" type="button" hidden>Закрыть</button></div>
+    </section>
+  </div>
+</body>
+</html>

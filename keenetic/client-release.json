@@ -1,0 +1,10 @@
+{
+  "schema": 1,
+  "platform": "mipsel-mips32r2-softfloat",
+  "buildRevision": "cd68d31215576185d51b77f31a568356dd562a09",
+  "sha256": "352221d0dce4b0966d06f108daf62920facad9d1b004b2be89f8d6bcbe7bf0fb",
+  "clientVersion": "0.8.0",
+  "upstreamRevision": "a389bee62da930807c3bc85284ee4976e9c7e08f",
+  "upstreamVersion": "0.4.6",
+  "sourceLockSha256": "d5ea48c0782b30acdb980efc7297dac1da47fc8aeef77352c98b4eb54548a9a5"
+}

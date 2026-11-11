@@ -1,0 +1,29 @@
+name: Inspect additional Keenetic SDKs
+on:
+  push:
+    branches: [main]
+    paths: [.github/workflows/inspect-platforms.yml]
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  inspect:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - uses: docker/setup-buildx-action@v3
+      - name: Resolve immutable SDK manifests
+        shell: bash
+        run: |
+          set -eu
+          mkdir sdk-manifests
+          for target in mediatek-filogic bcm53xx-generic; do
+            image="openwrt/sdk:$target-24.10.7"
+            echo "SDK $target"
+            docker buildx imagetools inspect "$image"
+            docker buildx imagetools inspect "$image" --raw > "sdk-manifests/$target.json"
+          done
+      - uses: actions/upload-artifact@v4
+        with:
+          name: sdk-manifests
+          path: sdk-manifests

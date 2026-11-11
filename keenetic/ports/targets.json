@@ -1,0 +1,20 @@
+{
+  "aarch64": {
+    "sdk": "openwrt/sdk:mediatek-filogic-24.10.7@sha256:25238bd296a45124dd48626fe218f10707ffc1c5e32fda09ffb7ca87bfb7b3ba",
+    "toolchain": "aarch64_cortex-a53_gcc-13.3.0_musl",
+    "triple": "aarch64-openwrt-linux-musl",
+    "arch": "armv8",
+    "processor": "aarch64",
+    "flags": "-march=armv8-a",
+    "emulator": "qemu-aarch64"
+  },
+  "armv7-softfloat": {
+    "sdk": "openwrt/sdk:bcm53xx-generic-24.10.7@sha256:4d6e02e57b33b949a564110fef526a8c96dde8194ef949363125d889935a6931",
+    "toolchain": "arm_cortex-a9_gcc-13.3.0_musl_eabi",
+    "triple": "arm-openwrt-linux-muslgnueabi",
+    "arch": "armv7",
+    "processor": "armv7",
+    "flags": "-march=armv7-a -mfloat-abi=soft",
+    "emulator": "qemu-arm"
+  }
+}

@@ -1,0 +1,30 @@
+{
+  "schema": 1,
+  "sourcesSha256": "d5ea48c0782b30acdb980efc7297dac1da47fc8aeef77352c98b4eb54548a9a5",
+  "evidenceRun": 42575096123,
+  "evidenceRevision": "6d873b3cc52524096b9428515d2d88deb5f6866e",
+  "tools": {
+    "pip": [
+      "certifi==2026.10.23",
+      "charset-normalizer==3.5.2",
+      "cmake==3.31.6",
+      "colorama==0.4.6",
+      "conan==2.34.0",
+      "distro==1.9.0",
+      "fasteners==0.20",
+      "idna==3.20",
+      "Jinja2==3.1.6",
+      "MarkupSafe==3.0.4",
+      "ninja==1.13.2",
+      "patch-ng==1.19.1",
+      "pip==24.0",
+      "PyYAML==6.0.3",
+      "requests==2.34.2",
+      "truststore==0.10.5",
+      "urllib3==2.8.0"
+    ],
+    "conan": "Conan version 2.34.0",
+    "cmake": "cmake version 3.31.6",
+    "ninja": "1.13.2.git.kitware.jobserver-pipe-1"
+  }
+}

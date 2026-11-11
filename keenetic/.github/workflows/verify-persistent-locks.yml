@@ -1,0 +1,48 @@
+name: Verify persistent locked images
+on:
+  workflow_run:
+    workflows: [Verify locked dependency images]
+    types: [completed]
+    branches: [main]
+permissions:
+  contents: read
+jobs:
+  restore:
+    if: >-
+      github.event.workflow_run.conclusion == 'success' &&
+      github.event.workflow_run.event != 'pull_request' &&
+      github.event.workflow_run.head_repository.full_name == github.repository
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    strategy:
+      fail-fast: false
+      matrix:
+        platform: [mipsel-mips32r2-softfloat, aarch64, armv7-softfloat]
+    env:
+      GH_TOKEN: ${{ github.token }}
+      GH_REPO: ${{ github.repository }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.workflow_run.head_sha }}
+          persist-credentials: false
+      - id: key
+        name: Calculate the exact validated dependency key
+        run: |
+          set -euo pipefail
+          if [ '${{ matrix.platform }}' = mipsel-mips32r2-softfloat ]; then
+            key=$(python3 scripts/dependency-image.py key .)
+          else
+            python3 scripts/render-platform.py . '${{ matrix.platform }}' ports/generated
+            key=$(python3 scripts/platform-dependency-key.py ports/generated)
+          fi
+          echo "key=$key" >> "$GITHUB_OUTPUT"
+      - id: restore
+        name: Restore only from the persistent release on this fresh runner
+        run: python3 scripts/arm-dependency-release.py restore '${{ matrix.platform }}' '${{ steps.key.outputs.key }}' "$RUNNER_TEMP/persistent/dependencies.tar"
+      - name: Require the release and verify OCI structure, config and every layer
+        env:
+          RESTORED: ${{ steps.restore.outputs.restored }}
+        run: |
+          test "$RESTORED" = true
+          python3 scripts/dependency-image.py unpack "$RUNNER_TEMP/persistent/dependencies.tar" "$RUNNER_TEMP/persistent/oci"

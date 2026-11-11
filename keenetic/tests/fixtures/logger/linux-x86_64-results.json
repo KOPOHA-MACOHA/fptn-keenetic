@@ -1,0 +1,84 @@
+{
+  "platform": "Linux x86_64",
+  "spdlogVersion": "1.17.0",
+  "upstreamRevision": "a389bee62da930807c3bc85284ee4976e9c7e08f",
+  "scope": "standalone original logger; not full client or router",
+  "results": {
+    "after": [
+      {
+        "afterRssKiB": 2792,
+        "app": "fptn-client-cli",
+        "beforeRssKiB": 1792,
+        "dropped": 0,
+        "initializedRssKiB": 2732,
+        "recorded": 512,
+        "seconds": 0.00212477,
+        "slotBytes": 408,
+        "systemCpuSeconds": 0,
+        "userCpuSeconds": 0.0031
+      },
+      {
+        "afterRssKiB": 2788,
+        "app": "fptn-client-cli",
+        "beforeRssKiB": 1792,
+        "dropped": 0,
+        "initializedRssKiB": 2740,
+        "recorded": 512,
+        "seconds": 0.00212422,
+        "slotBytes": 408,
+        "systemCpuSeconds": 0.0029,
+        "userCpuSeconds": 0
+      },
+      {
+        "afterRssKiB": 2788,
+        "app": "fptn-client-cli",
+        "beforeRssKiB": 1792,
+        "dropped": 0,
+        "initializedRssKiB": 2716,
+        "recorded": 512,
+        "seconds": 0.0019993,
+        "slotBytes": 408,
+        "systemCpuSeconds": 0.003251,
+        "userCpuSeconds": 0
+      }
+    ],
+    "before": [
+      {
+        "afterRssKiB": 15440,
+        "app": "fptn-client-cli",
+        "beforeRssKiB": 1788,
+        "dropped": 0,
+        "initializedRssKiB": 15392,
+        "recorded": 512,
+        "seconds": 0.00670769,
+        "slotBytes": 408,
+        "systemCpuSeconds": 0.003914,
+        "userCpuSeconds": 0.003914
+      },
+      {
+        "afterRssKiB": 15436,
+        "app": "fptn-client-cli",
+        "beforeRssKiB": 1788,
+        "dropped": 0,
+        "initializedRssKiB": 15380,
+        "recorded": 512,
+        "seconds": 0.0069841,
+        "slotBytes": 408,
+        "systemCpuSeconds": 0,
+        "userCpuSeconds": 0.008563
+      },
+      {
+        "afterRssKiB": 15440,
+        "app": "fptn-client-cli",
+        "beforeRssKiB": 1792,
+        "dropped": 0,
+        "initializedRssKiB": 15392,
+        "recorded": 512,
+        "seconds": 0.00671763,
+        "slotBytes": 408,
+        "systemCpuSeconds": 0.00782,
+        "userCpuSeconds": 0
+      }
+    ]
+  }
+}

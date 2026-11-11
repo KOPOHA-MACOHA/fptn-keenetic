@@ -1,0 +1,110 @@
+#!/bin/sh
+# Public bootstrap; install only missing Entware packages, then verify the pinned updater.
+set -eu
+umask 077
+export LC_ALL=C LANG=C
+PATH=/opt/sbin:/opt/bin:/opt/usr/bin:/usr/sbin:/usr/bin:/sbin:/bin
+export PATH
+fail() { echo "FPTN: $*" >&2; exit 1; }
+[ "$(id -u)" = 0 ] || fail 'Запустите от root Entware.'
+MODE=${1:-install}
+case "$MODE" in install|opkg) ;; *) fail 'Использование: sh install.sh [install|opkg] [LAN_IP] [PORT]' ;; esac
+LAN=${2:-}
+if [ -z "$LAN" ] && [ -r /opt/etc/fptn/web-origin ]; then
+  LAN=$(cat /opt/etc/fptn/web-origin); LAN=${LAN#http://}; LAN=${LAN%:*}
+fi
+LAN=${LAN:-192.168.1.1}
+PORT=${3:-}
+if [ -n "$PORT" ]; then
+  case "$PORT" in *[!0-9]*|0*) fail 'TCP-порт должен быть от 1 до 65535.' ;; esac
+  [ "${#PORT}" -le 5 ] && [ "$PORT" -ge 1 ] && [ "$PORT" -le 65535 ] || fail 'TCP-порт должен быть от 1 до 65535.'
+fi
+printf '%s\n' "$LAN" | awk -F. 'NF!=4 {exit 1} {for(i=1;i<=4;i++) if($i!~/^[0-9]+$/ || $i>255 || length($i)>3) exit 1}' || fail 'Некорректный IPv4 LAN.'
+[ -r /opt/etc/entware_release ] || fail 'Требуется установленный Entware.'
+value() { awk -F= -v key="$1" '$1==key {gsub(/["\047\r]/,"",$2); print $2}' /opt/etc/entware_release; }
+case "$(value arch):$(value cpu_type):$(value float)" in
+  mipsel:mips32r2:soft) ;;
+  aarch64:*) [ "$(uname -m)" = aarch64 ] || fail 'Entware и ядро aarch64 должны совпадать.' ;;
+  arm:*) [ "$(uname -m)" = armv7l ] || fail 'Нужно little-endian ядро ARMv7.' ;;
+  *) fail 'Для этой архитектуры Entware готовая сборка не поддерживается.' ;;
+esac
+command -v ndmc >/dev/null 2>&1 || fail 'Требуется KeeneticOS.'
+[ -c /dev/net/tun ] || fail 'Включите компонент TUN Keenetic.'
+command -v opkg >/dev/null 2>&1 || fail 'Не найден opkg.'
+NEW_HTTP=${FPTN_BOOTSTRAP_HTTP:-no}
+if [ ! -f /opt/etc/lighttpd/lighttpd.conf ] && ! command -v lighttpd >/dev/null 2>&1; then
+  pidof lighttpd >/dev/null 2>&1 && fail 'Уже работает lighttpd с другой конфигурацией.'
+  NEW_HTTP=yes
+fi
+PACKAGES=
+for pair in curl:curl jq:jq lighttpd:lighttpd; do
+  command -v "${pair%:*}" >/dev/null 2>&1 || PACKAGES="$PACKAGES ${pair#*:}"
+done
+[ -x /opt/sbin/ip ] || [ -x /opt/libexec/ip-full ] || PACKAGES="$PACKAGES ip-full"
+if ! command -v php-cgi >/dev/null 2>&1 && ! command -v php >/dev/null 2>&1; then PACKAGES="$PACKAGES php8-cgi"; fi
+for module in cgi setenv; do
+  [ -f "/opt/lib/lighttpd/mod_$module.so" ] || PACKAGES="$PACKAGES lighttpd-mod-$module"
+done
+if [ -n "$PACKAGES" ]; then
+  echo "Устанавливаю недостающие пакеты Entware:$PACKAGES"
+  opkg update
+  # Deliberate word splitting of a fixed list; no user-controlled package names.
+  opkg install $PACKAGES
+fi
+if [ "$NEW_HTTP" = yes ]; then
+  # A newly installed Entware lighttpd otherwise defaults to :80, occupied by Keenetic.
+  # Keep its unused primary listener private; FPTN gets its own LAN socket.
+  BASE_FRAGMENT=/opt/etc/lighttpd/conf.d/05-fptn-bootstrap.conf
+  [ ! -e "$BASE_FRAGMENT" ] || fail 'Фрагмент начальной настройки lighttpd уже существует.'
+  TCP_LISTENERS=$(netstat -lnt 2>/dev/null) || fail 'Не удалось проверить TCP-порты.'
+  BASE_PORT=1110
+  while [ "$BASE_PORT" = "${PORT:-1111}" ] || printf '%s\n' "$TCP_LISTENERS" | awk -v port="$BASE_PORT" '$4 ~ (":" port "$") {found=1} END {exit !found}'; do
+    BASE_PORT=$((BASE_PORT+1))
+    [ "$BASE_PORT" -le 65535 ] || fail 'Нет свободного порта для служебного listener lighttpd.'
+  done
+  [ -f /opt/etc/lighttpd/lighttpd.conf ] || fail 'Пакет lighttpd не создал основной конфиг.'
+  mkdir -p /opt/etc/lighttpd/conf.d
+  printf '%s\n' '# Initial Entware lighttpd listener, created by FPTN bootstrap.' 'server.bind := "127.0.0.1"' "server.port := $BASE_PORT" > "$BASE_FRAGMENT"
+  if ! lighttpd -tt -f /opt/etc/lighttpd/lighttpd.conf; then
+    rm -f "$BASE_FRAGMENT"
+    fail 'Не удалось подготовить новый lighttpd. Его основной конфиг не менялся.'
+  fi
+fi
+for cmd in curl jq sha256sum mktemp; do command -v "$cmd" >/dev/null 2>&1 || fail "Не найдена команда $cmd."; done
+if [ "$MODE" = opkg ]; then
+  case "$(value arch)" in
+    mipsel) FEED=mipselsf-k3.4 ;; aarch64) FEED=aarch64-k3.10 ;; arm) FEED=armv7sf-k3.2 ;; *) fail 'Неизвестная платформа.' ;;
+  esac
+  mkdir -p /opt/etc/opkg
+  FEED_FILE=/opt/etc/opkg/fptn-keenetic.conf
+  if [ -e "$FEED_FILE" ]; then grep -Fq '# Managed by FPTN package channel' "$FEED_FILE" || fail 'Конфигурация feed занята другим приложением.'; fi
+  printf '%s\n' '# Managed by FPTN package channel' "src/gz fptn_keenetic https://github.com/KOPOHA-MACOHA/fptn-keenetic/releases/download/entware-feed-$FEED" > "$FEED_FILE.new"
+  mv "$FEED_FILE.new" "$FEED_FILE"
+  export FPTN_PACKAGE_LAN=$LAN FPTN_INSTALL_PORT=$PORT
+  opkg update
+  opkg install fptn-keenetic
+  exit 0
+fi
+BUNDLE=$(dirname "$(readlink -f "$0")")
+if [ -f "$BUNDLE/release-revision" ] && [ -f "$BUNDLE/scripts/install-web-ui.sh" ]; then
+  REV=$(cat "$BUNDLE/release-revision")
+  case "$REV" in *[!a-f0-9]*|'') fail 'Некорректная версия пакета.' ;; esac
+  [ "${#REV}" -eq 40 ] || fail 'Нужен полный SHA пакета.'
+  (cd "$BUNDLE"; sha256sum -c SHA256SUMS) || fail 'Пакет повреждён.'
+  FPTN_PAYLOAD_DIR=$BUNDLE sh "$BUNDLE/scripts/install-web-ui.sh" install "$REV" "$LAN" "" "$PORT"
+  exit 0
+fi
+mkdir -p /opt/tmp
+STAGE=$(mktemp -d /opt/tmp/fptn-bootstrap.XXXXXX)
+trap 'rm -rf "$STAGE"' EXIT
+trap 'exit 1' INT TERM HUP
+curl --proto '=https' --proto-redir '=https' -fLsS --connect-timeout 15 --max-time 60 \
+  https://raw.githubusercontent.com/KOPOHA-MACOHA/fptn-keenetic/main/web/update.json -o "$STAGE/channel.json"
+jq -e 'def hex($n): type=="string" and length==$n and all(explode[]; (.>=48 and .<=57) or (.>=97 and .<=102));
+  .schema==1 and (.revision|hex(40)) and (.installerSha256|hex(64))' "$STAGE/channel.json" >/dev/null || fail 'Некорректный каталог выпуска.'
+REV=$(jq -r .revision "$STAGE/channel.json")
+SUM=$(jq -r .installerSha256 "$STAGE/channel.json")
+curl --proto '=https' --proto-redir '=https' -fLsS --connect-timeout 15 --max-time 60 \
+  "https://raw.githubusercontent.com/KOPOHA-MACOHA/fptn-keenetic/$REV/scripts/install-web-ui.sh" -o "$STAGE/install-web-ui.sh"
+printf '%s  %s\n' "$SUM" "$STAGE/install-web-ui.sh" | sha256sum -c - || fail 'Контрольная сумма установщика не совпала.'
+sh "$STAGE/install-web-ui.sh" install "$REV" "$LAN" "" "$PORT"

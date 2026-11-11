@@ -1,0 +1,156 @@
+# syntax=docker/dockerfile:1@sha256:4edf897a3ffa55b89f906fc8cc78afdb3f1834cc9c7083565e611a8a7d5fe99e
+# SDK supplies a modern compiler only. No OpenWrt package is installed on Keenetic.
+ARG DEPENDENCIES_IMAGE=dependencies
+ARG CONAN_SEED_IMAGE=empty-conan-seed
+FROM --platform=linux/amd64 openwrt/sdk:ramips-mt7621-24.10.7@sha256:80fac8772ff0c536ba8a1b59497acd038daa744b7e3a628508b447a50145308c AS sdk
+FROM --platform=linux/amd64 ubuntu:24.04@sha256:68ee22004a9109b44973313b02ff7b1de250f1de0f5ecb628d73f579aaff33ac AS toolchain
+# The minimal Ubuntu base has no CA bundle; bootstrap HTTPS from the pinned SDK.
+COPY --from=sdk /etc/ssl/certs/ca-certificates.crt /etc/ssl/certs/ca-certificates.crt
+ENV DEBIAN_FRONTEND=noninteractive
+COPY build-locks /work/build-locks
+COPY build-locks/ubuntu.sources /etc/apt/sources.list.d/ubuntu.sources
+COPY scripts/dependency-lock.py /work/dependency-lock.py
+RUN --mount=type=secret,id=proxy_ca \
+    if [ -f /run/secrets/proxy_ca ]; then \
+      export CURL_CA_BUNDLE=/run/secrets/proxy_ca SSL_CERT_FILE=/run/secrets/proxy_ca; \
+    fi; \
+    apt-get -o Acquire::https::CaInfo="${SSL_CERT_FILE:-/etc/ssl/certs/ca-certificates.crt}" update && \
+    apt-get -o Acquire::https::CaInfo="${SSL_CERT_FILE:-/etc/ssl/certs/ca-certificates.crt}" install -y --no-install-recommends \
+      $(cat /work/build-locks/apt.txt) && \
+    rm -rf /var/lib/apt/lists/*
+RUN --mount=type=secret,id=proxy_ca \
+    if [ -f /run/secrets/proxy_ca ]; then export PIP_CERT=/run/secrets/proxy_ca; fi; \
+    python3 -m venv /tools && \
+    /tools/bin/pip install --no-cache-dir --require-hashes --no-build-isolation -r /work/build-locks/python.txt
+COPY --from=sdk /builder/staging_dir/toolchain-mipsel_24kc_gcc-13.3.0_musl /builder/staging_dir/toolchain-mipsel_24kc_gcc-13.3.0_musl
+COPY --from=sdk /builder/staging_dir/host /builder/staging_dir/host
+COPY --from=sdk /builder/scripts /builder/scripts
+ENV STAGING_DIR=/builder/staging_dir/toolchain-mipsel_24kc_gcc-13.3.0_musl
+ENV PATH=/tools/bin:/builder/staging_dir/toolchain-mipsel_24kc_gcc-13.3.0_musl/bin:/builder/staging_dir/host/bin:${PATH}
+WORKDIR /work
+COPY scripts/fix-static-libgcc.py /work/fix-static-libgcc.py
+RUN python /work/fix-static-libgcc.py
+COPY sources.lock.json /work/sources.lock.json
+COPY profiles/mipsel-softfloat /work/profile
+COPY scripts/verify-elf.py /work/verify-elf.py
+
+FROM toolchain AS probe
+COPY src/platform-probe.cpp /work/platform-probe.cpp
+RUN mkdir /out && \
+    mipsel-openwrt-linux-musl-g++ -std=c++20 -Os -march=mips32r2 -mabi=32 \
+      -msoft-float -static -pthread /work/platform-probe.cpp -latomic -o /out/fptn-platform-probe && \
+    mipsel-openwrt-linux-musl-strip /out/fptn-platform-probe && \
+    python /work/verify-elf.py /out/fptn-platform-probe && \
+    timeout 30 qemu-mipsel /out/fptn-platform-probe && \
+    cp /work/sources.lock.json /out/ && \
+    cd /out && sha256sum fptn-platform-probe sources.lock.json > SHA256SUMS
+
+FROM scratch AS probe-export
+COPY --from=probe /out/ /
+
+FROM scratch AS empty-conan-seed
+COPY build-locks/build-profile /root/.conan2/profiles/default
+FROM ${CONAN_SEED_IMAGE} AS conan-seed
+
+FROM toolchain AS dependencies
+COPY --from=conan-seed /root/.conan2 /root/.conan2
+COPY scripts/install-locked-dependencies.sh /work/install-locked-dependencies.sh
+COPY scripts/prepare-source.py /work/prepare-source.py
+RUN --mount=type=secret,id=proxy_ca \
+    if [ -f /run/secrets/proxy_ca ]; then export GIT_SSL_CAINFO=/run/secrets/proxy_ca; fi; \
+    revision="$(python -c 'import json; print(json.load(open("/work/sources.lock.json"))["fptn"])')" && \
+    git init /work/upstream && \
+    git -C /work/upstream remote add origin https://github.com/fptn-project/fptn.git && \
+    git -C /work/upstream fetch --depth=1 origin "$revision" && \
+    git -C /work/upstream checkout --detach FETCH_HEAD && \
+    test "$(git -C /work/upstream rev-parse HEAD)" = "$revision" && \
+    python /work/prepare-source.py /work/upstream /work/sources.lock.json
+COPY build-locks/build-profile /root/.conan2/profiles/default
+RUN python /work/dependency-lock.py sources /work/build-locks && \
+    python /work/dependency-lock.py tools /work/build-locks
+WORKDIR /work/upstream
+RUN --mount=type=secret,id=proxy_ca \
+    if [ -f /run/secrets/proxy_ca ]; then \
+      export REQUESTS_CA_BUNDLE=/run/secrets/proxy_ca SSL_CERT_FILE=/run/secrets/proxy_ca \
+             CURL_CA_BUNDLE=/run/secrets/proxy_ca GIT_SSL_CAINFO=/run/secrets/proxy_ca \
+             CMAKE_TLS_CAINFO=/run/secrets/proxy_ca; \
+    fi; \
+    bash /work/install-locked-dependencies.sh && \
+    python /work/dependency-lock.py graph /work/build-locks
+
+# Strip disposable Conan builds/sources before flattening. Packages and /build stay.
+FROM dependencies AS dependency-clean
+RUN conan cache clean "*" --source --build --download --temp && \
+    conan cache check-integrity "*:*"
+
+# A single compact filesystem layer avoids carrying deleted multi-GB build trees.
+FROM scratch AS dependency-image
+COPY --from=dependency-clean / /
+ENV STAGING_DIR=/builder/staging_dir/toolchain-mipsel_24kc_gcc-13.3.0_musl
+ENV PATH=/tools/bin:/builder/staging_dir/toolchain-mipsel_24kc_gcc-13.3.0_musl/bin:/builder/staging_dir/host/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
+ENV DEBIAN_FRONTEND=noninteractive
+WORKDIR /work/upstream
+# END DEPENDENCY IMAGE INPUTS
+
+# CI overrides this FROM with an integrity-checked OCI snapshot, not a cache hint.
+FROM ${DEPENDENCIES_IMAGE} AS client
+# Restored OCI snapshots skip dependencies above; verify their locks here too.
+# This offline guard never installs or rebuilds Conan packages.
+COPY build-locks /work/build-locks
+COPY scripts/dependency-lock.py /work/dependency-lock.py
+RUN python /work/dependency-lock.py check /work/build-locks
+COPY scripts/check-cross-includes.py /work/check-cross-includes.py
+COPY scripts/prepare-connect-test.py /work/prepare-connect-test.py
+COPY scripts/run-connect-test.sh /work/run-connect-test.sh
+COPY docs/tunnel-test.md /work/TUNNEL-TEST.md
+COPY scripts/prepare-native-tun.py /work/prepare-native-tun.py
+COPY scripts/prepare-native-transport.py /work/prepare-native-transport.py
+COPY src/keenetic-transport.h /work/keenetic-transport.h
+COPY scripts/prepare-server-policy.py /work/prepare-server-policy.py
+COPY scripts/check-probe-mode.sh /work/check-probe-mode.sh
+COPY src/keenetic-health.h /work/keenetic-health.h
+COPY src/keenetic-server-policy.h /work/keenetic-server-policy.h
+COPY src/keenetic-linux-tun.h /work/keenetic-linux-tun.h
+COPY scripts/fptn-native-service.sh /work/fptn-native-service.sh
+COPY docs/native-interface.md /work/NATIVE-INTERFACE.md
+RUN python /work/prepare-connect-test.py /work/upstream && \
+    python /work/prepare-native-tun.py /work/upstream /work/keenetic-linux-tun.h && \
+    python /work/prepare-server-policy.py /work/upstream /work/keenetic-server-policy.h && \
+    python /work/prepare-native-transport.py /work/upstream /work/keenetic-transport.h
+RUN --mount=type=secret,id=proxy_ca \
+    if [ -f /run/secrets/proxy_ca ]; then \
+      export SSL_CERT_FILE=/run/secrets/proxy_ca CMAKE_TLS_CAINFO=/run/secrets/proxy_ca; \
+    fi; \
+    revision="$(python -c 'import json; print(json.load(open("/work/sources.lock.json"))["fptn"])')" && \
+    cmake -S /work/upstream -B /build \
+      -DCMAKE_TOOLCHAIN_FILE=/build/conan_toolchain.cmake \
+      -DCMAKE_BUILD_TYPE=Release -DCMAKE_EXE_LINKER_FLAGS=-static \
+      -DCMAKE_COMPILE_WARNING_AS_ERROR=OFF -DCMAKE_CXX_CLANG_TIDY= \
+      -DFPTN_VERSION=0.8.0 && \
+    python /work/check-cross-includes.py /build/compile_commands.json && \
+    cmake --build /build --target fptn-client-cli -j2
+RUN mkdir /out && \
+    cp /build/src/fptn-client/fptn-client-cli /out/ && \
+    mipsel-openwrt-linux-musl-strip /out/fptn-client-cli && \
+    python /work/verify-elf.py /out/fptn-client-cli && \
+    timeout 60 qemu-mipsel /out/fptn-client-cli --help > /out/HELP.txt && \
+    grep -q -- '--keenetic-connect' /out/HELP.txt && \
+    grep -q -- '--keenetic-native' /out/HELP.txt && \
+    grep -q -- '--keenetic-server-policy' /out/HELP.txt && \
+    grep -q -- '--keenetic-probe-only' /out/HELP.txt && \
+    if timeout 60 qemu-mipsel /out/fptn-client-cli --access-token test > /out/GUARD.txt 2>&1; then exit 1; fi && \
+    grep -q 'Connection requires --keenetic-connect' /out/GUARD.txt && \
+    if timeout 60 qemu-mipsel /out/fptn-client-cli --keenetic-connect --keenetic-native \
+      --access-token test --tun-interface-name fptn0 --enable-ad-block false --blacklist-domains '' > /out/NATIVE-GUARD.txt 2>&1; then exit 1; fi && \
+    grep -q 'Native mode requires opkgtunN' /out/NATIVE-GUARD.txt && \
+    cp /work/sources.lock.json /out/ && \
+    cp /work/upstream/LICENSE /out/LICENSE-FPTN && \
+    cp /work/run-connect-test.sh /work/TUNNEL-TEST.md /out/ && \
+    cp /work/fptn-native-service.sh /work/NATIVE-INTERFACE.md /out/ && \
+    cd /out && sha256sum fptn-client-cli HELP.txt sources.lock.json LICENSE-FPTN run-connect-test.sh TUNNEL-TEST.md fptn-native-service.sh NATIVE-INTERFACE.md > SHA256SUMS
+
+# Exercise probe-only mode on MIPS with a closed loopback port, without a TUN.
+RUN sh /work/check-probe-mode.sh
+
+FROM scratch AS client-export
+COPY --from=client /out/ /

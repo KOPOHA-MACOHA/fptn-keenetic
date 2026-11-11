@@ -1,0 +1,144 @@
+name: Check runtime and panel
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+  workflow_call:
+    inputs:
+      source-ref:
+        description: Exact candidate commit created by the upstream checker
+        required: true
+        type: string
+      publish-runtime:
+        description: Publish the exact validated main revision for the release orchestrator
+        required: false
+        type: boolean
+        default: false
+permissions:
+  contents: read
+concurrency:
+  group: runtime-${{ inputs.source-ref || github.ref }}
+  cancel-in-progress: true
+jobs:
+  test:
+    name: runtime-test-${{ inputs.source-ref || github.sha }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.source-ref || github.sha }}
+          persist-credentials: false
+          fetch-depth: 0
+      - name: Verify the requested revision and main ancestry before publication
+        env:
+          RUNTIME_SHA: ${{ inputs.source-ref || github.sha }}
+          PUBLISH_RUNTIME: ${{ inputs.publish-runtime || false }}
+        run: |
+          python3 - <<'PYREF'
+          import os,re,subprocess
+          ref=os.environ['RUNTIME_SHA']
+          if not re.fullmatch('[0-9a-f]{40}',ref):raise SystemExit('Expected an exact runtime SHA')
+          if os.environ['PUBLISH_RUNTIME']=='true':
+            subprocess.run(['git','merge-base','--is-ancestor',ref,'origin/main'],check=True)
+          PYREF
+      - name: Prepare PHP and lighttpd integration tests
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq php-cgi lighttpd libboost-dev libspdlog-dev libfmt-dev python3-yaml iproute2 iptables libarchive-dev libcurl4-openssl-dev pkg-config
+          php-cgi -n -v
+      - name: Build the pinned native opkg test tool
+        run: sh tests/build-opkg.sh
+      - name: Verify the complete runtime suite once, including required isolated kernel checks
+        run: |
+          python3 scripts/package-web.py --check
+          python3 -m compileall -q scripts
+          sudo --preserve-env=PATH env FPTN_REQUIRE_NETNS=1 FPTN_TEST_OPKG="$FPTN_TEST_OPKG" python3 -m unittest discover -s tests -v
+
+  package:
+    name: runtime-package-${{ inputs.source-ref || github.sha }}
+    needs: test
+    if: >-
+      github.repository == 'KOPOHA-MACOHA/fptn-keenetic' && github.ref == 'refs/heads/main' &&
+      ((inputs.source-ref == '' && github.event_name == 'push') ||
+       (inputs.publish-runtime && (github.event_name == 'workflow_run' || github.event_name == 'workflow_dispatch')))
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    permissions:
+      contents: write
+    env:
+      GH_TOKEN: ${{ github.token }}
+      GH_REPO: ${{ github.repository }}
+      RUNTIME_SHA: ${{ inputs.source-ref || github.sha }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.source-ref || github.sha }}
+          persist-credentials: false
+          fetch-depth: 0
+      - name: Download the pinned client and decoder without rebuilding dependencies
+        run: |
+          set -eu
+          mkdir output
+          : > output/SHA256SUMS
+          for platform in mipsel-mips32r2-softfloat $(jq -r '.platforms|keys[]' platform-releases.json); do
+            case "$platform" in mipsel-mips32r2-softfloat|aarch64|armv7-softfloat) ;; *) exit 1 ;; esac
+            stage="$RUNNER_TEMP/runtime-$platform"
+            mkdir -p "$stage/client" "$stage/decoder" "$stage/output"
+            if [ "$platform" = mipsel-mips32r2-softfloat ]; then
+              client="native-$(jq -r .buildRevision client-release.json)"
+              decoder=$(jq -r .decoderRelease runtime-assets.json)
+            else
+              client=$(jq -r --arg p "$platform" '.platforms[$p].assets.clientRelease' platform-releases.json)
+              decoder=$(jq -r --arg p "$platform" '.platforms[$p].assets.decoderRelease' platform-releases.json)
+            fi
+            for asset in fptn-client-cli sources.lock.json LICENSE-FPTN; do
+              gh release download "$client" --pattern "$asset" --dir "$stage/client"
+            done
+            for asset in brotli LICENSE-BROTLI BROTLI-SOURCE.txt; do
+              gh release download "$decoder" --pattern "$asset" --dir "$stage/decoder"
+            done
+            python3 scripts/package-runtime.py . "$stage/client" "$stage/decoder" "$stage/output" "$RUNTIME_SHA" "$platform"
+            serial=$(git rev-list --count "$RUNTIME_SHA")
+            python3 scripts/package-ipk.py . "$stage/output/fptn-keenetic-$platform.tar.gz" "$stage/ipk" "$platform" "$RUNTIME_SHA" "$serial"
+            cp "$stage/ipk/"*.ipk output/
+            for file in Packages Packages.gz package.json; do cp "$stage/ipk/$file" "output/$platform-$file"; done
+            cat "$stage/output/SHA256SUMS" >> output/SHA256SUMS
+            mv "$stage/output/"*.tar.gz output/
+          done
+      - name: Bind IPK architecture and index digests to the validated runtime
+        run: |
+          python3 - <<'PYIPK'
+          import hashlib,json,pathlib,os
+          root=pathlib.Path('output');rows={}
+          for p in ['mipsel-mips32r2-softfloat','aarch64','armv7-softfloat']:
+            row=json.loads((root/(p+'-package.json')).read_text())
+            row['indexes']={n:hashlib.sha256((root/(p+'-'+n)).read_bytes()).hexdigest() for n in ['Packages','Packages.gz']}
+            rows[p]=row
+          (root/'ipk-evidence.json').write_text(json.dumps({'schema':1,'runtimeRevision':os.environ['RUNTIME_SHA'],'platforms':rows},indent=2)+'\n')
+          PYIPK
+      - name: Bind package digests to this exact validation run
+        run: python3 scripts/release-publication.py evidence --directory output --runtime "$RUNTIME_SHA"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: fptn-keenetic-install
+          path: |
+            output/*.tar.gz
+            output/SHA256SUMS
+            output/runtime-evidence.json
+            output/*.ipk
+            output/*-Packages*
+            output/*-package.json
+            output/ipk-evidence.json
+          if-no-files-found: error
+      - name: Publish the tested complete runtime package
+        run: |
+          set -eu
+          tag="runtime-$RUNTIME_SHA"
+          if ! gh release view "$tag" >/dev/null 2>&1; then
+            gh release create "$tag" --target "$RUNTIME_SHA" --prerelease \
+              --title "FPTN Keenetic runtime ${RUNTIME_SHA:0:7}" \
+              --notes 'Complete install/update packages for registered Entware architectures. Exact client/decoder and source metadata, panel and service are included. Runtime tests passed in Actions; foreign-architecture CLI/probes are tested under QEMU, not live ARM hardware. Run sh install.sh install inside the extracted folder. Routes and DNS stay in Keenetic; optional IPv6 NAT66 is off by default.'
+          fi
+          gh release upload "$tag" output/*.tar.gz output/*.ipk output/*-Packages* output/*-package.json output/ipk-evidence.json output/SHA256SUMS output/runtime-evidence.json --clobber
