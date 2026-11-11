@@ -1,2 +1,1 @@
-Diagnose the rejected tag import before copying release files.
-Source: efbf0d550f9a03c437ff03714cbecc9d6f5b6f22
+Verify tag creation for the history imported through the authorized GitHub connection.
