@@ -29,6 +29,7 @@ jobs:
           python3 -m compileall -q scripts
           sudo --preserve-env=PATH env FPTN_REQUIRE_NETNS=1 FPTN_TEST_OPKG="$FPTN_TEST_OPKG" python3 -m unittest discover -s tests -v
   client:
+    if: "!contains(github.event.head_commit.message, '[runtime-only]')"
     needs: runtime
     runs-on: ubuntu-24.04
     timeout-minutes: 40

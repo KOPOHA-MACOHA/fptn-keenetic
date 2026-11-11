@@ -17,6 +17,9 @@ import urllib.request
 import urllib.parse
 
 REPOSITORY = 'KOPOHA-MACOHA/fptn-keenetic'
+LEGACY_REPOSITORY = 'KOPOHA-MACOHA/fptn-keenetic-test'
+LEGACY_REPOSITORY_ID = 1432556444
+LEGACY_MAIN = 'efbf0d550f9a03c437ff03714cbecc9d6f5b6f22'
 PLATFORMS = ('mipsel-mips32r2-softfloat', 'aarch64', 'armv7-softfloat')
 ARCHIVES = tuple(f'fptn-keenetic-{p}.tar.gz' for p in PLATFORMS)
 WORKFLOWS = {'mips': 'build.yml', 'arm': 'build-platforms.yml',
@@ -64,7 +67,9 @@ class GitHub:
         self.opener = urllib.request.build_opener(NoApiRedirect())
 
     def request(self, method, path, body=None, missing=False):
-        if not path.startswith('/repos/' + REPOSITORY + '/'):
+        legacy_actions = (method == 'GET' and re.fullmatch(
+            '/repos/' + re.escape(LEGACY_REPOSITORY) + r'/actions/runs/[1-9][0-9]*(?:/jobs\?[^#]*)?', path))
+        if not path.startswith('/repos/' + REPOSITORY + '/') and not legacy_actions:
             raise ValueError('Access outside the authorized repository is forbidden')
         prefix = '/repos/' + REPOSITORY
         writes = {('POST', prefix + '/git/trees'), ('POST', prefix + '/git/commits'),
@@ -388,10 +393,10 @@ def commit_files(api, repo, expected, blobs, message):
     return commit
 
 
-def jobs_for(api, run_id):
+def jobs_for(api, run_id, repository=REPOSITORY):
     jobs = []
     for page in range(1, 6):
-        batch = api.get(f'/repos/{REPOSITORY}/actions/runs/{run_id}/jobs?filter=all&per_page=100&page={page}').get('jobs', [])
+        batch = api.get(f'/repos/{repository}/actions/runs/{run_id}/jobs?filter=all&per_page=100&page={page}').get('jobs', [])
         jobs.extend(batch)
         if len(batch) < 100:
             break
@@ -406,9 +411,20 @@ def jobs_for(api, run_id):
 def validation_proof(api, repo, runtime, run_id, package_attempt=None, current_run=None):
     if type(run_id) is not int or run_id < 1:
         raise ValueError('Invalid validation run ID')
-    run = api.get(f'/repos/{REPOSITORY}/actions/runs/{run_id}')
+    repository = REPOSITORY
+    run = api.get(f'/repos/{repository}/actions/runs/{run_id}', missing=True)
+    if run is None:
+        # Actions run IDs do not migrate with Git objects or releases. Only
+        # historical runtimes contained in the frozen old main may use its
+        # original run, read from the renamed repository and bound to its ID.
+        if not repo.ancestor(runtime, LEGACY_MAIN):
+            return False
+        repository = LEGACY_REPOSITORY
+        run = api.get(f'/repos/{repository}/actions/runs/{run_id}', missing=True)
+        if run is None or run.get('head_repository', {}).get('id') != LEGACY_REPOSITORY_ID:
+            return False
     path = run.get('path', '').split('@')[0]
-    if run.get('head_branch') != 'main' or run.get('head_repository', {}).get('full_name') != REPOSITORY:
+    if run.get('head_branch') != 'main' or run.get('head_repository', {}).get('full_name') != repository:
         return False
     if path not in ('.github/workflows/' + WORKFLOWS['runtime'], '.github/workflows/' + WORKFLOWS['publication']):
         return False
@@ -421,7 +437,7 @@ def validation_proof(api, repo, runtime, run_id, package_attempt=None, current_r
     live_self = run_id == current_run and path.endswith('/' + WORKFLOWS['publication']) and run.get('status') == 'in_progress'
     if not live_self and (run.get('status') != 'completed' or run.get('conclusion') != 'success'):
         return False
-    jobs = jobs_for(api, run_id)
+    jobs = jobs_for(api, run_id, repository)
     names = [f'runtime-test-{runtime}', f'runtime-package-{runtime}']
     if path.endswith('/' + WORKFLOWS['runtime']) and run.get('head_sha') == runtime and not all(n in jobs for n in names):
         names = ['test', 'package']  # Already published pre-automation releases.

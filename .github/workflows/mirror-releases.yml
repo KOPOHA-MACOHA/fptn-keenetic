@@ -1,0 +1,31 @@
+name: Preserve releases for fork cutover
+on:
+  push:
+    branches: [migration/releases]
+    paths:
+      - '.github/migration/start-release-copy'
+permissions:
+  contents: read
+concurrency:
+  group: fork-release-migration
+  cancel-in-progress: false
+jobs:
+  mirror:
+    if: github.repository == 'KOPOHA-MACOHA/fptn-keenetic-next'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 90
+    permissions:
+      contents: write
+    env:
+      GH_TOKEN: ${{ github.token }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Copy frozen original tags and verify every release asset
+        run: python3 .github/scripts/mirror-releases.py
+      - uses: actions/upload-artifact@v4
+        with:
+          name: release-migration-provenance
+          path: ${{ runner.temp }}/release-migration.json
+          if-no-files-found: error

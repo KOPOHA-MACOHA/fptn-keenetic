@@ -1,0 +1,2864 @@
+{
+  "schema": 1,
+  "sourceRepository": "KOPOHA-MACOHA/fptn-keenetic",
+  "sourceRepositoryId": 1432556444,
+  "sourceRevision": "efbf0d550f9a03c437ff03714cbecc9d6f5b6f22",
+  "targetRepositoryId": 1453702975,
+  "latest": "v0.18.4-128",
+  "releases": [
+    {
+      "id": 439375344,
+      "tag_name": "v0.18.4-128",
+      "target_commitish": "dd99a1ff320891b37651291c106a86e5a22778d4",
+      "name": "FPTN Keenetic 0.18.4 · клиент 0.8.0",
+      "body": "Панель **0.18.4** · клиент **0.8.0** · пакет **0.18.4-128**.\n\n### Что изменилось\n\n- Добавлены пакеты Entware `.ipk` и отдельные каналы MIPS, ARM64 и ARMv7.\n- Обновление из панели пакетной установки использует `opkg`.\n- При переходе сохраняются токен, учётная запись, параметры подключения,\n  избранные серверы, выбранные порт и интерфейс.\n- Удаление сохраняет настройки и не удаляет общие пакеты Entware или чужие файлы.\n- Зафиксированы зависимости и инструменты сборки; подготовлены постоянные снимки\n  зависимостей для трёх архитектур.\n\n343 проверки CI прошли, включая установку, обновление и удаление настоящим\n`opkg` в изолированном каталоге. Клиентские бинарники прошли ELF/QEMU-проверки.\n\n### Установка\n\nАвтоматическая установка через Entware/opkg (настройки существующей службы сохраняются):\n\n```sh\ncurl -fsSL https://raw.githubusercontent.com/KOPOHA-MACOHA/fptn-keenetic/main/install.sh | sh -s opkg\n```\n\nВ Assets ниже:\n\n- `.ipk` — пакет Entware для своей архитектуры;\n- `.tar.gz` — полный комплект для ручной установки (`sh install.sh install` внутри распакованной папки);\n- `SHA256SUMS` — контрольные суммы всех шести файлов.\n\nMIPS: `mipsel-3.4` / `mipsel-mips32r2-softfloat`; ARM64: `aarch64-3.10`;\nARMv7 soft-float: `armv7-3.2`. Выбор платформы и ограничения:\n[инструкция](https://github.com/KOPOHA-MACOHA/fptn-keenetic/blob/main/docs/opkg.md).\n\nПроект экспериментальный; установка и использование — на свой страх и риск.\nАппаратные испытания проводились только на Hopper KN-3810. CI/QEMU не заменяют\nиспытания на других роутерах. Публикация обычного релиза не означает сертификацию.\n",
+      "prerelease": false,
+      "assets": [
+        {
+          "id": 728164448,
+          "name": "fptn-keenetic-aarch64.tar.gz",
+          "size": 12127723,
+          "digest": "sha256:d3bef60f0b204a0931815a61a20d96afc871bcca0e9342f40191879d14cec81e"
+        },
+        {
+          "id": 728164452,
+          "name": "fptn-keenetic-armv7-softfloat.tar.gz",
+          "size": 11624330,
+          "digest": "sha256:ce553342b42ec1db2027613baf38ff6ea9298dab09d23ca3fe7f115d738be720"
+        },
+        {
+          "id": 728164449,
+          "name": "fptn-keenetic-mipsel-mips32r2-softfloat.tar.gz",
+          "size": 12373684,
+          "digest": "sha256:9035864cabd6552e504e488f7b0d44c5f6054c485526a2de84818ed34d488642"
+        },
+        {
+          "id": 728164446,
+          "name": "fptn-keenetic_0.18.4-128_aarch64-3.10.ipk",
+          "size": 12119418,
+          "digest": "sha256:817c49d4793a79e48517be02ac459800dd3c30cb26dea1cb2ef1e0dd1c03ec26"
+        },
+        {
+          "id": 728164491,
+          "name": "fptn-keenetic_0.18.4-128_armv7-3.2.ipk",
+          "size": 11615219,
+          "digest": "sha256:643bb0d86f2514a34d602d11744d92176db99d40c90cf29506072f9ebb34a4dc"
+        },
+        {
+          "id": 728164447,
+          "name": "fptn-keenetic_0.18.4-128_mipsel-3.4.ipk",
+          "size": 12353314,
+          "digest": "sha256:c007426eb6a9a3318471bab37fb396f85e113ee17ff515432be90bb6c2b9fbef"
+        },
+        {
+          "id": 728164495,
+          "name": "SHA256SUMS",
+          "size": 630,
+          "digest": "sha256:2c5f2b756a7a7d81acfd83cdb8f5102275033d986019e3945fcf828ef36f1a84"
+        }
+      ]
+    },
+    {
+      "id": 439346289,
+      "tag_name": "runtime-dd99a1ff320891b37651291c106a86e5a22778d4",
+      "target_commitish": "dd99a1ff320891b37651291c106a86e5a22778d4",
+      "name": "FPTN Keenetic runtime dd99a1f",
+      "body": "Complete install/update packages for registered Entware architectures. Exact client/decoder and source metadata, panel and service are included. Runtime tests passed in Actions; foreign-architecture CLI/probes are tested under QEMU, not live ARM hardware. Run sh install.sh install inside the extracted folder. Routes and DNS stay in Keenetic; optional IPv6 NAT66 is off by default.",
+      "prerelease": true,
+      "assets": [
+        {
+          "id": 728082570,
+          "name": "aarch64-package.json",
+          "size": 473,
+          "digest": "sha256:2879fb062bbb290c48c861c3974965b24a4ec8b74ea4ca671d5c5db312ea7851"
+        },
+        {
+          "id": 728082543,
+          "name": "aarch64-Packages",
+          "size": 580,
+          "digest": "sha256:66b84fa33af603f7d87e4400bc38d399bf0c084e5e3bf5a71ecbe20e94611e2f"
+        },
+        {
+          "id": 728082550,
+          "name": "aarch64-Packages.gz",
+          "size": 396,
+          "digest": "sha256:01a9c5a737d9c8ebc8356385108fde811cd6cd1726840387b8c2c6c7e0f421d4"
+        },
+        {
+          "id": 728082589,
+          "name": "armv7-softfloat-package.json",
+          "size": 474,
+          "digest": "sha256:30dba600ff24e6999096207dba9542a626e9db03da261a57ddc7cf64370da7ba"
+        },
+        {
+          "id": 728082547,
+          "name": "armv7-softfloat-Packages",
+          "size": 574,
+          "digest": "sha256:c3c02be908a6ca83b74da25e57ba5c7862e8375b895b04c1338fbfe2551a1fb3"
+        },
+        {
+          "id": 728082563,
+          "name": "armv7-softfloat-Packages.gz",
+          "size": 398,
+          "digest": "sha256:44ccb648ea215d0fdb22bf94c4a05a5aa80acef95bff3d6585d031226b187869"
+        },
+        {
+          "id": 728082482,
+          "name": "fptn-keenetic-aarch64.tar.gz",
+          "size": 12127723,
+          "digest": "sha256:d3bef60f0b204a0931815a61a20d96afc871bcca0e9342f40191879d14cec81e"
+        },
+        {
+          "id": 728082478,
+          "name": "fptn-keenetic-armv7-softfloat.tar.gz",
+          "size": 11624330,
+          "digest": "sha256:ce553342b42ec1db2027613baf38ff6ea9298dab09d23ca3fe7f115d738be720"
+        },
+        {
+          "id": 728082479,
+          "name": "fptn-keenetic-mipsel-mips32r2-softfloat.tar.gz",
+          "size": 12373684,
+          "digest": "sha256:9035864cabd6552e504e488f7b0d44c5f6054c485526a2de84818ed34d488642"
+        },
+        {
+          "id": 728082477,
+          "name": "fptn-keenetic_0.18.4-128_aarch64-3.10.ipk",
+          "size": 12119418,
+          "digest": "sha256:817c49d4793a79e48517be02ac459800dd3c30cb26dea1cb2ef1e0dd1c03ec26"
+        },
+        {
+          "id": 728082480,
+          "name": "fptn-keenetic_0.18.4-128_armv7-3.2.ipk",
+          "size": 11615219,
+          "digest": "sha256:643bb0d86f2514a34d602d11744d92176db99d40c90cf29506072f9ebb34a4dc"
+        },
+        {
+          "id": 728082542,
+          "name": "fptn-keenetic_0.18.4-128_mipsel-3.4.ipk",
+          "size": 12353314,
+          "digest": "sha256:c007426eb6a9a3318471bab37fb396f85e113ee17ff515432be90bb6c2b9fbef"
+        },
+        {
+          "id": 728082594,
+          "name": "ipk-evidence.json",
+          "size": 2374,
+          "digest": "sha256:37bdf79b8a8f2f9d552fab6ca2ef9e2fc7447b2ab0b450561fa1281bf875ed1a"
+        },
+        {
+          "id": 728082588,
+          "name": "mipsel-mips32r2-softfloat-package.json",
+          "size": 487,
+          "digest": "sha256:e2a2773715d327c19391c51fca953987f238f40782505bbe44c009de469487c7"
+        },
+        {
+          "id": 728082564,
+          "name": "mipsel-mips32r2-softfloat-Packages",
+          "size": 576,
+          "digest": "sha256:5d241b85aa4ef84acbe754f3793c4639a0a692f629fe96e5057dd293dd2c077a"
+        },
+        {
+          "id": 728082568,
+          "name": "mipsel-mips32r2-softfloat-Packages.gz",
+          "size": 395,
+          "digest": "sha256:0904dba83c0daedb51dce868d4450bc52b209e0e40e0ff4a3651926815dd4648"
+        },
+        {
+          "id": 728082614,
+          "name": "runtime-evidence.json",
+          "size": 619,
+          "digest": "sha256:ba2e7a5a43b24547b726e4ab09b738979103223ee1dc3e6d6f5f23c9e7e0cb2f"
+        },
+        {
+          "id": 728082597,
+          "name": "SHA256SUMS",
+          "size": 311,
+          "digest": "sha256:105c08d49e32bcfffc7d16562ecbac00d6fd00844fdc694b1d31c04b8a7e3d32"
+        }
+      ]
+    },
+    {
+      "id": 438898928,
+      "tag_name": "runtime-cd68d31215576185d51b77f31a568356dd562a09",
+      "target_commitish": "cd68d31215576185d51b77f31a568356dd562a09",
+      "name": "FPTN Keenetic runtime cd68d31",
+      "body": "Complete install/update packages for registered Entware architectures. Exact client/decoder and source metadata, panel and service are included. Runtime tests passed in Actions; foreign-architecture CLI/probes are tested under QEMU, not live ARM hardware. Run sh install.sh install inside the extracted folder. Routes and DNS stay in Keenetic; optional IPv6 NAT66 is off by default.",
+      "prerelease": true,
+      "assets": [
+        {
+          "id": 726802214,
+          "name": "fptn-keenetic-aarch64.tar.gz",
+          "size": 12128900,
+          "digest": "sha256:b8f282d30d85c3846f720ebeed5d913d0d1a70afc0b836d03af2c99ac5aaad51"
+        },
+        {
+          "id": 726802213,
+          "name": "fptn-keenetic-armv7-softfloat.tar.gz",
+          "size": 11625667,
+          "digest": "sha256:ef8351a5cc06e082a3c2d12df1c60928663438cb489e887542f9b30ed2bf9b4c"
+        },
+        {
+          "id": 726802212,
+          "name": "fptn-keenetic-mipsel-mips32r2-softfloat.tar.gz",
+          "size": 12374755,
+          "digest": "sha256:da5076268e4f23335070954befb998c36e1f2e4b49c0fb6da0cc3cf215a96235"
+        },
+        {
+          "id": 726802216,
+          "name": "runtime-evidence.json",
+          "size": 619,
+          "digest": "sha256:41248501919148b8445c2f9f430227e3f85b4a5c3e8c5e35372812e85a46ab18"
+        },
+        {
+          "id": 726802215,
+          "name": "SHA256SUMS",
+          "size": 311,
+          "digest": "sha256:8ca5b4709b3dd9ca55a5345c8acfdcd4cf9af12a9e8545a38d2176767bd6e966"
+        }
+      ]
+    },
+    {
+      "id": 439382733,
+      "tag_name": "runtime-b3d9fa254c91ba97ee65d0555bf5e47a61110f4a",
+      "target_commitish": "b3d9fa254c91ba97ee65d0555bf5e47a61110f4a",
+      "name": "FPTN Keenetic runtime b3d9fa2",
+      "body": "Complete install/update packages for registered Entware architectures. Exact client/decoder and source metadata, panel and service are included. Runtime tests passed in Actions; foreign-architecture CLI/probes are tested under QEMU, not live ARM hardware. Run sh install.sh install inside the extracted folder. Routes and DNS stay in Keenetic; optional IPv6 NAT66 is off by default.",
+      "prerelease": true,
+      "assets": [
+        {
+          "id": 728182810,
+          "name": "aarch64-package.json",
+          "size": 473,
+          "digest": "sha256:1b27380e07d90fce844caf45edc76044774417a7d62e5a626b1185dc837e89bb"
+        },
+        {
+          "id": 728182780,
+          "name": "aarch64-Packages",
+          "size": 580,
+          "digest": "sha256:e3f2c432dc15786bdca0739134f74c2905f8c1ce78742a3fc90b90c0ba5cff41"
+        },
+        {
+          "id": 728182784,
+          "name": "aarch64-Packages.gz",
+          "size": 399,
+          "digest": "sha256:b3ef296b54a35b3b069766af9d25d8bcd663312fdb4e71a69deb6e44bffa74e1"
+        },
+        {
+          "id": 728182833,
+          "name": "armv7-softfloat-package.json",
+          "size": 474,
+          "digest": "sha256:5a0410a4910501abb9f7f9bf4b1ff36f717aa5861fea823bb348723da00b842b"
+        },
+        {
+          "id": 728182783,
+          "name": "armv7-softfloat-Packages",
+          "size": 574,
+          "digest": "sha256:987b9a30ed32bbc99d4625471aae317f7d27f5f8fa0a7a11fb1f0680f0f0c9aa"
+        },
+        {
+          "id": 728182803,
+          "name": "armv7-softfloat-Packages.gz",
+          "size": 396,
+          "digest": "sha256:34143974c777570dc7a7b4ff04f901f10eb4b289818c6b8dd2bb86b52c3e43b6"
+        },
+        {
+          "id": 728182689,
+          "name": "fptn-keenetic-aarch64.tar.gz",
+          "size": 12127723,
+          "digest": "sha256:cad5467841f64fea4bfca68ecd97bf2a77939db7914dda86d5af0a940b93ac2c"
+        },
+        {
+          "id": 728182687,
+          "name": "fptn-keenetic-armv7-softfloat.tar.gz",
+          "size": 11624352,
+          "digest": "sha256:36f87b39ab087b51fe4a412ec133d782eabdc6cb95328ab59c7ca792b923cf98"
+        },
+        {
+          "id": 728182686,
+          "name": "fptn-keenetic-mipsel-mips32r2-softfloat.tar.gz",
+          "size": 12373685,
+          "digest": "sha256:b4f1ba89ab6bd52f9a3bb5d6831dbfde3696da14f4e12448bdfdccc9f744a8c4"
+        },
+        {
+          "id": 728182680,
+          "name": "fptn-keenetic_0.18.4-131_aarch64-3.10.ipk",
+          "size": 12119400,
+          "digest": "sha256:ebc3669b32de98a1f4f6b539bdfa5ab051b3923b74f72482c9d9691ffb35748b"
+        },
+        {
+          "id": 728182690,
+          "name": "fptn-keenetic_0.18.4-131_armv7-3.2.ipk",
+          "size": 11615212,
+          "digest": "sha256:db08c39208fc5cbadb83ba8c1a19c6fdb76ca766f932842fdcd9ec870d517b1d"
+        },
+        {
+          "id": 728182771,
+          "name": "fptn-keenetic_0.18.4-131_mipsel-3.4.ipk",
+          "size": 12353274,
+          "digest": "sha256:65bf8b0a05af26bc71d4cac713834c492863777bcf9069a3bd0acb2f2d17cbd4"
+        },
+        {
+          "id": 728182840,
+          "name": "ipk-evidence.json",
+          "size": 2374,
+          "digest": "sha256:503d4c051c2a6613300941c4a7f67d8ff8b67a414814e98ef211968b991702ac"
+        },
+        {
+          "id": 728182843,
+          "name": "mipsel-mips32r2-softfloat-package.json",
+          "size": 487,
+          "digest": "sha256:b4a7b87a9975d1eace56a7eb6e98fa01d794777e4ecd4c3dfbe48377732e0593"
+        },
+        {
+          "id": 728182805,
+          "name": "mipsel-mips32r2-softfloat-Packages",
+          "size": 576,
+          "digest": "sha256:d396be6508ac0616e220000c37fe29d27b51935ced3673a199b71a08e0b35487"
+        },
+        {
+          "id": 728182802,
+          "name": "mipsel-mips32r2-softfloat-Packages.gz",
+          "size": 396,
+          "digest": "sha256:2e88f42e2a27d1b69f9a58e9091b6f99e586665e02754e0a6f091777fb7d863e"
+        },
+        {
+          "id": 728182855,
+          "name": "runtime-evidence.json",
+          "size": 619,
+          "digest": "sha256:d12631ed864656b1f2e1070d305feaf703a4f04e289409c01bb2d6b2eb1a1259"
+        },
+        {
+          "id": 728182848,
+          "name": "SHA256SUMS",
+          "size": 311,
+          "digest": "sha256:e4ed9de722e0c4756a69764427f9af56bc67a54746a905a08265c1f364ab1752"
+        }
+      ]
+    },
+    {
+      "id": 438816002,
+      "tag_name": "runtime-6d873b3cc52524096b9428515d2d88deb5f6866e",
+      "target_commitish": "6d873b3cc52524096b9428515d2d88deb5f6866e",
+      "name": "FPTN Keenetic runtime 6d873b3",
+      "body": "Complete install/update packages for registered Entware architectures. Exact client/decoder and source metadata, panel and service are included. Runtime tests passed in Actions; foreign-architecture CLI/probes are tested under QEMU, not live ARM hardware. Run sh install.sh install inside the extracted folder. Routes and DNS stay in Keenetic; optional IPv6 NAT66 is off by default.",
+      "prerelease": true,
+      "assets": [
+        {
+          "id": 726524957,
+          "name": "fptn-keenetic-aarch64.tar.gz",
+          "size": 12128892,
+          "digest": "sha256:795a085bcbb4f41275608e39bb621311ad0ec73e217797c3047fda4e547871f7"
+        },
+        {
+          "id": 726524961,
+          "name": "fptn-keenetic-armv7-softfloat.tar.gz",
+          "size": 11625622,
+          "digest": "sha256:3cda85f543d077bb58aeb0890289326a31314534d599e051b789ebb3c9e960c9"
+        },
+        {
+          "id": 726524962,
+          "name": "fptn-keenetic-mipsel-mips32r2-softfloat.tar.gz",
+          "size": 12374747,
+          "digest": "sha256:6a4bb90f0b7ca994a6ede39b56f95a71eb1322ab4917b092416a016bfd370d81"
+        },
+        {
+          "id": 726524958,
+          "name": "runtime-evidence.json",
+          "size": 619,
+          "digest": "sha256:f8a2d0b16dd9e31e53bf5f2e9f5e558e1203d077a1615c5f487209512175b27a"
+        },
+        {
+          "id": 726524959,
+          "name": "SHA256SUMS",
+          "size": 311,
+          "digest": "sha256:1355f13a525ed7d79f922fa8ba7e9d4c8681d3411df0184bedb1f0a24286aead"
+        }
+      ]
+    },
+    {
+      "id": 438910667,
+      "tag_name": "runtime-641643684a4b4507e77a9486551405ed9c0f579b",
+      "target_commitish": "641643684a4b4507e77a9486551405ed9c0f579b",
+      "name": "FPTN Keenetic runtime 6416436",
+      "body": "Complete install/update packages for registered Entware architectures. Exact client/decoder and source metadata, panel and service are included. Runtime tests passed in Actions; foreign-architecture CLI/probes are tested under QEMU, not live ARM hardware. Run sh install.sh install inside the extracted folder. Routes and DNS stay in Keenetic; optional IPv6 NAT66 is off by default.",
+      "prerelease": true,
+      "assets": [
+        {
+          "id": 726839315,
+          "name": "fptn-keenetic-aarch64.tar.gz",
+          "size": 12128921,
+          "digest": "sha256:a7cf098cbde18ffe6139d4f55d9d858e3260f8944bdbf827e251185fa899d195"
+        },
+        {
+          "id": 726839316,
+          "name": "fptn-keenetic-armv7-softfloat.tar.gz",
+          "size": 11625684,
+          "digest": "sha256:8e434d7ebd54a31c6f676d0bd0d88ed8eabd236f860914ab4556f059817c3d80"
+        },
+        {
+          "id": 726839313,
+          "name": "fptn-keenetic-mipsel-mips32r2-softfloat.tar.gz",
+          "size": 12374822,
+          "digest": "sha256:ee8e8ca2efb5134e0401922689553026d51ad17ba3ca450bba307207f7f4bf9f"
+        },
+        {
+          "id": 726839317,
+          "name": "runtime-evidence.json",
+          "size": 619,
+          "digest": "sha256:0c21cbb263cdc554cc0b4795aeb0e602b31fe5fd76aa29a12808f0a1b594a9b9"
+        },
+        {
+          "id": 726839320,
+          "name": "SHA256SUMS",
+          "size": 311,
+          "digest": "sha256:ae914e591c9ed8988d50bc4905a4ccbe78e2f5253775dd7fd586e68633d9c82a"
+        }
+      ]
+    },
+    {
+      "id": 439339307,
+      "tag_name": "runtime-5517c5224fcaa46c0f70c71618ba89ec2888569d",
+      "target_commitish": "5517c5224fcaa46c0f70c71618ba89ec2888569d",
+      "name": "FPTN Keenetic runtime 5517c52",
+      "body": "Complete install/update packages for registered Entware architectures. Exact client/decoder and source metadata, panel and service are included. Runtime tests passed in Actions; foreign-architecture CLI/probes are tested under QEMU, not live ARM hardware. Run sh install.sh install inside the extracted folder. Routes and DNS stay in Keenetic; optional IPv6 NAT66 is off by default.",
+      "prerelease": true,
+      "assets": [
+        {
+          "id": 728062387,
+          "name": "aarch64-package.json",
+          "size": 473,
+          "digest": "sha256:5967218717c38ba6c8df01aeb5aa1d26ee3924d8b41c90ee466b349577c26558"
+        },
+        {
+          "id": 728062356,
+          "name": "aarch64-Packages",
+          "size": 580,
+          "digest": "sha256:cfc0ecc1ea0a48181f14d278733338e3e405a6479d88b6e01c40e46a0f0e47e6"
+        },
+        {
+          "id": 728062359,
+          "name": "aarch64-Packages.gz",
+          "size": 399,
+          "digest": "sha256:2a884eaafb45688e19380138272d2be0b42e70263e3f88070069304895b38c79"
+        },
+        {
+          "id": 728062395,
+          "name": "armv7-softfloat-package.json",
+          "size": 474,
+          "digest": "sha256:a6382f55c963b975ca7f032b839a3f12f40609f90af0061bbc64d81307448c5e"
+        },
+        {
+          "id": 728062366,
+          "name": "armv7-softfloat-Packages",
+          "size": 574,
+          "digest": "sha256:47cb75afd398feff46f1ee8a71b49316496c38b26381bcde9dc47368e1196532"
+        },
+        {
+          "id": 728062365,
+          "name": "armv7-softfloat-Packages.gz",
+          "size": 397,
+          "digest": "sha256:7a7fb4dfa50711e7447f01b1dee6a35e623a80dfa80023382d1f34a8c22de658"
+        },
+        {
+          "id": 728062272,
+          "name": "fptn-keenetic-aarch64.tar.gz",
+          "size": 12129449,
+          "digest": "sha256:b0ca086a3c47b0df3a99e0d7efe63f5f141f0513078b9c9526f9681962537b77"
+        },
+        {
+          "id": 728062279,
+          "name": "fptn-keenetic-armv7-softfloat.tar.gz",
+          "size": 11626140,
+          "digest": "sha256:4abc4bd8cad2904cb3816563e6c625356744b373633ad4371db0ffef48ae775c"
+        },
+        {
+          "id": 728062275,
+          "name": "fptn-keenetic-mipsel-mips32r2-softfloat.tar.gz",
+          "size": 12375303,
+          "digest": "sha256:2cce6c35c67c61feb68877aff4db5099cd5fbc36393385479934a85c56c68c91"
+        },
+        {
+          "id": 728062271,
+          "name": "fptn-keenetic_0.18.4-127_aarch64-3.10.ipk",
+          "size": 12121486,
+          "digest": "sha256:f0b04d909b7896fc924e3e208862d374caf545839b0a8340bd556ada8f5a66d7"
+        },
+        {
+          "id": 728062273,
+          "name": "fptn-keenetic_0.18.4-127_armv7-3.2.ipk",
+          "size": 11618066,
+          "digest": "sha256:ca7af55494ac5a95335708db9b6e322b77bf20b83eaf0975162fefe0e605e062"
+        },
+        {
+          "id": 728062347,
+          "name": "fptn-keenetic_0.18.4-127_mipsel-3.4.ipk",
+          "size": 12353811,
+          "digest": "sha256:d5bd8b7e2de9309f73a33245368fccb53f18737c147d8f679522e2072f5e65c1"
+        },
+        {
+          "id": 728062408,
+          "name": "ipk-evidence.json",
+          "size": 2374,
+          "digest": "sha256:77a3a4d895170ce245554f07795776d08b8355b7abe5de27cf91ac98211fbac9"
+        },
+        {
+          "id": 728062409,
+          "name": "mipsel-mips32r2-softfloat-package.json",
+          "size": 487,
+          "digest": "sha256:a8f9ebde793337c298fbc4085c3d69da4a3bbd2a4936cf3660f9c931b33fe178"
+        },
+        {
+          "id": 728062386,
+          "name": "mipsel-mips32r2-softfloat-Packages",
+          "size": 576,
+          "digest": "sha256:ebfc49cc24128013d265fccaf251d522e8575c59e7fd1b19993a927cd023d543"
+        },
+        {
+          "id": 728062389,
+          "name": "mipsel-mips32r2-softfloat-Packages.gz",
+          "size": 397,
+          "digest": "sha256:76d4430e37418c27c272fa7f3f0757523bc21b4ee3c1a3f10f71f21cf55cbed0"
+        },
+        {
+          "id": 728062413,
+          "name": "runtime-evidence.json",
+          "size": 619,
+          "digest": "sha256:b3b11c102ff137800780cdac6f1e58ccc4853597552c8db3c47772ece613655f"
+        },
+        {
+          "id": 728062410,
+          "name": "SHA256SUMS",
+          "size": 311,
+          "digest": "sha256:e7992b9cbaaf0c39e90100cc5c19206768ee99e4b0b654ad59341a8186fb9932"
+        }
+      ]
+    },
+    {
+      "id": 438844414,
+      "tag_name": "runtime-2f0c513e9ffb9574fbfc6a1bfc0c2cdb2c9e5797",
+      "target_commitish": "2f0c513e9ffb9574fbfc6a1bfc0c2cdb2c9e5797",
+      "name": "FPTN Keenetic runtime 2f0c513",
+      "body": "Complete install/update packages for registered Entware architectures. Exact client/decoder and source metadata, panel and service are included. Runtime tests passed in Actions; foreign-architecture CLI/probes are tested under QEMU, not live ARM hardware. Run sh install.sh install inside the extracted folder. Routes and DNS stay in Keenetic; optional IPv6 NAT66 is off by default.",
+      "prerelease": true,
+      "assets": [
+        {
+          "id": 726627484,
+          "name": "fptn-keenetic-aarch64.tar.gz",
+          "size": 12128902,
+          "digest": "sha256:86cae91a24799ea2e454afeb6d1c0448784745298791b0387c52318a961b373c"
+        },
+        {
+          "id": 726627487,
+          "name": "fptn-keenetic-armv7-softfloat.tar.gz",
+          "size": 11625683,
+          "digest": "sha256:c5d94c7d0b6e281035b42c6cea1a9ffebcedfe7368f77a8459860cc08a663b63"
+        },
+        {
+          "id": 726627485,
+          "name": "fptn-keenetic-mipsel-mips32r2-softfloat.tar.gz",
+          "size": 12374741,
+          "digest": "sha256:06cca08cb364f63bc8455468282a476d96a3802a18279fbfe83c8be5664702ee"
+        },
+        {
+          "id": 726627490,
+          "name": "runtime-evidence.json",
+          "size": 619,
+          "digest": "sha256:94c277f37c87737c2b33140e162b899c632cc98718a0149d298034ada946d482"
+        },
+        {
+          "id": 726627488,
+          "name": "SHA256SUMS",
+          "size": 311,
+          "digest": "sha256:2c009e3553f347d983a2127b2a2fa60973736b62fbb73e546fcaffa1655c0a57"
+        }
+      ]
+    },
+    {
+      "id": 438901224,
+      "tag_name": "port-armv7-softfloat-cd68d31215576185d51b77f31a568356dd562a09",
+      "target_commitish": "cd68d31215576185d51b77f31a568356dd562a09",
+      "name": "Experimental FPTN armv7-softfloat cd68d31",
+      "body": "Cross-built static binaries. ELF ABI, C++20 runtime and offline CLI/probe-only checked under QEMU. No hardware or live VPN test on this architecture. Client and decoder include source metadata and licenses. Installer support is published separately after these results are reviewed.",
+      "prerelease": true,
+      "assets": [
+        {
+          "id": 726810206,
+          "name": "brotli",
+          "size": 857804,
+          "digest": "sha256:52ea717965adcf324cb4a8ff55214ef7581d9d367cd8c81d4784b01b97f48855"
+        },
+        {
+          "id": 726810214,
+          "name": "BROTLI-SOURCE.txt",
+          "size": 79,
+          "digest": "sha256:c609e6e55f9f7814d7f13d117cfac8fd41a861ac46e3e9b4eeea87db4b4cbdeb"
+        },
+        {
+          "id": 726810166,
+          "name": "client-release.json",
+          "size": 408,
+          "digest": "sha256:b16707e0ac3e601d9797ab036bb925b884128c374d618987435601539b29f91d"
+        },
+        {
+          "id": 726810230,
+          "name": "DECODER-SHA256SUMS",
+          "size": 324,
+          "digest": "sha256:f448cbc0c476b49b10fa2cacc66595185f93fdf911193461a0c796007afba86e"
+        },
+        {
+          "id": 726810170,
+          "name": "fptn-client-cli",
+          "size": 19900008,
+          "digest": "sha256:a0cb350e57a56a53c0a1ab3fdb6d2327398900e2cb2c2759dde75d25940a8d87"
+        },
+        {
+          "id": 726810174,
+          "name": "HELP.txt",
+          "size": 7615,
+          "digest": "sha256:8202c434b7f0ea8f8e62becfc13624a5bd2bdb1cec79023247e6dcd8c7955732"
+        },
+        {
+          "id": 726810210,
+          "name": "LICENSE-BROTLI",
+          "size": 1084,
+          "digest": "sha256:3d180008e36922a4e8daec11c34c7af264fed5962d07924aea928c38e8663c94"
+        },
+        {
+          "id": 726810169,
+          "name": "LICENSE-FPTN",
+          "size": 1068,
+          "digest": "sha256:2f817d4133bca382fe26298f08c106f2c2f36206946e85a40049b38ab15dfaca"
+        },
+        {
+          "id": 726810223,
+          "name": "runtime-assets.json",
+          "size": 503,
+          "digest": "sha256:bcc2768b9930feea143e71478ce2a52f4f6766462057b612f607af288594d640"
+        },
+        {
+          "id": 726810201,
+          "name": "SHA256SUMS",
+          "size": 748,
+          "digest": "sha256:bb8b605fbe7ce08087317d79a8394e2e0f1b72f5ffababe9662997e94b46191b"
+        },
+        {
+          "id": 726810172,
+          "name": "sources.lock.json",
+          "size": 294,
+          "digest": "sha256:d5ea48c0782b30acdb980efc7297dac1da47fc8aeef77352c98b4eb54548a9a5"
+        }
+      ]
+    },
+    {
+      "id": 438899522,
+      "tag_name": "port-aarch64-cd68d31215576185d51b77f31a568356dd562a09",
+      "target_commitish": "cd68d31215576185d51b77f31a568356dd562a09",
+      "name": "Experimental FPTN aarch64 cd68d31",
+      "body": "Cross-built static binaries. ELF ABI, C++20 runtime and offline CLI/probe-only checked under QEMU. No hardware or live VPN test on this architecture. Client and decoder include source metadata and licenses. Installer support is published separately after these results are reviewed.",
+      "prerelease": true,
+      "assets": [
+        {
+          "id": 726804402,
+          "name": "brotli",
+          "size": 919664,
+          "digest": "sha256:0b74b076e007e713e1294a34d5b858a810700c6666ab1090efaac1ccdccfd58b"
+        },
+        {
+          "id": 726804410,
+          "name": "BROTLI-SOURCE.txt",
+          "size": 79,
+          "digest": "sha256:c609e6e55f9f7814d7f13d117cfac8fd41a861ac46e3e9b4eeea87db4b4cbdeb"
+        },
+        {
+          "id": 726804371,
+          "name": "client-release.json",
+          "size": 400,
+          "digest": "sha256:b6905d96bcb348559c970cd825a4824cbab0eca369058d0f6ba9623c78ec0ce4"
+        },
+        {
+          "id": 726804431,
+          "name": "DECODER-SHA256SUMS",
+          "size": 324,
+          "digest": "sha256:edf7243bcd86ed2f77fd02c8b4a4ebc35af59047cf319623b057df322c4fec05"
+        },
+        {
+          "id": 726804364,
+          "name": "fptn-client-cli",
+          "size": 21190400,
+          "digest": "sha256:627a5faf5103e962f6f0c69e255aa52d228d46263c1203c232e1f991d216b410"
+        },
+        {
+          "id": 726804370,
+          "name": "HELP.txt",
+          "size": 7615,
+          "digest": "sha256:8202c434b7f0ea8f8e62becfc13624a5bd2bdb1cec79023247e6dcd8c7955732"
+        },
+        {
+          "id": 726804405,
+          "name": "LICENSE-BROTLI",
+          "size": 1084,
+          "digest": "sha256:3d180008e36922a4e8daec11c34c7af264fed5962d07924aea928c38e8663c94"
+        },
+        {
+          "id": 726804373,
+          "name": "LICENSE-FPTN",
+          "size": 1068,
+          "digest": "sha256:2f817d4133bca382fe26298f08c106f2c2f36206946e85a40049b38ab15dfaca"
+        },
+        {
+          "id": 726804433,
+          "name": "runtime-assets.json",
+          "size": 487,
+          "digest": "sha256:06f927275dff08a079170816ed0cc6365c102c51ca5c97431739e3df0200e2ff"
+        },
+        {
+          "id": 726804404,
+          "name": "SHA256SUMS",
+          "size": 748,
+          "digest": "sha256:256ef509abf690e958bc0215b38d32b9a0212845c822f537da957cd8990a6cb3"
+        },
+        {
+          "id": 726804369,
+          "name": "sources.lock.json",
+          "size": 294,
+          "digest": "sha256:d5ea48c0782b30acdb980efc7297dac1da47fc8aeef77352c98b4eb54548a9a5"
+        }
+      ]
+    },
+    {
+      "id": 438904805,
+      "tag_name": "native-cd68d31215576185d51b77f31a568356dd562a09",
+      "target_commitish": "cd68d31215576185d51b77f31a568356dd562a09",
+      "name": "FPTN Keenetic native prototype cd68d31",
+      "body": "Native prototype for Hopper KN-3810 / Entware mipsel. Includes favorite/excluded server policy, bounded automatic selection, live connection status and login checks without a TUN. Compilation and local tests passed; router validation of this update is still required. Routing, DNS and firewall remain managed by Keenetic.",
+      "prerelease": true,
+      "assets": [
+        {
+          "id": 726820942,
+          "name": "client-release.json",
+          "size": 418,
+          "digest": "sha256:498a4cb6e49ee89c90f64c6a1a092d33dd9f387ab78864696ae121be9cc60368"
+        },
+        {
+          "id": 726820909,
+          "name": "fptn-client-cli",
+          "size": 23311188,
+          "digest": "sha256:352221d0dce4b0966d06f108daf62920facad9d1b004b2be89f8d6bcbe7bf0fb"
+        },
+        {
+          "id": 726820913,
+          "name": "HELP.txt",
+          "size": 7615,
+          "digest": "sha256:8202c434b7f0ea8f8e62becfc13624a5bd2bdb1cec79023247e6dcd8c7955732"
+        },
+        {
+          "id": 726820915,
+          "name": "LICENSE-FPTN",
+          "size": 1068,
+          "digest": "sha256:2f817d4133bca382fe26298f08c106f2c2f36206946e85a40049b38ab15dfaca"
+        },
+        {
+          "id": 726820912,
+          "name": "SHA256SUMS",
+          "size": 748,
+          "digest": "sha256:9826be1f16e3155c6a55d3dbe4ec058fdcac49229f33fc069c9fa5f5ad359929"
+        },
+        {
+          "id": 726820914,
+          "name": "sources.lock.json",
+          "size": 294,
+          "digest": "sha256:d5ea48c0782b30acdb980efc7297dac1da47fc8aeef77352c98b4eb54548a9a5"
+        }
+      ]
+    },
+    {
+      "id": 439346810,
+      "tag_name": "entware-feed-mipselsf-k3.4",
+      "target_commitish": "dd99a1ff320891b37651291c106a86e5a22778d4",
+      "name": "Entware feed: mipselsf-k3.4",
+      "body": "Verified FPTN package feed. Immutable versioned IPKs; index advances only after runtime checks.",
+      "prerelease": true,
+      "assets": [
+        {
+          "id": 728084312,
+          "name": "fptn-keenetic_0.18.4-128_mipsel-3.4.ipk",
+          "size": 12353314,
+          "digest": "sha256:c007426eb6a9a3318471bab37fb396f85e113ee17ff515432be90bb6c2b9fbef"
+        },
+        {
+          "id": 728084950,
+          "name": "package.json",
+          "size": 677,
+          "digest": "sha256:89451fba0ff9e509b887fb6c6ed3e4564e1ffd8552a7d692f1e161bb249b0af6"
+        },
+        {
+          "id": 728084951,
+          "name": "Packages",
+          "size": 576,
+          "digest": "sha256:5d241b85aa4ef84acbe754f3793c4639a0a692f629fe96e5057dd293dd2c077a"
+        },
+        {
+          "id": 728084954,
+          "name": "Packages.gz",
+          "size": 395,
+          "digest": "sha256:0904dba83c0daedb51dce868d4450bc52b209e0e40e0ff4a3651926815dd4648"
+        }
+      ]
+    },
+    {
+      "id": 439347018,
+      "tag_name": "entware-feed-armv7sf-k3.2",
+      "target_commitish": "dd99a1ff320891b37651291c106a86e5a22778d4",
+      "name": "Entware feed: armv7sf-k3.2",
+      "body": "Verified FPTN package feed. Immutable versioned IPKs; index advances only after runtime checks.",
+      "prerelease": true,
+      "assets": [
+        {
+          "id": 728084840,
+          "name": "fptn-keenetic_0.18.4-128_armv7-3.2.ipk",
+          "size": 11615219,
+          "digest": "sha256:643bb0d86f2514a34d602d11744d92176db99d40c90cf29506072f9ebb34a4dc"
+        },
+        {
+          "id": 728085077,
+          "name": "package.json",
+          "size": 664,
+          "digest": "sha256:9f084154484ee855965e2d31e7d3f06e7bc4cd72e71a83ba6d7613daadfb07a9"
+        },
+        {
+          "id": 728085075,
+          "name": "Packages",
+          "size": 574,
+          "digest": "sha256:c3c02be908a6ca83b74da25e57ba5c7862e8375b895b04c1338fbfe2551a1fb3"
+        },
+        {
+          "id": 728085076,
+          "name": "Packages.gz",
+          "size": 398,
+          "digest": "sha256:44ccb648ea215d0fdb22bf94c4a05a5aa80acef95bff3d6585d031226b187869"
+        }
+      ]
+    },
+    {
+      "id": 439346923,
+      "tag_name": "entware-feed-aarch64-k3.10",
+      "target_commitish": "dd99a1ff320891b37651291c106a86e5a22778d4",
+      "name": "Entware feed: aarch64-k3.10",
+      "body": "Verified FPTN package feed. Immutable versioned IPKs; index advances only after runtime checks.",
+      "prerelease": true,
+      "assets": [
+        {
+          "id": 728084592,
+          "name": "fptn-keenetic_0.18.4-128_aarch64-3.10.ipk",
+          "size": 12119418,
+          "digest": "sha256:817c49d4793a79e48517be02ac459800dd3c30cb26dea1cb2ef1e0dd1c03ec26"
+        },
+        {
+          "id": 728085006,
+          "name": "package.json",
+          "size": 663,
+          "digest": "sha256:fe673cfb69391c101b42b55b6c77a4132d3845cc910083186e1ca286676505c6"
+        },
+        {
+          "id": 728085012,
+          "name": "Packages",
+          "size": 580,
+          "digest": "sha256:66b84fa33af603f7d87e4400bc38d399bf0c084e5e3bf5a71ecbe20e94611e2f"
+        },
+        {
+          "id": 728085014,
+          "name": "Packages.gz",
+          "size": 396,
+          "digest": "sha256:01a9c5a737d9c8ebc8356385108fde811cd6cd1726840387b8c2c6c7e0f421d4"
+        }
+      ]
+    },
+    {
+      "id": 438892327,
+      "tag_name": "deps-mipsel-mips32r2-softfloat-8c6139e4250ed6a382b802d23f6b30edcde41f1210ba50fb53ab90c82179182a",
+      "target_commitish": "dc45964663f4503ab4b92b6bd23b790fd3800b47",
+      "name": "Build dependencies: mipsel-mips32r2-softfloat (8c6139e4250e)",
+      "body": "Build-time OCI snapshot, keyed by SDK, ABI and dependency inputs. Not a router installation package. Retained independently of the Actions cache.",
+      "prerelease": true,
+      "assets": [
+        {
+          "id": 726781084,
+          "name": "dependencies.tar",
+          "size": 830517248,
+          "digest": "sha256:10a587891295711568f60187960fb71b5400ce6a8f6916c75ba49b90afc2bc96"
+        },
+        {
+          "id": 726781085,
+          "name": "metadata.json",
+          "size": 239,
+          "digest": "sha256:4c83f065d0940048199e4a00e3d7178551e2e0c3d3a559d0c6d64cb3c1cc4579"
+        }
+      ]
+    },
+    {
+      "id": 438834121,
+      "tag_name": "deps-armv7-softfloat-e0ef406d0f0859cda13d2f68e80e6b410670aaf9d7ebe21a49cb321f0c6dc24c",
+      "target_commitish": "920669b99f7c8e6327a33bc27626d23c0a2c0d3b",
+      "name": "Build dependencies: armv7-softfloat (e0ef406d0f08)",
+      "body": "Build-time OCI snapshot, keyed by SDK, ABI and dependency inputs. Not a router installation package. Retained independently of the Actions cache.",
+      "prerelease": true,
+      "assets": [
+        {
+          "id": 726596356,
+          "name": "dependencies.tar",
+          "size": 770903040,
+          "digest": "sha256:f305011afe669c85dabd18789668e20cfe64c1d569618080675c7199825af858"
+        },
+        {
+          "id": 726596359,
+          "name": "metadata.json",
+          "size": 229,
+          "digest": "sha256:28efff676beb85e1a2a854c8ac52474bcc5c9de9a9f14669bb8737696420ca99"
+        }
+      ]
+    },
+    {
+      "id": 438871755,
+      "tag_name": "deps-armv7-softfloat-5b8dcb207a481f9f93b19db5d54b6f543250e0f8ac181990804812d1c1aaeecb",
+      "target_commitish": "dc45964663f4503ab4b92b6bd23b790fd3800b47",
+      "name": "Build dependencies: armv7-softfloat (5b8dcb207a48)",
+      "body": "Build-time OCI snapshot, keyed by SDK, ABI and dependency inputs. Not a router installation package. Retained independently of the Actions cache.",
+      "prerelease": true,
+      "assets": [
+        {
+          "id": 726713911,
+          "name": "dependencies.tar",
+          "size": 770903040,
+          "digest": "sha256:f305011afe669c85dabd18789668e20cfe64c1d569618080675c7199825af858"
+        },
+        {
+          "id": 726713908,
+          "name": "metadata.json",
+          "size": 229,
+          "digest": "sha256:571efe9b144fd7182f720431c655aadf945aa74b8a0292a1cc9653cf6b7d131b"
+        }
+      ]
+    },
+    {
+      "id": 438840431,
+      "tag_name": "deps-armv7-softfloat-4b71c7cbdc59cdafb18a3b729251525b77c3a38d8bacf792cd4d55e2c29be289",
+      "target_commitish": "705d1ea11956e474ad2035678bc6b7fde28ae8ec",
+      "name": "Build dependencies: armv7-softfloat (4b71c7cbdc59)",
+      "body": "Build-time OCI snapshot, keyed by SDK, ABI and dependency inputs. Not a router installation package. Retained independently of the Actions cache.",
+      "prerelease": true,
+      "assets": [
+        {
+          "id": 726617781,
+          "name": "dependencies.tar",
+          "size": 770903040,
+          "digest": "sha256:f305011afe669c85dabd18789668e20cfe64c1d569618080675c7199825af858"
+        },
+        {
+          "id": 726617796,
+          "name": "metadata.json",
+          "size": 229,
+          "digest": "sha256:b2fac991298aa8af084227bb9dbf6eb689b6d53fc7e1f79d7bbe303eb96c0b2f"
+        }
+      ]
+    },
+    {
+      "id": 438837734,
+      "tag_name": "deps-armv7-softfloat-02a336a61c26b3e3f38779a26f25e666bc987a86a74eabc70a535c502e229653",
+      "target_commitish": "dc2e077ce4399c2eb9f4ea7c3bea08ff3d797280",
+      "name": "Build dependencies: armv7-softfloat (02a336a61c26)",
+      "body": "Build-time OCI snapshot, keyed by SDK, ABI and dependency inputs. Not a router installation package. Retained independently of the Actions cache.",
+      "prerelease": true,
+      "assets": [
+        {
+          "id": 726608879,
+          "name": "dependencies.tar",
+          "size": 770903040,
+          "digest": "sha256:f305011afe669c85dabd18789668e20cfe64c1d569618080675c7199825af858"
+        },
+        {
+          "id": 726608873,
+          "name": "metadata.json",
+          "size": 229,
+          "digest": "sha256:819b9ef325f69ab1adf1cde22b5d8a1912e4a864aa4909b1e3aaed5638106bfc"
+        }
+      ]
+    },
+    {
+      "id": 438834652,
+      "tag_name": "deps-aarch64-9997eda4872791a65221b9319d619d9c36454c794dc6260390548539d4e31888",
+      "target_commitish": "920669b99f7c8e6327a33bc27626d23c0a2c0d3b",
+      "name": "Build dependencies: aarch64 (9997eda48727)",
+      "body": "Build-time OCI snapshot, keyed by SDK, ABI and dependency inputs. Not a router installation package. Retained independently of the Actions cache.",
+      "prerelease": true,
+      "assets": [
+        {
+          "id": 726598533,
+          "name": "dependencies.tar",
+          "size": 779055616,
+          "digest": "sha256:ac404d4cbf074ece3c8ee3044818191f66ef3d5adcc1e061ccd1cfa40a40837b"
+        },
+        {
+          "id": 726598532,
+          "name": "metadata.json",
+          "size": 221,
+          "digest": "sha256:23494a42e80d8d9b1f94ff592294f5478785eb6fa389fee73bd985fa8adac63a"
+        }
+      ]
+    },
+    {
+      "id": 438871734,
+      "tag_name": "deps-aarch64-83f39d1f1788c83a1649ec25682c8b14ed9c50482214a4c660d7c27651087254",
+      "target_commitish": "dc45964663f4503ab4b92b6bd23b790fd3800b47",
+      "name": "Build dependencies: aarch64 (83f39d1f1788)",
+      "body": "Build-time OCI snapshot, keyed by SDK, ABI and dependency inputs. Not a router installation package. Retained independently of the Actions cache.",
+      "prerelease": true,
+      "assets": [
+        {
+          "id": 726713836,
+          "name": "dependencies.tar",
+          "size": 779055616,
+          "digest": "sha256:ac404d4cbf074ece3c8ee3044818191f66ef3d5adcc1e061ccd1cfa40a40837b"
+        },
+        {
+          "id": 726713840,
+          "name": "metadata.json",
+          "size": 221,
+          "digest": "sha256:dc7ea0d8f752f4eaf0effd922929754f2a8784f7b0c51310cf77f6226cd3af60"
+        }
+      ]
+    },
+    {
+      "id": 438837452,
+      "tag_name": "deps-aarch64-481e85859a0ecd44841dfcadb7dc996b9cf805778cd130361198f12310095752",
+      "target_commitish": "dc2e077ce4399c2eb9f4ea7c3bea08ff3d797280",
+      "name": "Build dependencies: aarch64 (481e85859a0e)",
+      "body": "Build-time OCI snapshot, keyed by SDK, ABI and dependency inputs. Not a router installation package. Retained independently of the Actions cache.",
+      "prerelease": true,
+      "assets": [
+        {
+          "id": 726608021,
+          "name": "dependencies.tar",
+          "size": 779055616,
+          "digest": "sha256:ac404d4cbf074ece3c8ee3044818191f66ef3d5adcc1e061ccd1cfa40a40837b"
+        },
+        {
+          "id": 726608022,
+          "name": "metadata.json",
+          "size": 221,
+          "digest": "sha256:22c99313e092639511bf59cf540494961fd7bbe6075457029dc1069ee88ead68"
+        }
+      ]
+    },
+    {
+      "id": 438840292,
+      "tag_name": "deps-aarch64-373b605a16912415ace34d339d3478edb9d273efe319a35cc09e79359466c81b",
+      "target_commitish": "705d1ea11956e474ad2035678bc6b7fde28ae8ec",
+      "name": "Build dependencies: aarch64 (373b605a1691)",
+      "body": "Build-time OCI snapshot, keyed by SDK, ABI and dependency inputs. Not a router installation package. Retained independently of the Actions cache.",
+      "prerelease": true,
+      "assets": [
+        {
+          "id": 726617175,
+          "name": "dependencies.tar",
+          "size": 779055616,
+          "digest": "sha256:ac404d4cbf074ece3c8ee3044818191f66ef3d5adcc1e061ccd1cfa40a40837b"
+        },
+        {
+          "id": 726617174,
+          "name": "metadata.json",
+          "size": 221,
+          "digest": "sha256:6d8c256728424db8f1e152f6001d56497bbf87c2629e7b018292b7facc7b18cc"
+        }
+      ]
+    },
+    {
+      "id": 438101691,
+      "tag_name": "runtime-c75fe283620f28f25326b2e2a26c36876173f08a",
+      "target_commitish": "c75fe283620f28f25326b2e2a26c36876173f08a",
+      "name": "FPTN Keenetic runtime c75fe28",
+      "body": "Complete install/update packages for registered Entware architectures. Exact client/decoder and source metadata, panel and service are included. Runtime tests passed in Actions; foreign-architecture CLI/probes are tested under QEMU, not live ARM hardware. Run sh install.sh install inside the extracted folder. Routes and DNS stay in Keenetic; optional IPv6 NAT66 is off by default.",
+      "prerelease": true,
+      "assets": [
+        {
+          "id": 723262550,
+          "name": "fptn-keenetic-aarch64.tar.gz",
+          "size": 12128678,
+          "digest": "sha256:5834f64b3cc34279ff46c3aad670b9fd6a6de1e0600afe913b3fbc893b6d1e3f"
+        },
+        {
+          "id": 723262541,
+          "name": "fptn-keenetic-armv7-softfloat.tar.gz",
+          "size": 11625228,
+          "digest": "sha256:bfba16c7a678e0d6a7ed0b7e4fe73ad551c2240c3d3c1a89f50864d577af8cbe"
+        },
+        {
+          "id": 723262548,
+          "name": "fptn-keenetic-mipsel-mips32r2-softfloat.tar.gz",
+          "size": 12374636,
+          "digest": "sha256:6d8a2a27b44db0915679e03f065e92a0cda91fdc8806f44ba61a79c6e39709ef"
+        },
+        {
+          "id": 723262551,
+          "name": "SHA256SUMS",
+          "size": 311,
+          "digest": "sha256:52151f6ab58b7b437a8ea7474a128984b168cd94f3897ddfa64a9b60428db183"
+        }
+      ]
+    },
+    {
+      "id": 438154037,
+      "tag_name": "runtime-70eca7261704c39555c85a525b88da39b776a5cc",
+      "target_commitish": "70eca7261704c39555c85a525b88da39b776a5cc",
+      "name": "FPTN Keenetic runtime 70eca72",
+      "body": "Complete install/update packages for registered Entware architectures. Exact client/decoder and source metadata, panel and service are included. Runtime tests passed in Actions; foreign-architecture CLI/probes are tested under QEMU, not live ARM hardware. Run sh install.sh install inside the extracted folder. Routes and DNS stay in Keenetic; optional IPv6 NAT66 is off by default.",
+      "prerelease": true,
+      "assets": [
+        {
+          "id": 723520595,
+          "name": "fptn-keenetic-aarch64.tar.gz",
+          "size": 12128910,
+          "digest": "sha256:48237b3e3c85a58aaac76c58bfdd24c7f0835d9181f0c9b6e550171faf24a24e"
+        },
+        {
+          "id": 723520598,
+          "name": "fptn-keenetic-armv7-softfloat.tar.gz",
+          "size": 11625636,
+          "digest": "sha256:fc7cca30ccd6306de58c902e7eca6e357eed276be0ca816839d09adbaa792661"
+        },
+        {
+          "id": 723520597,
+          "name": "fptn-keenetic-mipsel-mips32r2-softfloat.tar.gz",
+          "size": 12374749,
+          "digest": "sha256:5d23edd4a1cb5ef2616955c73511282b45def9efd43b18049e259c143d4ad6cb"
+        },
+        {
+          "id": 723520593,
+          "name": "runtime-evidence.json",
+          "size": 619,
+          "digest": "sha256:e76e16b4e2f79568f86ddfb70c0f8d78fea8a0e7834cc08284036015293a3552"
+        },
+        {
+          "id": 723520592,
+          "name": "SHA256SUMS",
+          "size": 311,
+          "digest": "sha256:b798494b0ff40ca35b9a08b79355b05bfa0322387b541e100d03f7d90633efb3"
+        }
+      ]
+    },
+    {
+      "id": 438114051,
+      "tag_name": "runtime-5c83fc97eaefff921fa1778e5500b41a138e141d",
+      "target_commitish": "5c83fc97eaefff921fa1778e5500b41a138e141d",
+      "name": "FPTN Keenetic runtime 5c83fc9",
+      "body": "Complete install/update packages for registered Entware architectures. Exact client/decoder and source metadata, panel and service are included. Runtime tests passed in Actions; foreign-architecture CLI/probes are tested under QEMU, not live ARM hardware. Run sh install.sh install inside the extracted folder. Routes and DNS stay in Keenetic; optional IPv6 NAT66 is off by default.",
+      "prerelease": true,
+      "assets": [
+        {
+          "id": 723327383,
+          "name": "fptn-keenetic-aarch64.tar.gz",
+          "size": 12128947,
+          "digest": "sha256:a24278e19125993f035e2889f97db75cad3b2395f9a9e7df87dbfcf808f92bef"
+        },
+        {
+          "id": 723327384,
+          "name": "fptn-keenetic-armv7-softfloat.tar.gz",
+          "size": 11625685,
+          "digest": "sha256:0e32ae59f095171b0aa4e8cebd8269171fb8ce12ab95f78bf08946e9ea4aeb39"
+        },
+        {
+          "id": 723327381,
+          "name": "fptn-keenetic-mipsel-mips32r2-softfloat.tar.gz",
+          "size": 12374754,
+          "digest": "sha256:b5738d06ef771f3f2c19d525d8ffd68386f79eb285440064fe9d8401e584f1a1"
+        },
+        {
+          "id": 723327385,
+          "name": "SHA256SUMS",
+          "size": 311,
+          "digest": "sha256:cdea11b09a11bf3d127acebda8b10c637391feadd83af8d260b0f26b90239dad"
+        }
+      ]
+    },
+    {
+      "id": 438146384,
+      "tag_name": "runtime-49cc47c830e3493f91b0c49ba45e45cd97f25def",
+      "target_commitish": "49cc47c830e3493f91b0c49ba45e45cd97f25def",
+      "name": "FPTN Keenetic runtime 49cc47c",
+      "body": "Complete install/update packages for registered Entware architectures. Exact client/decoder and source metadata, panel and service are included. Runtime tests passed in Actions; foreign-architecture CLI/probes are tested under QEMU, not live ARM hardware. Run sh install.sh install inside the extracted folder. Routes and DNS stay in Keenetic; optional IPv6 NAT66 is off by default.",
+      "prerelease": true,
+      "assets": [
+        {
+          "id": 723485195,
+          "name": "fptn-keenetic-aarch64.tar.gz",
+          "size": 12128910,
+          "digest": "sha256:8a554e4ac08c4fe74ec6ed6a8f32c5115cffa5c0639fbd9c1d3b36990f16554d"
+        },
+        {
+          "id": 723485185,
+          "name": "fptn-keenetic-armv7-softfloat.tar.gz",
+          "size": 11625644,
+          "digest": "sha256:07c13b76d8957b93a29fda6c7201064310850f5b5d8c190ff1dc7c2b34a7c7a1"
+        },
+        {
+          "id": 723485191,
+          "name": "fptn-keenetic-mipsel-mips32r2-softfloat.tar.gz",
+          "size": 12374750,
+          "digest": "sha256:90acadc5b69702e2d1c883838c70550e888297c3fefee977e8a9591a4a7e5782"
+        },
+        {
+          "id": 723485198,
+          "name": "runtime-evidence.json",
+          "size": 619,
+          "digest": "sha256:ba7f063293ef46a170c64c287beb68ebc004d00f5ecccf58e5da228804f64e13"
+        },
+        {
+          "id": 723485193,
+          "name": "SHA256SUMS",
+          "size": 311,
+          "digest": "sha256:752c9c46f2297031ef228972d8baeabab2f75a25c3de570540ffe0f6ad5d080c"
+        }
+      ]
+    },
+    {
+      "id": 438106165,
+      "tag_name": "runtime-3b2c7b64cac63a5444cb37d0de17d1bcb5bfe11e",
+      "target_commitish": "3b2c7b64cac63a5444cb37d0de17d1bcb5bfe11e",
+      "name": "FPTN Keenetic runtime 3b2c7b6",
+      "body": "Complete install/update packages for registered Entware architectures. Exact client/decoder and source metadata, panel and service are included. Runtime tests passed in Actions; foreign-architecture CLI/probes are tested under QEMU, not live ARM hardware. Run sh install.sh install inside the extracted folder. Routes and DNS stay in Keenetic; optional IPv6 NAT66 is off by default.",
+      "prerelease": true,
+      "assets": [
+        {
+          "id": 723287912,
+          "name": "fptn-keenetic-aarch64.tar.gz",
+          "size": 12128768,
+          "digest": "sha256:8b89a1b2fa1257306493712130a930d545d46da49cb6c983091802166bc18998"
+        },
+        {
+          "id": 723287913,
+          "name": "fptn-keenetic-armv7-softfloat.tar.gz",
+          "size": 11625476,
+          "digest": "sha256:9f6e1357cc22e1fa15188c1220b99d6e2ff2438395f988542db7ad2138e23231"
+        },
+        {
+          "id": 723287916,
+          "name": "fptn-keenetic-mipsel-mips32r2-softfloat.tar.gz",
+          "size": 12374610,
+          "digest": "sha256:1fa7fded2f271d02df0afa12e987a5eaad4486beeb33e53d2d95446ebb6f4ac2"
+        },
+        {
+          "id": 723287915,
+          "name": "SHA256SUMS",
+          "size": 311,
+          "digest": "sha256:521f184903a9528ae9353a2a367cdacc60593ea94898a4b7f5fadf36dde1c185"
+        }
+      ]
+    },
+    {
+      "id": 438101214,
+      "tag_name": "port-armv7-softfloat-c75fe283620f28f25326b2e2a26c36876173f08a",
+      "target_commitish": "c75fe283620f28f25326b2e2a26c36876173f08a",
+      "name": "Experimental FPTN armv7-softfloat c75fe28",
+      "body": "Cross-built static binaries. ELF ABI, C++20 runtime and offline CLI/probe-only checked under QEMU. No hardware or live VPN test on this architecture. Client and decoder include source metadata and licenses. Installer support is published separately after these results are reviewed.",
+      "prerelease": true,
+      "assets": [
+        {
+          "id": 723259894,
+          "name": "brotli",
+          "size": 857804,
+          "digest": "sha256:52ea717965adcf324cb4a8ff55214ef7581d9d367cd8c81d4784b01b97f48855"
+        },
+        {
+          "id": 723259896,
+          "name": "BROTLI-SOURCE.txt",
+          "size": 79,
+          "digest": "sha256:c609e6e55f9f7814d7f13d117cfac8fd41a861ac46e3e9b4eeea87db4b4cbdeb"
+        },
+        {
+          "id": 723259862,
+          "name": "client-release.json",
+          "size": 408,
+          "digest": "sha256:ba4cee325a7434c096a8b8b792621a6509ef77d01022162d850f5d956da8413d"
+        },
+        {
+          "id": 723259909,
+          "name": "DECODER-SHA256SUMS",
+          "size": 324,
+          "digest": "sha256:cff880046192cfd30444f83b0218d6374795f102ff499540da4cb75939eb95c2"
+        },
+        {
+          "id": 723259865,
+          "name": "fptn-client-cli",
+          "size": 19900008,
+          "digest": "sha256:a0cb350e57a56a53c0a1ab3fdb6d2327398900e2cb2c2759dde75d25940a8d87"
+        },
+        {
+          "id": 723259868,
+          "name": "HELP.txt",
+          "size": 7615,
+          "digest": "sha256:8202c434b7f0ea8f8e62becfc13624a5bd2bdb1cec79023247e6dcd8c7955732"
+        },
+        {
+          "id": 723259895,
+          "name": "LICENSE-BROTLI",
+          "size": 1084,
+          "digest": "sha256:3d180008e36922a4e8daec11c34c7af264fed5962d07924aea928c38e8663c94"
+        },
+        {
+          "id": 723259867,
+          "name": "LICENSE-FPTN",
+          "size": 1068,
+          "digest": "sha256:2f817d4133bca382fe26298f08c106f2c2f36206946e85a40049b38ab15dfaca"
+        },
+        {
+          "id": 723259904,
+          "name": "runtime-assets.json",
+          "size": 503,
+          "digest": "sha256:a75f4a954374e60250f4fe268f37624be0085f881bc940a2c1491afcf1002137"
+        },
+        {
+          "id": 723259893,
+          "name": "SHA256SUMS",
+          "size": 748,
+          "digest": "sha256:3f3c79c85e72621ff4dbe2fbad655c8cfa489d06305a34ad4ed9685e772b3c6e"
+        },
+        {
+          "id": 723259866,
+          "name": "sources.lock.json",
+          "size": 294,
+          "digest": "sha256:d5ea48c0782b30acdb980efc7297dac1da47fc8aeef77352c98b4eb54548a9a5"
+        }
+      ]
+    },
+    {
+      "id": 438100768,
+      "tag_name": "port-aarch64-c75fe283620f28f25326b2e2a26c36876173f08a",
+      "target_commitish": "c75fe283620f28f25326b2e2a26c36876173f08a",
+      "name": "Experimental FPTN aarch64 c75fe28",
+      "body": "Cross-built static binaries. ELF ABI, C++20 runtime and offline CLI/probe-only checked under QEMU. No hardware or live VPN test on this architecture. Client and decoder include source metadata and licenses. Installer support is published separately after these results are reviewed.",
+      "prerelease": true,
+      "assets": [
+        {
+          "id": 723257137,
+          "name": "brotli",
+          "size": 919664,
+          "digest": "sha256:0b74b076e007e713e1294a34d5b858a810700c6666ab1090efaac1ccdccfd58b"
+        },
+        {
+          "id": 723257148,
+          "name": "BROTLI-SOURCE.txt",
+          "size": 79,
+          "digest": "sha256:c609e6e55f9f7814d7f13d117cfac8fd41a861ac46e3e9b4eeea87db4b4cbdeb"
+        },
+        {
+          "id": 723257121,
+          "name": "client-release.json",
+          "size": 400,
+          "digest": "sha256:926ee0bdd9d3840c81c4f96d9ebb0f33bf821b27b2b425733415370303d7120b"
+        },
+        {
+          "id": 723257162,
+          "name": "DECODER-SHA256SUMS",
+          "size": 324,
+          "digest": "sha256:d4eaf7fffbc1c241a78775ce74c3331f1529a3b590f14ae9fb291dea287d11ad"
+        },
+        {
+          "id": 723257123,
+          "name": "fptn-client-cli",
+          "size": 21190400,
+          "digest": "sha256:627a5faf5103e962f6f0c69e255aa52d228d46263c1203c232e1f991d216b410"
+        },
+        {
+          "id": 723257119,
+          "name": "HELP.txt",
+          "size": 7615,
+          "digest": "sha256:8202c434b7f0ea8f8e62becfc13624a5bd2bdb1cec79023247e6dcd8c7955732"
+        },
+        {
+          "id": 723257142,
+          "name": "LICENSE-BROTLI",
+          "size": 1084,
+          "digest": "sha256:3d180008e36922a4e8daec11c34c7af264fed5962d07924aea928c38e8663c94"
+        },
+        {
+          "id": 723257118,
+          "name": "LICENSE-FPTN",
+          "size": 1068,
+          "digest": "sha256:2f817d4133bca382fe26298f08c106f2c2f36206946e85a40049b38ab15dfaca"
+        },
+        {
+          "id": 723257160,
+          "name": "runtime-assets.json",
+          "size": 487,
+          "digest": "sha256:4355a6d082e10940eaae8d9b6421785f6e8f2684a6a556e38bc9d2fd623564b0"
+        },
+        {
+          "id": 723257136,
+          "name": "SHA256SUMS",
+          "size": 748,
+          "digest": "sha256:907990f3a8b1930d0469a3a4e2134d915e8c0f31b60779c51ebb6a1841e772c8"
+        },
+        {
+          "id": 723257122,
+          "name": "sources.lock.json",
+          "size": 294,
+          "digest": "sha256:d5ea48c0782b30acdb980efc7297dac1da47fc8aeef77352c98b4eb54548a9a5"
+        }
+      ]
+    },
+    {
+      "id": 438103283,
+      "tag_name": "native-c75fe283620f28f25326b2e2a26c36876173f08a",
+      "target_commitish": "c75fe283620f28f25326b2e2a26c36876173f08a",
+      "name": "FPTN Keenetic native prototype c75fe28",
+      "body": "Native prototype for Hopper KN-3810 / Entware mipsel. Includes favorite/excluded server policy, bounded automatic selection, live connection status and login checks without a TUN. Compilation and local tests passed; router validation of this update is still required. Routing, DNS and firewall remain managed by Keenetic.",
+      "prerelease": true,
+      "assets": [
+        {
+          "id": 723271936,
+          "name": "client-release.json",
+          "size": 418,
+          "digest": "sha256:d92b6cdab020c1e2ba48f28ffce483fd815fb6ded175e4ee95dc0cbd0fbeeea1"
+        },
+        {
+          "id": 723271908,
+          "name": "fptn-client-cli",
+          "size": 23311188,
+          "digest": "sha256:66e989cceab5bdf19abd1c41c25bbc0b420a7f138b03be3412ed6a9f43ce09b1"
+        },
+        {
+          "id": 723271906,
+          "name": "HELP.txt",
+          "size": 7615,
+          "digest": "sha256:8202c434b7f0ea8f8e62becfc13624a5bd2bdb1cec79023247e6dcd8c7955732"
+        },
+        {
+          "id": 723271912,
+          "name": "LICENSE-FPTN",
+          "size": 1068,
+          "digest": "sha256:2f817d4133bca382fe26298f08c106f2c2f36206946e85a40049b38ab15dfaca"
+        },
+        {
+          "id": 723271907,
+          "name": "SHA256SUMS",
+          "size": 748,
+          "digest": "sha256:19632bbc7572f5a0f8557e050f39cf0b088ac6c950c24ee1df21a0671eb0c633"
+        },
+        {
+          "id": 723271917,
+          "name": "sources.lock.json",
+          "size": 294,
+          "digest": "sha256:d5ea48c0782b30acdb980efc7297dac1da47fc8aeef77352c98b4eb54548a9a5"
+        }
+      ]
+    },
+    {
+      "id": 434928616,
+      "tag_name": "runtime-fcf959273e2057c516dc45364054c5efd68e14c8",
+      "target_commitish": "fcf959273e2057c516dc45364054c5efd68e14c8",
+      "name": "FPTN Keenetic runtime fcf9592",
+      "body": "Complete install/update packages for registered Entware architectures. Exact client/decoder and source metadata, panel and service are included. Runtime tests passed in Actions; foreign-architecture CLI/probes are tested under QEMU, not live ARM hardware. Run sh install.sh install inside the extracted folder. Routes and DNS stay in Keenetic; optional IPv6 NAT66 is off by default.",
+      "prerelease": true,
+      "assets": [
+        {
+          "id": 712606959,
+          "name": "fptn-keenetic-aarch64.tar.gz",
+          "size": 12125614,
+          "digest": "sha256:3177b9f620b7cdc6e8e82ad7e587e23471f4a5b01405c64bbf19dd53e9f7f95c"
+        },
+        {
+          "id": 712606962,
+          "name": "fptn-keenetic-armv7-softfloat.tar.gz",
+          "size": 11621997,
+          "digest": "sha256:cace1d7b43a46e083f5a808841e5f4ae38ffef66f29719ec9939ec323b357306"
+        },
+        {
+          "id": 712606961,
+          "name": "fptn-keenetic-mipsel-mips32r2-softfloat.tar.gz",
+          "size": 12371502,
+          "digest": "sha256:42c857af0b859621625f7dc314dfbc5ce0dfc88cd3ab130bac26f91dfb518ad9"
+        },
+        {
+          "id": 712606965,
+          "name": "SHA256SUMS",
+          "size": 311,
+          "digest": "sha256:464229f376858e377b756083b81aefdd407dce28f399d99257f64a7ee6137aa1"
+        }
+      ]
+    },
+    {
+      "id": 434966945,
+      "tag_name": "runtime-f271408aec4e738d7362419a8000a815b6cf14b4",
+      "target_commitish": "f271408aec4e738d7362419a8000a815b6cf14b4",
+      "name": "FPTN Keenetic runtime f271408",
+      "body": "Complete install/update packages for registered Entware architectures. Exact client/decoder and source metadata, panel and service are included. Runtime tests passed in Actions; foreign-architecture CLI/probes are tested under QEMU, not live ARM hardware. Run sh install.sh install inside the extracted folder. Routes and DNS stay in Keenetic; optional IPv6 NAT66 is off by default.",
+      "prerelease": true,
+      "assets": [
+        {
+          "id": 712733519,
+          "name": "fptn-keenetic-aarch64.tar.gz",
+          "size": 12128517,
+          "digest": "sha256:5792fac07f967569ce246e60ab3788e447c192663a5005d5aa975531c00192c6"
+        },
+        {
+          "id": 712733517,
+          "name": "fptn-keenetic-armv7-softfloat.tar.gz",
+          "size": 11625013,
+          "digest": "sha256:386c85253ef487ed9f9f3c6216710e66071c976912f991e3800c1f963d3b50de"
+        },
+        {
+          "id": 712733520,
+          "name": "fptn-keenetic-mipsel-mips32r2-softfloat.tar.gz",
+          "size": 12374436,
+          "digest": "sha256:a646e02614b49685136d18d1de865ffd2119c2faecd9c0518aeaadfea459c3bc"
+        },
+        {
+          "id": 712733513,
+          "name": "SHA256SUMS",
+          "size": 311,
+          "digest": "sha256:7b629216dbbe9b1f86f091fb031084ba121a0521846c94db1e6fc5b88b0dc05c"
+        }
+      ]
+    },
+    {
+      "id": 434908648,
+      "tag_name": "runtime-e195159b2c38704e6fa9f528e90246e5d792be7e",
+      "target_commitish": "e195159b2c38704e6fa9f528e90246e5d792be7e",
+      "name": "FPTN Keenetic runtime e195159",
+      "body": "Complete install/update packages for registered Entware architectures. Exact client/decoder and source metadata, panel and service are included. Runtime tests passed in Actions; foreign-architecture CLI/probes are tested under QEMU, not live ARM hardware. Run sh install.sh install inside the extracted folder. Routes and DNS stay in Keenetic; optional IPv6 NAT66 is off by default.",
+      "prerelease": true,
+      "assets": [
+        {
+          "id": 712541660,
+          "name": "fptn-keenetic-aarch64.tar.gz",
+          "size": 12117601,
+          "digest": "sha256:c130af2752db13e2fcab644a96112ed1bbcaa0d792aadccaa55719c47da6b30f"
+        },
+        {
+          "id": 712541664,
+          "name": "fptn-keenetic-armv7-softfloat.tar.gz",
+          "size": 11612565,
+          "digest": "sha256:73228ac1267ae21ae39c0e4d9b91bc8c1d86f3c8e97676b426696236f5b9ed16"
+        },
+        {
+          "id": 712541665,
+          "name": "fptn-keenetic-mipsel-mips32r2-softfloat.tar.gz",
+          "size": 12357302,
+          "digest": "sha256:ca94024ccb4d8d427d66053bc13903a42e2a0405fb7d4e8b3337f168e7a54570"
+        },
+        {
+          "id": 712541662,
+          "name": "SHA256SUMS",
+          "size": 311,
+          "digest": "sha256:a9ab04efcf3cc7121611c9c77bacf0bbac7b36f42ea82543097715651f232683"
+        }
+      ]
+    },
+    {
+      "id": 435236359,
+      "tag_name": "runtime-a3828c2d72cc251f5eb3ba3f1b3fccdaaee99c0e",
+      "target_commitish": "a3828c2d72cc251f5eb3ba3f1b3fccdaaee99c0e",
+      "name": "FPTN Keenetic runtime a3828c2",
+      "body": "Complete install/update packages for registered Entware architectures. Exact client/decoder and source metadata, panel and service are included. Runtime tests passed in Actions; foreign-architecture CLI/probes are tested under QEMU, not live ARM hardware. Run sh install.sh install inside the extracted folder. Routes and DNS stay in Keenetic; optional IPv6 NAT66 is off by default.",
+      "prerelease": true,
+      "assets": [
+        {
+          "id": 713505103,
+          "name": "fptn-keenetic-aarch64.tar.gz",
+          "size": 12128669,
+          "digest": "sha256:91ae14ec231e309c332d32c496c526851893dbc62f2c465e48ae9880dffbc302"
+        },
+        {
+          "id": 713505112,
+          "name": "fptn-keenetic-armv7-softfloat.tar.gz",
+          "size": 11625173,
+          "digest": "sha256:a1d26cad4fa2e4429c3891d0a98cb27ac516738ca49e95861c2264333e0f5e08"
+        },
+        {
+          "id": 713505096,
+          "name": "fptn-keenetic-mipsel-mips32r2-softfloat.tar.gz",
+          "size": 12374615,
+          "digest": "sha256:94dea8833a99268e4657e5471262250094343b00d084faa9e09f074d72d5edce"
+        },
+        {
+          "id": 713505094,
+          "name": "SHA256SUMS",
+          "size": 311,
+          "digest": "sha256:3fc4669c3f82c2f92b84ff4cde3b0c5d45a47013185007adc54670ffcf7eafab"
+        }
+      ]
+    },
+    {
+      "id": 435224943,
+      "tag_name": "runtime-46d710b673114d78dbcd806ef862b90d345b5afe",
+      "target_commitish": "46d710b673114d78dbcd806ef862b90d345b5afe",
+      "name": "FPTN Keenetic runtime 46d710b",
+      "body": "Complete install/update packages for registered Entware architectures. Exact client/decoder and source metadata, panel and service are included. Runtime tests passed in Actions; foreign-architecture CLI/probes are tested under QEMU, not live ARM hardware. Run sh install.sh install inside the extracted folder. Routes and DNS stay in Keenetic; optional IPv6 NAT66 is off by default.",
+      "prerelease": true,
+      "assets": [
+        {
+          "id": 713474927,
+          "name": "fptn-keenetic-aarch64.tar.gz",
+          "size": 12130656,
+          "digest": "sha256:f7f8e677a32859d0a0abb6070a0284dd8296f42acca038c85f264c0bb8f3d67c"
+        },
+        {
+          "id": 713474925,
+          "name": "fptn-keenetic-armv7-softfloat.tar.gz",
+          "size": 11627264,
+          "digest": "sha256:03808e8f317af04a42082e2e81874d0262674afc3c415c5da521f2e637191b59"
+        },
+        {
+          "id": 713474926,
+          "name": "fptn-keenetic-mipsel-mips32r2-softfloat.tar.gz",
+          "size": 12376619,
+          "digest": "sha256:4a35fc9c08eb0765ea876cec32000a428eeab6e1bf24051a6af82acf61d024c3"
+        },
+        {
+          "id": 713474924,
+          "name": "SHA256SUMS",
+          "size": 311,
+          "digest": "sha256:0158d1e7c9135fab438d2c1a0a7d04ba5599b5f17d339cf4ea22c93cdb913c80"
+        }
+      ]
+    },
+    {
+      "id": 434974438,
+      "tag_name": "runtime-04900857df024ee6da30a3fa90fcd496c273a332",
+      "target_commitish": "04900857df024ee6da30a3fa90fcd496c273a332",
+      "name": "FPTN Keenetic runtime 0490085",
+      "body": "Complete install/update packages for registered Entware architectures. Exact client/decoder and source metadata, panel and service are included. Runtime tests passed in Actions; foreign-architecture CLI/probes are tested under QEMU, not live ARM hardware. Run sh install.sh install inside the extracted folder. Routes and DNS stay in Keenetic; optional IPv6 NAT66 is off by default.",
+      "prerelease": true,
+      "assets": [
+        {
+          "id": 712756378,
+          "name": "fptn-keenetic-aarch64.tar.gz",
+          "size": 12128544,
+          "digest": "sha256:25ae51e0650db033d09add1219d7c50fd6dba35b079c5ae1775380bccfd8bc32"
+        },
+        {
+          "id": 712756377,
+          "name": "fptn-keenetic-armv7-softfloat.tar.gz",
+          "size": 11625033,
+          "digest": "sha256:6b2578e47dce26879fa0d4b024c8a68c14c50da33621c3672f234350d3a194b0"
+        },
+        {
+          "id": 712756380,
+          "name": "fptn-keenetic-mipsel-mips32r2-softfloat.tar.gz",
+          "size": 12374469,
+          "digest": "sha256:1c8fbd090230905284dc59238bc51a46123d93eaa3af500397ec8831dafcfc77"
+        },
+        {
+          "id": 712756381,
+          "name": "SHA256SUMS",
+          "size": 311,
+          "digest": "sha256:01f7af9700a8dd30466d8d03f992d9bd530862b1785551315b1b75355ebcfa26"
+        }
+      ]
+    },
+    {
+      "id": 434906115,
+      "tag_name": "port-armv7-softfloat-e195159b2c38704e6fa9f528e90246e5d792be7e",
+      "target_commitish": "e195159b2c38704e6fa9f528e90246e5d792be7e",
+      "name": "Experimental FPTN armv7-softfloat e195159",
+      "body": "Cross-built static binaries. ELF ABI, C++20 runtime and offline CLI/probe-only checked under QEMU. No hardware or live VPN test on this architecture. Client and decoder include source metadata and licenses. Installer support is published separately after these results are reviewed.",
+      "prerelease": true,
+      "assets": [
+        {
+          "id": 712531938,
+          "name": "brotli",
+          "size": 857804,
+          "digest": "sha256:52ea717965adcf324cb4a8ff55214ef7581d9d367cd8c81d4784b01b97f48855"
+        },
+        {
+          "id": 712531941,
+          "name": "BROTLI-SOURCE.txt",
+          "size": 79,
+          "digest": "sha256:c609e6e55f9f7814d7f13d117cfac8fd41a861ac46e3e9b4eeea87db4b4cbdeb"
+        },
+        {
+          "id": 712531905,
+          "name": "client-release.json",
+          "size": 408,
+          "digest": "sha256:acb5ce4960b907e67c13ea9be7056ed75710122bc4f60eef496ea647df53ff1a"
+        },
+        {
+          "id": 712531954,
+          "name": "DECODER-SHA256SUMS",
+          "size": 324,
+          "digest": "sha256:352bbc68c0237d45afe64fd6ba8466ba17e8ca861bfd6b6671ae2fb6e9ebe34b"
+        },
+        {
+          "id": 712531904,
+          "name": "fptn-client-cli",
+          "size": 19900008,
+          "digest": "sha256:83b5b358d3724e341366c1019cf421f7763e40eae27acc3259229a29b6560967"
+        },
+        {
+          "id": 712531902,
+          "name": "HELP.txt",
+          "size": 7615,
+          "digest": "sha256:8202c434b7f0ea8f8e62becfc13624a5bd2bdb1cec79023247e6dcd8c7955732"
+        },
+        {
+          "id": 712531940,
+          "name": "LICENSE-BROTLI",
+          "size": 1084,
+          "digest": "sha256:3d180008e36922a4e8daec11c34c7af264fed5962d07924aea928c38e8663c94"
+        },
+        {
+          "id": 712531899,
+          "name": "LICENSE-FPTN",
+          "size": 1068,
+          "digest": "sha256:2f817d4133bca382fe26298f08c106f2c2f36206946e85a40049b38ab15dfaca"
+        },
+        {
+          "id": 712531951,
+          "name": "runtime-assets.json",
+          "size": 503,
+          "digest": "sha256:9a71d20a4be4c4fa0f05394f4f6bcc8027794d8d8d2e9a745b3ff125b1be3356"
+        },
+        {
+          "id": 712531932,
+          "name": "SHA256SUMS",
+          "size": 748,
+          "digest": "sha256:523c736e016cc85bc0247da40898d814719c6c91fd32268d33e274568ce768e0"
+        },
+        {
+          "id": 712531900,
+          "name": "sources.lock.json",
+          "size": 294,
+          "digest": "sha256:d5ea48c0782b30acdb980efc7297dac1da47fc8aeef77352c98b4eb54548a9a5"
+        }
+      ]
+    },
+    {
+      "id": 434888884,
+      "tag_name": "port-armv7-softfloat-69c68170c4625e213750cbe7b803482b8f49d66d",
+      "target_commitish": "69c68170c4625e213750cbe7b803482b8f49d66d",
+      "name": "Experimental FPTN armv7-softfloat 69c6817",
+      "body": "Cross-built static binaries. ELF ABI, C++20 runtime and offline CLI/probe-only checked under QEMU. No hardware or live VPN test on this architecture. Client and decoder include source metadata and licenses. Installer support is published separately after these results are reviewed.",
+      "prerelease": true,
+      "assets": [
+        {
+          "id": 712471088,
+          "name": "brotli",
+          "size": 857804,
+          "digest": "sha256:52ea717965adcf324cb4a8ff55214ef7581d9d367cd8c81d4784b01b97f48855"
+        },
+        {
+          "id": 712471096,
+          "name": "BROTLI-SOURCE.txt",
+          "size": 79,
+          "digest": "sha256:c609e6e55f9f7814d7f13d117cfac8fd41a861ac46e3e9b4eeea87db4b4cbdeb"
+        },
+        {
+          "id": 712471068,
+          "name": "client-release.json",
+          "size": 408,
+          "digest": "sha256:dbb092cf00bbeaf112a7b14d609d0ba2a06083090c12bad777e68d046063ba37"
+        },
+        {
+          "id": 712471114,
+          "name": "DECODER-SHA256SUMS",
+          "size": 324,
+          "digest": "sha256:d642a87c5f759ea8e378d2cb51dfb7d319fc0cf7428a8477b8552e5807182c40"
+        },
+        {
+          "id": 712471072,
+          "name": "fptn-client-cli",
+          "size": 19900008,
+          "digest": "sha256:330ad8d64bfb25a0d720bc9b7e312089205ddfaa99e603548c4673ff028e42b4"
+        },
+        {
+          "id": 712471069,
+          "name": "HELP.txt",
+          "size": 7615,
+          "digest": "sha256:8202c434b7f0ea8f8e62becfc13624a5bd2bdb1cec79023247e6dcd8c7955732"
+        },
+        {
+          "id": 712471089,
+          "name": "LICENSE-BROTLI",
+          "size": 1084,
+          "digest": "sha256:3d180008e36922a4e8daec11c34c7af264fed5962d07924aea928c38e8663c94"
+        },
+        {
+          "id": 712471070,
+          "name": "LICENSE-FPTN",
+          "size": 1068,
+          "digest": "sha256:2f817d4133bca382fe26298f08c106f2c2f36206946e85a40049b38ab15dfaca"
+        },
+        {
+          "id": 712471113,
+          "name": "runtime-assets.json",
+          "size": 503,
+          "digest": "sha256:10e673b014a60abd6ea5db5d117db147919a92daf1e0047615116c09bea39a8d"
+        },
+        {
+          "id": 712471090,
+          "name": "SHA256SUMS",
+          "size": 748,
+          "digest": "sha256:7090c8683d0880b1d7d9594d828e43aafb29aaf6f45266c5703ef18db67da276"
+        },
+        {
+          "id": 712471071,
+          "name": "sources.lock.json",
+          "size": 294,
+          "digest": "sha256:d5ea48c0782b30acdb980efc7297dac1da47fc8aeef77352c98b4eb54548a9a5"
+        }
+      ]
+    },
+    {
+      "id": 434906090,
+      "tag_name": "port-aarch64-e195159b2c38704e6fa9f528e90246e5d792be7e",
+      "target_commitish": "e195159b2c38704e6fa9f528e90246e5d792be7e",
+      "name": "Experimental FPTN aarch64 e195159",
+      "body": "Cross-built static binaries. ELF ABI, C++20 runtime and offline CLI/probe-only checked under QEMU. No hardware or live VPN test on this architecture. Client and decoder include source metadata and licenses. Installer support is published separately after these results are reviewed.",
+      "prerelease": true,
+      "assets": [
+        {
+          "id": 712531795,
+          "name": "brotli",
+          "size": 919664,
+          "digest": "sha256:0b74b076e007e713e1294a34d5b858a810700c6666ab1090efaac1ccdccfd58b"
+        },
+        {
+          "id": 712531801,
+          "name": "BROTLI-SOURCE.txt",
+          "size": 79,
+          "digest": "sha256:c609e6e55f9f7814d7f13d117cfac8fd41a861ac46e3e9b4eeea87db4b4cbdeb"
+        },
+        {
+          "id": 712531757,
+          "name": "client-release.json",
+          "size": 400,
+          "digest": "sha256:f214632118119b64ff9aa72eb72d6a5365b946b40613698e0d2e9dd78466319e"
+        },
+        {
+          "id": 712531879,
+          "name": "DECODER-SHA256SUMS",
+          "size": 324,
+          "digest": "sha256:7277f2f82b72faee76b83129dba41eb493c0c81866b5cc012ab4b46db9c8d9cc"
+        },
+        {
+          "id": 712531752,
+          "name": "fptn-client-cli",
+          "size": 21190400,
+          "digest": "sha256:a763755fe5ee03e3b0f039064100eccea451eb338ccbb3a3786fb7a69679854d"
+        },
+        {
+          "id": 712531748,
+          "name": "HELP.txt",
+          "size": 7615,
+          "digest": "sha256:8202c434b7f0ea8f8e62becfc13624a5bd2bdb1cec79023247e6dcd8c7955732"
+        },
+        {
+          "id": 712531799,
+          "name": "LICENSE-BROTLI",
+          "size": 1084,
+          "digest": "sha256:3d180008e36922a4e8daec11c34c7af264fed5962d07924aea928c38e8663c94"
+        },
+        {
+          "id": 712531747,
+          "name": "LICENSE-FPTN",
+          "size": 1068,
+          "digest": "sha256:2f817d4133bca382fe26298f08c106f2c2f36206946e85a40049b38ab15dfaca"
+        },
+        {
+          "id": 712531877,
+          "name": "runtime-assets.json",
+          "size": 487,
+          "digest": "sha256:ab4c9e9319b2dcc1a79945d08c4be09c31309734ab3485135748f10a61d9da06"
+        },
+        {
+          "id": 712531793,
+          "name": "SHA256SUMS",
+          "size": 748,
+          "digest": "sha256:20e33a591a717aea3eccbfbf872403f1b0ffc9684c2333810e146dc5710a8490"
+        },
+        {
+          "id": 712531750,
+          "name": "sources.lock.json",
+          "size": 294,
+          "digest": "sha256:d5ea48c0782b30acdb980efc7297dac1da47fc8aeef77352c98b4eb54548a9a5"
+        }
+      ]
+    },
+    {
+      "id": 434889046,
+      "tag_name": "port-aarch64-69c68170c4625e213750cbe7b803482b8f49d66d",
+      "target_commitish": "69c68170c4625e213750cbe7b803482b8f49d66d",
+      "name": "Experimental FPTN aarch64 69c6817",
+      "body": "Cross-built static binaries. ELF ABI, C++20 runtime and offline CLI/probe-only checked under QEMU. No hardware or live VPN test on this architecture. Client and decoder include source metadata and licenses. Installer support is published separately after these results are reviewed.",
+      "prerelease": true,
+      "assets": [
+        {
+          "id": 712471529,
+          "name": "brotli",
+          "size": 919664,
+          "digest": "sha256:0b74b076e007e713e1294a34d5b858a810700c6666ab1090efaac1ccdccfd58b"
+        },
+        {
+          "id": 712471537,
+          "name": "BROTLI-SOURCE.txt",
+          "size": 79,
+          "digest": "sha256:c609e6e55f9f7814d7f13d117cfac8fd41a861ac46e3e9b4eeea87db4b4cbdeb"
+        },
+        {
+          "id": 712471507,
+          "name": "client-release.json",
+          "size": 400,
+          "digest": "sha256:41e3fde70040d364d5ac529fc6b97ebaab845a6489c86c9988d184bb7e59b213"
+        },
+        {
+          "id": 712471552,
+          "name": "DECODER-SHA256SUMS",
+          "size": 324,
+          "digest": "sha256:e8605d2ba5f20bd034e17d3dd01cad43d7468d640afda31fbc8fc78e0b698e8e"
+        },
+        {
+          "id": 712471506,
+          "name": "fptn-client-cli",
+          "size": 21190400,
+          "digest": "sha256:3d680ad5a010c84166d2d63f9a266671afd3fa1119898cf3d4ab969f75356982"
+        },
+        {
+          "id": 712471510,
+          "name": "HELP.txt",
+          "size": 7615,
+          "digest": "sha256:8202c434b7f0ea8f8e62becfc13624a5bd2bdb1cec79023247e6dcd8c7955732"
+        },
+        {
+          "id": 712471530,
+          "name": "LICENSE-BROTLI",
+          "size": 1084,
+          "digest": "sha256:3d180008e36922a4e8daec11c34c7af264fed5962d07924aea928c38e8663c94"
+        },
+        {
+          "id": 712471505,
+          "name": "LICENSE-FPTN",
+          "size": 1068,
+          "digest": "sha256:2f817d4133bca382fe26298f08c106f2c2f36206946e85a40049b38ab15dfaca"
+        },
+        {
+          "id": 712471544,
+          "name": "runtime-assets.json",
+          "size": 487,
+          "digest": "sha256:c538c7e3233d013577a7da60cfa63363f265c779bc7964455252520532db0f28"
+        },
+        {
+          "id": 712471526,
+          "name": "SHA256SUMS",
+          "size": 748,
+          "digest": "sha256:98dfdd21cdef0cc35deeaf269cf64943f6b23bfe1f7f3d91075141abc0e88595"
+        },
+        {
+          "id": 712471504,
+          "name": "sources.lock.json",
+          "size": 294,
+          "digest": "sha256:d5ea48c0782b30acdb980efc7297dac1da47fc8aeef77352c98b4eb54548a9a5"
+        }
+      ]
+    },
+    {
+      "id": 434910817,
+      "tag_name": "native-e195159b2c38704e6fa9f528e90246e5d792be7e",
+      "target_commitish": "e195159b2c38704e6fa9f528e90246e5d792be7e",
+      "name": "FPTN Keenetic native prototype e195159",
+      "body": "Native prototype for Hopper KN-3810 / Entware mipsel. Includes favorite/excluded server policy, bounded automatic selection, live connection status and login checks without a TUN. Compilation and local tests passed; router validation of this update is still required. Routing, DNS and firewall remain managed by Keenetic.",
+      "prerelease": true,
+      "assets": [
+        {
+          "id": 712549480,
+          "name": "client-release.json",
+          "size": 418,
+          "digest": "sha256:9da0eee3e0421a89568d1198ef73320fb5f9229d5c51271c54cdd932bed27b73"
+        },
+        {
+          "id": 712549452,
+          "name": "fptn-client-cli",
+          "size": 23307476,
+          "digest": "sha256:85543b88c77a98e859ccc451448b814aaf7e366378b64ea951dff5936bde882c"
+        },
+        {
+          "id": 712549456,
+          "name": "HELP.txt",
+          "size": 7615,
+          "digest": "sha256:8202c434b7f0ea8f8e62becfc13624a5bd2bdb1cec79023247e6dcd8c7955732"
+        },
+        {
+          "id": 712549453,
+          "name": "LICENSE-FPTN",
+          "size": 1068,
+          "digest": "sha256:2f817d4133bca382fe26298f08c106f2c2f36206946e85a40049b38ab15dfaca"
+        },
+        {
+          "id": 712549450,
+          "name": "SHA256SUMS",
+          "size": 748,
+          "digest": "sha256:eba4e9c195c556b1f256d564c3efeffc33283d3c5e629b6bf543ff348c950996"
+        },
+        {
+          "id": 712549454,
+          "name": "sources.lock.json",
+          "size": 294,
+          "digest": "sha256:d5ea48c0782b30acdb980efc7297dac1da47fc8aeef77352c98b4eb54548a9a5"
+        }
+      ]
+    },
+    {
+      "id": 428752962,
+      "tag_name": "runtime-b86721212ce5d1ba14682d79331a3485a66641a8",
+      "target_commitish": "b86721212ce5d1ba14682d79331a3485a66641a8",
+      "name": "FPTN Keenetic runtime b867212",
+      "body": "Complete install/update packages for registered Entware architectures. Exact client/decoder and source metadata, panel and service are included. Runtime tests passed in Actions; foreign-architecture CLI/probes are tested under QEMU, not live ARM hardware. Run sh install.sh install inside the extracted folder. Routes and DNS stay in Keenetic; optional IPv6 NAT66 is off by default.",
+      "prerelease": true,
+      "assets": [
+        {
+          "id": 691314806,
+          "name": "fptn-keenetic-aarch64.tar.gz",
+          "size": 12110616,
+          "digest": "sha256:80c834ef1c5707b628be697cd7b806358d1cb35f01a628fd711df631707a6992"
+        },
+        {
+          "id": 691314808,
+          "name": "fptn-keenetic-armv7-softfloat.tar.gz",
+          "size": 11606565,
+          "digest": "sha256:0e45a9a2ceeaf7984eda3735d757747771d1b7cce4d2ff0db94d984cbfd1ea15"
+        },
+        {
+          "id": 691314804,
+          "name": "fptn-keenetic-mipsel-mips32r2-softfloat.tar.gz",
+          "size": 12350214,
+          "digest": "sha256:386ac84318f12ded9886bdf39b94ce24c7e113fd3be19917814ac8afefa49eed"
+        },
+        {
+          "id": 691314805,
+          "name": "SHA256SUMS",
+          "size": 311,
+          "digest": "sha256:4b36ddbb08d497f9c67ff69f32e087cc0255aafb488cfc16c6b4cb701c5318db"
+        }
+      ]
+    },
+    {
+      "id": 428793641,
+      "tag_name": "runtime-a568509e8383ab0915399be1aaf1df562af691ab",
+      "target_commitish": "a568509e8383ab0915399be1aaf1df562af691ab",
+      "name": "FPTN Keenetic runtime a568509",
+      "body": "Complete install/update packages for registered Entware architectures. Exact client/decoder and source metadata, panel and service are included. Runtime tests passed in Actions; foreign-architecture CLI/probes are tested under QEMU, not live ARM hardware. Run sh install.sh install inside the extracted folder. Routes and DNS stay in Keenetic; optional IPv6 NAT66 is off by default.",
+      "prerelease": true,
+      "assets": [
+        {
+          "id": 691445657,
+          "name": "fptn-keenetic-aarch64.tar.gz",
+          "size": 12111693,
+          "digest": "sha256:602e45ef9d0d94b9df424790a9a62284029f847da9ba33cb9929601c220f72c2"
+        },
+        {
+          "id": 691445656,
+          "name": "fptn-keenetic-armv7-softfloat.tar.gz",
+          "size": 11606737,
+          "digest": "sha256:5c45659c760aea310039bc3f79bd4fdf9a174ef14b496113f9f759f6c197afa9"
+        },
+        {
+          "id": 691445652,
+          "name": "fptn-keenetic-mipsel-mips32r2-softfloat.tar.gz",
+          "size": 12351565,
+          "digest": "sha256:98e033f29f7d00b58026f4887ab020b059839cdddf247f6ad6e1246c134d277d"
+        },
+        {
+          "id": 691445655,
+          "name": "SHA256SUMS",
+          "size": 311,
+          "digest": "sha256:43cc99c18f1e9b0e28b9ebcd5abd9e87bbea2d685bf2f1bd4e058ff303a82963"
+        }
+      ]
+    },
+    {
+      "id": 428779604,
+      "tag_name": "runtime-4c4809e4e3a9d654a44cd3734f4e70d4c1be1eaf",
+      "target_commitish": "4c4809e4e3a9d654a44cd3734f4e70d4c1be1eaf",
+      "name": "FPTN Keenetic runtime 4c4809e",
+      "body": "Complete install/update packages for registered Entware architectures. Exact client/decoder and source metadata, panel and service are included. Runtime tests passed in Actions; foreign-architecture CLI/probes are tested under QEMU, not live ARM hardware. Run sh install.sh install inside the extracted folder. Routes and DNS stay in Keenetic; optional IPv6 NAT66 is off by default.",
+      "prerelease": true,
+      "assets": [
+        {
+          "id": 691402503,
+          "name": "fptn-keenetic-aarch64.tar.gz",
+          "size": 12111727,
+          "digest": "sha256:0b99c237c509000a580709f3a8324c139d53b478912727ac3c822202eef94422"
+        },
+        {
+          "id": 691402509,
+          "name": "fptn-keenetic-armv7-softfloat.tar.gz",
+          "size": 11606711,
+          "digest": "sha256:8a90cb5a344d852dce4c869fbbd49ded09174a41f4b6e50e34cc291ecdc166e0"
+        },
+        {
+          "id": 691402505,
+          "name": "fptn-keenetic-mipsel-mips32r2-softfloat.tar.gz",
+          "size": 12351545,
+          "digest": "sha256:46c70dcdbc1428c852eef1a83ac5e611d08c03ea9b57a3ea2cb4468dc8ae7928"
+        },
+        {
+          "id": 691402504,
+          "name": "SHA256SUMS",
+          "size": 311,
+          "digest": "sha256:63587fb5eef553df993cdf3c9795d31dc7486a8322593a0d538ae39e69758f98"
+        }
+      ]
+    },
+    {
+      "id": 428767778,
+      "tag_name": "port-armv7-softfloat-b86721212ce5d1ba14682d79331a3485a66641a8",
+      "target_commitish": "b86721212ce5d1ba14682d79331a3485a66641a8",
+      "name": "Experimental FPTN armv7-softfloat b867212",
+      "body": "Cross-built static binaries. ELF ABI, C++20 runtime and offline CLI/probe-only checked under QEMU. No hardware or live VPN test on this architecture. Client and decoder include source metadata and licenses. Installer support is published separately after these results are reviewed.",
+      "prerelease": true,
+      "assets": [
+        {
+          "id": 691364110,
+          "name": "brotli",
+          "size": 857804,
+          "digest": "sha256:52ea717965adcf324cb4a8ff55214ef7581d9d367cd8c81d4784b01b97f48855"
+        },
+        {
+          "id": 691364121,
+          "name": "BROTLI-SOURCE.txt",
+          "size": 79,
+          "digest": "sha256:c609e6e55f9f7814d7f13d117cfac8fd41a861ac46e3e9b4eeea87db4b4cbdeb"
+        },
+        {
+          "id": 691364086,
+          "name": "client-release.json",
+          "size": 408,
+          "digest": "sha256:b1151d333fce743ac9834140627503ede02125725a9c913a373e5897780a6c1f"
+        },
+        {
+          "id": 691364135,
+          "name": "DECODER-SHA256SUMS",
+          "size": 324,
+          "digest": "sha256:4d4a1758341a94754ef947d3e4ec291682d3c3f76d5085115f24c727f9ba721e"
+        },
+        {
+          "id": 691364088,
+          "name": "fptn-client-cli",
+          "size": 19879528,
+          "digest": "sha256:70e83c35d4bcffd97635d1690b64803365b50e3501e78021c5616b3aeeea8071"
+        },
+        {
+          "id": 691364083,
+          "name": "HELP.txt",
+          "size": 7054,
+          "digest": "sha256:6a2510bfb50c42557f9b74d6723b28072c30106ca3de020d348e3ed5071c1c4e"
+        },
+        {
+          "id": 691364109,
+          "name": "LICENSE-BROTLI",
+          "size": 1084,
+          "digest": "sha256:3d180008e36922a4e8daec11c34c7af264fed5962d07924aea928c38e8663c94"
+        },
+        {
+          "id": 691364082,
+          "name": "LICENSE-FPTN",
+          "size": 1068,
+          "digest": "sha256:2f817d4133bca382fe26298f08c106f2c2f36206946e85a40049b38ab15dfaca"
+        },
+        {
+          "id": 691364133,
+          "name": "runtime-assets.json",
+          "size": 503,
+          "digest": "sha256:760751e296dde570d3eadcd1e8790dc7591988a6f549d0b8d06796912975e84e"
+        },
+        {
+          "id": 691364111,
+          "name": "SHA256SUMS",
+          "size": 748,
+          "digest": "sha256:51b6627e8e8e7bfae9c284f04073b9a193e6c55831ec3bad8597293d5d90c20b"
+        },
+        {
+          "id": 691364079,
+          "name": "sources.lock.json",
+          "size": 294,
+          "digest": "sha256:d5ea48c0782b30acdb980efc7297dac1da47fc8aeef77352c98b4eb54548a9a5"
+        }
+      ]
+    },
+    {
+      "id": 428771122,
+      "tag_name": "port-aarch64-b86721212ce5d1ba14682d79331a3485a66641a8",
+      "target_commitish": "b86721212ce5d1ba14682d79331a3485a66641a8",
+      "name": "Experimental FPTN aarch64 b867212",
+      "body": "Cross-built static binaries. ELF ABI, C++20 runtime and offline CLI/probe-only checked under QEMU. No hardware or live VPN test on this architecture. Client and decoder include source metadata and licenses. Installer support is published separately after these results are reviewed.",
+      "prerelease": true,
+      "assets": [
+        {
+          "id": 691374158,
+          "name": "brotli",
+          "size": 919664,
+          "digest": "sha256:0b74b076e007e713e1294a34d5b858a810700c6666ab1090efaac1ccdccfd58b"
+        },
+        {
+          "id": 691374172,
+          "name": "BROTLI-SOURCE.txt",
+          "size": 79,
+          "digest": "sha256:c609e6e55f9f7814d7f13d117cfac8fd41a861ac46e3e9b4eeea87db4b4cbdeb"
+        },
+        {
+          "id": 691374132,
+          "name": "client-release.json",
+          "size": 400,
+          "digest": "sha256:a4b6d51a7ed5b77a25b30be02b26b8ad709c8d13c2bc44afdef6cc9a5864b04f"
+        },
+        {
+          "id": 691374181,
+          "name": "DECODER-SHA256SUMS",
+          "size": 324,
+          "digest": "sha256:6152c808e7aac5c57875209545a788a9559aa8809f2adae1e05b5cefda06fdc2"
+        },
+        {
+          "id": 691374133,
+          "name": "fptn-client-cli",
+          "size": 21190384,
+          "digest": "sha256:cbfac96afde1952d279c665b932dcbc2e35629ace243a29c5998b37e9d223306"
+        },
+        {
+          "id": 691374129,
+          "name": "HELP.txt",
+          "size": 7054,
+          "digest": "sha256:6a2510bfb50c42557f9b74d6723b28072c30106ca3de020d348e3ed5071c1c4e"
+        },
+        {
+          "id": 691374168,
+          "name": "LICENSE-BROTLI",
+          "size": 1084,
+          "digest": "sha256:3d180008e36922a4e8daec11c34c7af264fed5962d07924aea928c38e8663c94"
+        },
+        {
+          "id": 691374131,
+          "name": "LICENSE-FPTN",
+          "size": 1068,
+          "digest": "sha256:2f817d4133bca382fe26298f08c106f2c2f36206946e85a40049b38ab15dfaca"
+        },
+        {
+          "id": 691374177,
+          "name": "runtime-assets.json",
+          "size": 487,
+          "digest": "sha256:540b1bf9e14139f51bdfbc7286f5f9089118eab7372c5e4b736c40febd1a6668"
+        },
+        {
+          "id": 691374153,
+          "name": "SHA256SUMS",
+          "size": 748,
+          "digest": "sha256:332920fc773bf035f5024cc1670809225f6f5f46cb01083c0791f7b808b669c8"
+        },
+        {
+          "id": 691374128,
+          "name": "sources.lock.json",
+          "size": 294,
+          "digest": "sha256:d5ea48c0782b30acdb980efc7297dac1da47fc8aeef77352c98b4eb54548a9a5"
+        }
+      ]
+    },
+    {
+      "id": 428754998,
+      "tag_name": "native-b86721212ce5d1ba14682d79331a3485a66641a8",
+      "target_commitish": "b86721212ce5d1ba14682d79331a3485a66641a8",
+      "name": "FPTN Keenetic native prototype b867212",
+      "body": "Native prototype for Hopper KN-3810 / Entware mipsel. Includes favorite/excluded server policy, bounded automatic selection, live connection status and login checks without a TUN. Compilation and local tests passed; router validation of this update is still required. Routing, DNS and firewall remain managed by Keenetic.",
+      "prerelease": true,
+      "assets": [
+        {
+          "id": 691320538,
+          "name": "client-release.json",
+          "size": 418,
+          "digest": "sha256:74a4421eef1651e1b6b808b9a1cb39c59c59ee9d6d4fbb7126163200801b889b"
+        },
+        {
+          "id": 691320521,
+          "name": "fptn-client-cli",
+          "size": 23284808,
+          "digest": "sha256:24154b13be1a2f845ac7d972bd06fa57f773981561f7d378b814d0f42c77783f"
+        },
+        {
+          "id": 691320526,
+          "name": "HELP.txt",
+          "size": 7054,
+          "digest": "sha256:6a2510bfb50c42557f9b74d6723b28072c30106ca3de020d348e3ed5071c1c4e"
+        },
+        {
+          "id": 691320525,
+          "name": "LICENSE-FPTN",
+          "size": 1068,
+          "digest": "sha256:2f817d4133bca382fe26298f08c106f2c2f36206946e85a40049b38ab15dfaca"
+        },
+        {
+          "id": 691320520,
+          "name": "SHA256SUMS",
+          "size": 748,
+          "digest": "sha256:b815f19e631154f72630ee40b40dde266b87c0e25d1d96763ac96a2548ffc073"
+        },
+        {
+          "id": 691320522,
+          "name": "sources.lock.json",
+          "size": 294,
+          "digest": "sha256:d5ea48c0782b30acdb980efc7297dac1da47fc8aeef77352c98b4eb54548a9a5"
+        }
+      ]
+    },
+    {
+      "id": 428787892,
+      "tag_name": "deps-armv7-softfloat-9f81812fb4b6a3a0560cb6e3b70f10e228381819d3b47ff8c0ea942b35602c7a",
+      "target_commitish": "a568509e8383ab0915399be1aaf1df562af691ab",
+      "name": "ARM build dependencies: armv7-softfloat (9f81812fb4b6)",
+      "body": "Build-time OCI snapshot, keyed by SDK, ABI and dependency inputs. Not a router installation package. Retained independently of the Actions cache.",
+      "prerelease": true,
+      "assets": [
+        {
+          "id": 691428224,
+          "name": "dependencies.tar",
+          "size": 770903040,
+          "digest": "sha256:f305011afe669c85dabd18789668e20cfe64c1d569618080675c7199825af858"
+        },
+        {
+          "id": 691428226,
+          "name": "metadata.json",
+          "size": 229,
+          "digest": "sha256:b21ea0f978f95537760e1d9941168a4204a8adf5be5c7ca006a471f5f96207ef"
+        }
+      ]
+    },
+    {
+      "id": 428787916,
+      "tag_name": "deps-aarch64-30636d55083c26c9640c220ac92976db7517c69dfbd547d76997a62152f63128",
+      "target_commitish": "a568509e8383ab0915399be1aaf1df562af691ab",
+      "name": "ARM build dependencies: aarch64 (30636d55083c)",
+      "body": "Build-time OCI snapshot, keyed by SDK, ABI and dependency inputs. Not a router installation package. Retained independently of the Actions cache.",
+      "prerelease": true,
+      "assets": [
+        {
+          "id": 691428310,
+          "name": "dependencies.tar",
+          "size": 779055616,
+          "digest": "sha256:ac404d4cbf074ece3c8ee3044818191f66ef3d5adcc1e061ccd1cfa40a40837b"
+        },
+        {
+          "id": 691428312,
+          "name": "metadata.json",
+          "size": 221,
+          "digest": "sha256:ce4d8e7b62ebfe787c49fd7ba4cb9ab25770b65d8fb37926e5486c937cf92602"
+        }
+      ]
+    },
+    {
+      "id": 426382952,
+      "tag_name": "runtime-f0fe5e93b96b73f7eb1fbea0708c0d31c63a4f3c",
+      "target_commitish": "f0fe5e93b96b73f7eb1fbea0708c0d31c63a4f3c",
+      "name": "FPTN Keenetic runtime f0fe5e9",
+      "body": "Complete install/update package for Entware mipsel MIPS32r2 soft-float. Contains the existing verified client and Brotli decoder, panel and service. Runtime tests passed in Actions; clean installation still needs hardware validation. Run sh install.sh install inside the extracted folder. Routes, firewall and DNS remain managed by Keenetic.",
+      "prerelease": true,
+      "assets": [
+        {
+          "id": 684249915,
+          "name": "fptn-keenetic-mipsel-mips32r2-softfloat.tar.gz",
+          "size": 12335938,
+          "digest": "sha256:cd64398fe08770990485f85c4a782516cff783d13bd73701537fcdf3b0365220"
+        },
+        {
+          "id": 684249919,
+          "name": "SHA256SUMS",
+          "size": 113,
+          "digest": "sha256:445594998104e2b6fd7ca1f0d72d040b90c44cf2d9141840901825b93c2dbffa"
+        }
+      ]
+    },
+    {
+      "id": 426435407,
+      "tag_name": "runtime-83958ed3ff494dd9d5db3f1cecc838b91d89b5df",
+      "target_commitish": "83958ed3ff494dd9d5db3f1cecc838b91d89b5df",
+      "name": "FPTN Keenetic runtime 83958ed",
+      "body": "Complete install/update packages for registered Entware architectures. Exact client/decoder and source metadata, panel and service are included. Runtime tests passed in Actions; foreign-architecture CLI/probes are tested under QEMU, not live ARM hardware. Run sh install.sh install inside the extracted folder. Routes and DNS stay in Keenetic; optional IPv6 NAT66 is off by default.",
+      "prerelease": true,
+      "assets": [
+        {
+          "id": 684394121,
+          "name": "fptn-keenetic-mipsel-mips32r2-softfloat.tar.gz",
+          "size": 12346493,
+          "digest": "sha256:99cff55b5d7092eef73699de732fc65fd527cf0c0d90bb9537453e154593fc80"
+        },
+        {
+          "id": 684394124,
+          "name": "SHA256SUMS",
+          "size": 113,
+          "digest": "sha256:38a103b9ecf961cf6fca88fce39e7485f5be02e7bb109d21a48f53d5f1d53e85"
+        }
+      ]
+    },
+    {
+      "id": 426394488,
+      "tag_name": "runtime-604b0938b882bbdcd503ae522af4ba8f44a2e933",
+      "target_commitish": "604b0938b882bbdcd503ae522af4ba8f44a2e933",
+      "name": "FPTN Keenetic runtime 604b093",
+      "body": "Complete install/update package for Entware mipsel MIPS32r2 soft-float. Contains the existing verified client and Brotli decoder, panel and service. Runtime tests passed in Actions; clean installation still needs hardware validation. Run sh install.sh install inside the extracted folder. Routes, firewall and DNS remain managed by Keenetic.",
+      "prerelease": true,
+      "assets": [
+        {
+          "id": 684282433,
+          "name": "fptn-keenetic-mipsel-mips32r2-softfloat.tar.gz",
+          "size": 12343114,
+          "digest": "sha256:d46f4e8d471b086932e19e7dbab70ee33f7988540668468ba94032531e476ef6"
+        },
+        {
+          "id": 684282432,
+          "name": "SHA256SUMS",
+          "size": 113,
+          "digest": "sha256:1942b9d26af3a136f4f5a5036f855c9ed92da8f05e97e5ccbb67347b23553c23"
+        }
+      ]
+    },
+    {
+      "id": 426454752,
+      "tag_name": "runtime-311661c48bb5cd354dc4b65b4748ff02a4bcd255",
+      "target_commitish": "311661c48bb5cd354dc4b65b4748ff02a4bcd255",
+      "name": "FPTN Keenetic runtime 311661c",
+      "body": "Complete install/update packages for registered Entware architectures. Exact client/decoder and source metadata, panel and service are included. Runtime tests passed in Actions; foreign-architecture CLI/probes are tested under QEMU, not live ARM hardware. Run sh install.sh install inside the extracted folder. Routes and DNS stay in Keenetic; optional IPv6 NAT66 is off by default.",
+      "prerelease": true,
+      "assets": [
+        {
+          "id": 684445048,
+          "name": "fptn-keenetic-aarch64.tar.gz",
+          "size": 12107539,
+          "digest": "sha256:e5e4b56ffc067d4b4ae0ed263f49b915e7d0ec664cf9d57e6542b5597fb5634e"
+        },
+        {
+          "id": 684445051,
+          "name": "fptn-keenetic-mipsel-mips32r2-softfloat.tar.gz",
+          "size": 12347069,
+          "digest": "sha256:d02c67fd71a63ae6b66a3041e8f25d3071c4ebbe7bffb8a3d707007bd4fe05d6"
+        },
+        {
+          "id": 684445049,
+          "name": "SHA256SUMS",
+          "size": 208,
+          "digest": "sha256:8b83e0b6cec0f32c41453eb25fa884e946161df5562d52a3f4aac3ee6fa33a8a"
+        }
+      ]
+    },
+    {
+      "id": 426476099,
+      "tag_name": "runtime-2a2936356e3acd72e9246459dd097c4f12f2113f",
+      "target_commitish": "2a2936356e3acd72e9246459dd097c4f12f2113f",
+      "name": "FPTN Keenetic runtime 2a29363",
+      "body": "Complete install/update packages for registered Entware architectures. Exact client/decoder and source metadata, panel and service are included. Runtime tests passed in Actions; foreign-architecture CLI/probes are tested under QEMU, not live ARM hardware. Run sh install.sh install inside the extracted folder. Routes and DNS stay in Keenetic; optional IPv6 NAT66 is off by default.",
+      "prerelease": true,
+      "assets": [
+        {
+          "id": 684499763,
+          "name": "fptn-keenetic-aarch64.tar.gz",
+          "size": 12107674,
+          "digest": "sha256:d94e439ceb5a0ac4f2658aa2a17c7e40bb537cf650de30a93d35cd481d3492d7"
+        },
+        {
+          "id": 684499762,
+          "name": "fptn-keenetic-armv7-softfloat.tar.gz",
+          "size": 11603607,
+          "digest": "sha256:39469d2f62805ae9feb703058356dd8184f84a96c7fd5b28e3df31f575096547"
+        },
+        {
+          "id": 684499769,
+          "name": "fptn-keenetic-mipsel-mips32r2-softfloat.tar.gz",
+          "size": 12347200,
+          "digest": "sha256:7efa4a2c654bf6bdaf2db2335bf71029a0c8720073d5069f9761d866d7b2f250"
+        },
+        {
+          "id": 684499766,
+          "name": "SHA256SUMS",
+          "size": 311,
+          "digest": "sha256:06aff0440699df09a4c783399b64344102f559b75e5a5e15961015137b244c26"
+        }
+      ]
+    },
+    {
+      "id": 426467180,
+      "tag_name": "port-armv7-softfloat-15ebc9817d8407241e421ebb9ac7a66c4069a8bd",
+      "target_commitish": "15ebc9817d8407241e421ebb9ac7a66c4069a8bd",
+      "name": "Experimental FPTN armv7-softfloat 15ebc98",
+      "body": "Cross-built static binaries. ELF ABI, C++20 runtime and offline CLI/probe-only checked under QEMU. No hardware or live VPN test on this architecture. Client and decoder include source metadata and licenses. Installer support is published separately after these results are reviewed.",
+      "prerelease": true,
+      "assets": [
+        {
+          "id": 684477382,
+          "name": "brotli",
+          "size": 857804,
+          "digest": "sha256:52ea717965adcf324cb4a8ff55214ef7581d9d367cd8c81d4784b01b97f48855"
+        },
+        {
+          "id": 684477378,
+          "name": "BROTLI-SOURCE.txt",
+          "size": 79,
+          "digest": "sha256:c609e6e55f9f7814d7f13d117cfac8fd41a861ac46e3e9b4eeea87db4b4cbdeb"
+        },
+        {
+          "id": 684477355,
+          "name": "client-release.json",
+          "size": 408,
+          "digest": "sha256:1a1ac8d932c9fbe434f3653967df20dba03b253d5458637cde4120d5fc987157"
+        },
+        {
+          "id": 684477410,
+          "name": "DECODER-SHA256SUMS",
+          "size": 324,
+          "digest": "sha256:a17ae3831b33f47fdd6e236e11508b3a632a366b1d1dab2a494b5c55a2964839"
+        },
+        {
+          "id": 684477353,
+          "name": "fptn-client-cli",
+          "size": 19879528,
+          "digest": "sha256:7f193a16a8abc2002aef94c635b99bb72e23990852b3fe66a7e5a3d832e43014"
+        },
+        {
+          "id": 684477350,
+          "name": "HELP.txt",
+          "size": 7054,
+          "digest": "sha256:82f1f6ab2d143cf0cede938b96877fabab2f1bdee8f48f3bf43d1e80758d2d95"
+        },
+        {
+          "id": 684477379,
+          "name": "LICENSE-BROTLI",
+          "size": 1084,
+          "digest": "sha256:3d180008e36922a4e8daec11c34c7af264fed5962d07924aea928c38e8663c94"
+        },
+        {
+          "id": 684477351,
+          "name": "LICENSE-FPTN",
+          "size": 1068,
+          "digest": "sha256:2f817d4133bca382fe26298f08c106f2c2f36206946e85a40049b38ab15dfaca"
+        },
+        {
+          "id": 684477404,
+          "name": "runtime-assets.json",
+          "size": 503,
+          "digest": "sha256:abf1268bcd26b4ba26722547ee39e42d5ff1b7ba78a83383eb8b229fe6121aac"
+        },
+        {
+          "id": 684477373,
+          "name": "SHA256SUMS",
+          "size": 748,
+          "digest": "sha256:eded1c7a5f0d3ae294d4db489b63ca5ecf98dbdc74d8261645dd4566eca7df3a"
+        },
+        {
+          "id": 684477352,
+          "name": "sources.lock.json",
+          "size": 294,
+          "digest": "sha256:d5ea48c0782b30acdb980efc7297dac1da47fc8aeef77352c98b4eb54548a9a5"
+        }
+      ]
+    },
+    {
+      "id": 426439989,
+      "tag_name": "port-aarch64-15ebc9817d8407241e421ebb9ac7a66c4069a8bd",
+      "target_commitish": "15ebc9817d8407241e421ebb9ac7a66c4069a8bd",
+      "name": "Experimental FPTN aarch64 15ebc98",
+      "body": "Cross-built static binaries. ELF ABI, C++20 runtime and offline CLI/probe-only checked under QEMU. No hardware or live VPN test on this architecture. Client and decoder include source metadata and licenses. Installer support is published separately after these results are reviewed.",
+      "prerelease": true,
+      "assets": [
+        {
+          "id": 684405624,
+          "name": "brotli",
+          "size": 919664,
+          "digest": "sha256:0b74b076e007e713e1294a34d5b858a810700c6666ab1090efaac1ccdccfd58b"
+        },
+        {
+          "id": 684405628,
+          "name": "BROTLI-SOURCE.txt",
+          "size": 79,
+          "digest": "sha256:c609e6e55f9f7814d7f13d117cfac8fd41a861ac46e3e9b4eeea87db4b4cbdeb"
+        },
+        {
+          "id": 684405602,
+          "name": "client-release.json",
+          "size": 400,
+          "digest": "sha256:1a347844f4e694a23bfaef209baf386ec92f8f13dd1216b068a981f2ddb0128a"
+        },
+        {
+          "id": 684405646,
+          "name": "DECODER-SHA256SUMS",
+          "size": 324,
+          "digest": "sha256:77e7ff947d7061ee56961d1db16c1118ec8274c6b2877d3bf8c0217c19bffac3"
+        },
+        {
+          "id": 684405601,
+          "name": "fptn-client-cli",
+          "size": 21190384,
+          "digest": "sha256:35bb43833f5dcac669f5029a0d7fcc02688725ec2c69176858052876b9f8fb60"
+        },
+        {
+          "id": 684405604,
+          "name": "HELP.txt",
+          "size": 7054,
+          "digest": "sha256:82f1f6ab2d143cf0cede938b96877fabab2f1bdee8f48f3bf43d1e80758d2d95"
+        },
+        {
+          "id": 684405626,
+          "name": "LICENSE-BROTLI",
+          "size": 1084,
+          "digest": "sha256:3d180008e36922a4e8daec11c34c7af264fed5962d07924aea928c38e8663c94"
+        },
+        {
+          "id": 684405605,
+          "name": "LICENSE-FPTN",
+          "size": 1068,
+          "digest": "sha256:2f817d4133bca382fe26298f08c106f2c2f36206946e85a40049b38ab15dfaca"
+        },
+        {
+          "id": 684405645,
+          "name": "runtime-assets.json",
+          "size": 487,
+          "digest": "sha256:594b60fa2a7a130435acc75b1073f8242ae061a2094edf2e1c51d3be5eac7a57"
+        },
+        {
+          "id": 684405623,
+          "name": "SHA256SUMS",
+          "size": 748,
+          "digest": "sha256:234652df93633f7ac1b36ed677ec8815d57927255d4d90754b1134ba5fdab74c"
+        },
+        {
+          "id": 684405603,
+          "name": "sources.lock.json",
+          "size": 294,
+          "digest": "sha256:d5ea48c0782b30acdb980efc7297dac1da47fc8aeef77352c98b4eb54548a9a5"
+        }
+      ]
+    },
+    {
+      "id": 426384250,
+      "tag_name": "native-f0fe5e93b96b73f7eb1fbea0708c0d31c63a4f3c",
+      "target_commitish": "f0fe5e93b96b73f7eb1fbea0708c0d31c63a4f3c",
+      "name": "FPTN Keenetic native prototype f0fe5e9",
+      "body": "Native prototype for Hopper KN-3810 / Entware mipsel. Includes favorite/excluded server policy, bounded automatic selection, live connection status and login checks without a TUN. Compilation and local tests passed; router validation of this update is still required. Routing, DNS and firewall remain managed by Keenetic.",
+      "prerelease": true,
+      "assets": [
+        {
+          "id": 684253759,
+          "name": "client-release.json",
+          "size": 418,
+          "digest": "sha256:34f8fa9d75423085d30a8eb64d43f8108a1a3750da7133b0b7261c4874d49791"
+        },
+        {
+          "id": 684253745,
+          "name": "fptn-client-cli",
+          "size": 23284680,
+          "digest": "sha256:c92e9c3cf26b70e63b9730cc626bc61ec51d75f19f72c7c0d9a8aec413670c7b"
+        },
+        {
+          "id": 684253751,
+          "name": "HELP.txt",
+          "size": 7054,
+          "digest": "sha256:82f1f6ab2d143cf0cede938b96877fabab2f1bdee8f48f3bf43d1e80758d2d95"
+        },
+        {
+          "id": 684253743,
+          "name": "LICENSE-FPTN",
+          "size": 1068,
+          "digest": "sha256:2f817d4133bca382fe26298f08c106f2c2f36206946e85a40049b38ab15dfaca"
+        },
+        {
+          "id": 684253739,
+          "name": "SHA256SUMS",
+          "size": 748,
+          "digest": "sha256:bfa28e64e83bce24afbfcfa9d2a725b6f2a70f3ed948f1d67bf13c475f6dd911"
+        },
+        {
+          "id": 684253742,
+          "name": "sources.lock.json",
+          "size": 294,
+          "digest": "sha256:d5ea48c0782b30acdb980efc7297dac1da47fc8aeef77352c98b4eb54548a9a5"
+        }
+      ]
+    },
+    {
+      "id": 425131308,
+      "tag_name": "runtime-ea919dbff9779019ede9f22954890b055ff9cd7b",
+      "target_commitish": "ea919dbff9779019ede9f22954890b055ff9cd7b",
+      "name": "FPTN Keenetic runtime ea919db",
+      "body": "Complete install/update package for Entware mipsel MIPS32r2 soft-float. Contains the existing verified client and Brotli decoder, panel and service. Runtime tests passed in Actions; clean installation still needs hardware validation. Run sh install.sh install inside the extracted folder. Routes, firewall and DNS remain managed by Keenetic.",
+      "prerelease": true,
+      "assets": [
+        {
+          "id": 680778670,
+          "name": "fptn-keenetic-mipsel-mips32r2-softfloat.tar.gz",
+          "size": 12335960,
+          "digest": "sha256:db54e699210cbc33de171fd5f8b476a202ce3211ab2d9d35d08a9222180e260a"
+        },
+        {
+          "id": 680778672,
+          "name": "SHA256SUMS",
+          "size": 113,
+          "digest": "sha256:55802c8c9197106aa3f236937e7072a70f7e6b5ab57275c9398aa5ab1cdc1370"
+        }
+      ]
+    },
+    {
+      "id": 425120079,
+      "tag_name": "runtime-340873ac577df194097387ab5c558fc32f5a7e78",
+      "target_commitish": "340873ac577df194097387ab5c558fc32f5a7e78",
+      "name": "FPTN Keenetic runtime 340873a",
+      "body": "Complete install/update package for Entware mipsel MIPS32r2 soft-float. Contains the existing verified client and Brotli decoder, panel and service. Runtime tests passed in Actions; clean installation still needs hardware validation. Run sh install.sh install inside the extracted folder. Routes, firewall and DNS remain managed by Keenetic.",
+      "prerelease": true,
+      "assets": [
+        {
+          "id": 680746401,
+          "name": "fptn-keenetic-mipsel-mips32r2-softfloat.tar.gz",
+          "size": 12335418,
+          "digest": "sha256:7fc8706fc14924b5e5b53cb7c7dfd5f77f45d79026a3bf32dd284ae9b1fd07bb"
+        },
+        {
+          "id": 680746402,
+          "name": "SHA256SUMS",
+          "size": 113,
+          "digest": "sha256:55c08c8db5630e2bace4d73c845cd3e1e0e767a55448ab6180a56ce54425f2fc"
+        }
+      ]
+    },
+    {
+      "id": 425116550,
+      "tag_name": "decoder-3838b0141bfe83dd6e31dcc2a56a5458bcdb1e21",
+      "target_commitish": "340873ac577df194097387ab5c558fc32f5a7e78",
+      "name": "Brotli token decoder for Entware mipsel",
+      "body": "Existing static decoder, built and round-trip tested in run 40177196930 and already used on Hopper. No VPN transport changes. Source and license included.",
+      "prerelease": true,
+      "assets": [
+        {
+          "id": 680736248,
+          "name": "brotli",
+          "size": 952708,
+          "digest": "sha256:4975b92d3fccc483e3a2af6945debedbbd39c58d0e354fa8d0e3cfc004563332"
+        },
+        {
+          "id": 680736246,
+          "name": "BROTLI-SOURCE.txt",
+          "size": 79,
+          "digest": "sha256:c609e6e55f9f7814d7f13d117cfac8fd41a861ac46e3e9b4eeea87db4b4cbdeb"
+        },
+        {
+          "id": 680736253,
+          "name": "LICENSE-BROTLI",
+          "size": 1084,
+          "digest": "sha256:3d180008e36922a4e8daec11c34c7af264fed5962d07924aea928c38e8663c94"
+        },
+        {
+          "id": 680736251,
+          "name": "SHA256SUMS",
+          "size": 238,
+          "digest": "sha256:b61911fb77cb0324419466962feff65ff50c28bb146a803ae68bed9956550aaf"
+        }
+      ]
+    },
+    {
+      "id": 423642983,
+      "tag_name": "native-c0386cbb73bf9ddf35e551c08d094ac0debf2466",
+      "target_commitish": "c0386cbb73bf9ddf35e551c08d094ac0debf2466",
+      "name": "FPTN Keenetic native prototype c0386cb",
+      "body": "Native prototype for Hopper KN-3810 / Entware mipsel. Includes favorite/excluded server policy, bounded automatic selection, live connection status and login checks without a TUN. Compilation and local tests passed; router validation of this update is still required. Routing, DNS and firewall remain managed by Keenetic.",
+      "prerelease": true,
+      "assets": [
+        {
+          "id": 676042902,
+          "name": "fptn-client-cli",
+          "size": 23267284,
+          "digest": "sha256:97e04235668e7566bb916685e604151f2c928b9a565265f484cbdec69a1b05dd"
+        },
+        {
+          "id": 676042913,
+          "name": "HELP.txt",
+          "size": 6796,
+          "digest": "sha256:edeca02fb9b35725e76cb468e2c41fc7ba267469ecdefdded383181cfba2866e"
+        },
+        {
+          "id": 676042904,
+          "name": "LICENSE-FPTN",
+          "size": 1068,
+          "digest": "sha256:2f817d4133bca382fe26298f08c106f2c2f36206946e85a40049b38ab15dfaca"
+        },
+        {
+          "id": 676042908,
+          "name": "SHA256SUMS",
+          "size": 662,
+          "digest": "sha256:e84a6a63171f6dffa73278fc29c244668a9c20db41b0e28d74bcf0bd2ce71541"
+        },
+        {
+          "id": 676042914,
+          "name": "sources.lock.json",
+          "size": 294,
+          "digest": "sha256:d5ea48c0782b30acdb980efc7297dac1da47fc8aeef77352c98b4eb54548a9a5"
+        }
+      ]
+    },
+    {
+      "id": 423613963,
+      "tag_name": "native-683f6da898108847b7411a26701fba8d7912be74",
+      "target_commitish": "683f6da898108847b7411a26701fba8d7912be74",
+      "name": "FPTN Keenetic native prototype 683f6da",
+      "body": "Native prototype for Hopper KN-3810 / Entware mipsel. Includes favorite/excluded server policy and bounded automatic selection. Compilation and local tests passed; router validation of this update is still required. Routing, DNS and firewall remain managed by Keenetic.",
+      "prerelease": true,
+      "assets": [
+        {
+          "id": 675918138,
+          "name": "fptn-client-cli",
+          "size": 23257748,
+          "digest": "sha256:afc745d7ee79f9cd686d1fb04f5005f6c8332cbec8b768eab6dc795e4489d75b"
+        },
+        {
+          "id": 675918144,
+          "name": "HELP.txt",
+          "size": 6454,
+          "digest": "sha256:805422a1eda7f375fee341971a548a0d4b200a876cea3d84d9e97cba0383fa5e"
+        },
+        {
+          "id": 675918141,
+          "name": "LICENSE-FPTN",
+          "size": 1068,
+          "digest": "sha256:2f817d4133bca382fe26298f08c106f2c2f36206946e85a40049b38ab15dfaca"
+        },
+        {
+          "id": 675918140,
+          "name": "SHA256SUMS",
+          "size": 662,
+          "digest": "sha256:82fdf55a58d59bada43e0b406c5ba148f108f3afad244dd5282be9309e185f3b"
+        },
+        {
+          "id": 675918143,
+          "name": "sources.lock.json",
+          "size": 294,
+          "digest": "sha256:d5ea48c0782b30acdb980efc7297dac1da47fc8aeef77352c98b4eb54548a9a5"
+        }
+      ]
+    },
+    {
+      "id": 422974013,
+      "tag_name": "probe-4ed5766",
+      "target_commitish": "4ed5766546da62a5c596ed32cb651fdf638165e2",
+      "name": "Hopper compatibility probe (no VPN)",
+      "body": "Compatibility diagnostic for Keenetic Hopper KN-3810 EAEU.\nMIPS32r2 little-endian / o32 / soft-float / fully static musl.\nC++20 threads, atomic64, exceptions and coroutines passed under QEMU.\nDoes not access TUN, connect to a VPN or modify network settings.\nNot a working VPN client; real-device compatibility remains to be tested.\nBuilt from commit 4ed5766546da62a5c596ed32cb651fdf638165e2.\n",
+      "prerelease": true,
+      "assets": [
+        {
+          "id": 673274463,
+          "name": "fptn-platform-probe",
+          "size": 1036112,
+          "digest": "sha256:832674ff7859ddca7832971ac0acb41e711a173b4e88d84742333eb346c4dec2"
+        },
+        {
+          "id": 673274461,
+          "name": "SHA256SUMS",
+          "size": 170,
+          "digest": "sha256:7124298299f3e6c845be7edaf6092f9b79b8f80710014b37b1fa062bcb815a01"
+        },
+        {
+          "id": 673274465,
+          "name": "sources.lock.json",
+          "size": 294,
+          "digest": "sha256:d5ea48c0782b30acdb980efc7297dac1da47fc8aeef77352c98b4eb54548a9a5"
+        }
+      ]
+    }
+  ]
+}
