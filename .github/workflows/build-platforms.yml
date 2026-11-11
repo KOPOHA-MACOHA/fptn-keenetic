@@ -8,6 +8,7 @@ on:
       - 'conanfile.py'
       - '.conan/**'
       - 'depends/**'
+      - 'deploy/**'
       - 'scripts/export-fork-source.py'
       - 'sources.lock.json'
       - 'profiles/**'

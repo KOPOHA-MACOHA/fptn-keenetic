@@ -1,0 +1,32 @@
+name: Verify canonical fork endpoints
+on:
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/verify-cutover.yml'
+      - '.github/scripts/verify-cutover.py'
+  workflow_dispatch:
+permissions:
+  contents: read
+  actions: read
+jobs:
+  verify:
+    if: github.repository == 'KOPOHA-MACOHA/fptn-keenetic'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    env:
+      GH_TOKEN: ${{ github.token }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Check build input tracking
+        run: python3 -m unittest discover -s tests -p test_fork_build_inputs.py -v
+      - name: Verify canonical downloads and archived validation evidence
+        run: python3 .github/scripts/verify-cutover.py
+      - uses: actions/upload-artifact@v4
+        with:
+          name: canonical-cutover-verification
+          path: out/cutover/verification.json
+          if-no-files-found: error
