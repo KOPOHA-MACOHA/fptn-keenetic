@@ -75,7 +75,13 @@ class Api:
 def execute(args, output=None):
     result = subprocess.run(args, stdout=output or subprocess.PIPE, stderr=subprocess.PIPE)
     if result.returncode:
-        raise RuntimeError(args[0]+' failed with exit '+str(result.returncode))
+        detail = ''
+        if args[:2] == ['git', 'push']:
+            detail = result.stderr.decode(errors='replace')[-16000:]
+            token = os.environ.get('GH_TOKEN')
+            if token:
+                detail = detail.replace(token, '***')
+        raise RuntimeError(args[0]+' failed with exit '+str(result.returncode)+'\\n'+detail)
     return result.stdout.decode().strip() if output is None else None
 
 
