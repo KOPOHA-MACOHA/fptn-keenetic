@@ -104,6 +104,14 @@ class ImageAuditTest(unittest.TestCase):
             p=self.work/name;old=p.read_bytes();p.write_text('drift\n')
             with self.assertRaises(ValueError):reuse.audit(self.work)
             p.write_bytes(old)
+    def test_pre_lock_sdk_requires_exact_audited_oci_manifest(self):
+        (self.work/'build-locks/conan.lock').unlink()
+        d='sha256:'+'a'*64
+        (self.work/'candidate-build-locks/cache-imports.json').write_text(json.dumps({'arm':{'key':{'imageDigest':d}}}))
+        with self.assertRaisesRegex(ValueError,'exact previously audited'):reuse.audit(self.work)
+        with self.assertRaisesRegex(ValueError,'exact previously audited'):reuse.audit(self.work,'oci-layout:///tmp/image@sha256:'+'b'*64)
+        reuse.audit(self.work,'oci-layout:///tmp/image@'+d)
+
     def test_missing_source_authorization_is_rejected(self):
         (self.work/'candidate-build-locks/source-reuse.json').unlink()
         with self.assertRaises(FileNotFoundError):reuse.audit(self.work)

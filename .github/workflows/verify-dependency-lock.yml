@@ -63,7 +63,9 @@ jobs:
           context: .
           file: ${{ matrix.platform == 'mipsel-mips32r2-softfloat' && 'Dockerfile' || 'ports/generated/Dockerfile' }}
           target: client-export
-          build-args: DEPENDENCIES_IMAGE=prepared-dependencies
+          build-args: |
+            DEPENDENCIES_IMAGE=prepared-dependencies
+            DEPENDENCIES_CONTEXT=${{ steps.mips.outputs.context || steps.arm.outputs.context }}
           build-contexts: |
             prepared-dependencies=${{ steps.mips.outputs.context || steps.arm.outputs.context }}
             fork-source=./out/fork-source

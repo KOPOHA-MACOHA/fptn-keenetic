@@ -94,6 +94,7 @@ WORKDIR /work/upstream
 
 # CI overrides this FROM with an integrity-checked OCI snapshot, not a cache hint.
 FROM ${DEPENDENCIES_IMAGE} AS client
+ARG DEPENDENCIES_CONTEXT
 # Compile this fork's committed sources, rather than the original cached checkout.
 # Only the client stage changes; dependency-image input keys remain unchanged.
 COPY --from=fork-source / /work/candidate-source/
@@ -102,7 +103,7 @@ COPY build-locks /work/candidate-build-locks
 COPY profiles/mipsel-softfloat /work/candidate.profile
 COPY scripts/dependency-reuse.py /work/dependency-reuse.py
 RUN python /work/prepare-source.py /work/candidate-source /work/candidate.sources.lock.json && \
-    python /work/dependency-reuse.py audit /work && \
+    python /work/dependency-reuse.py audit /work "${DEPENDENCIES_CONTEXT}" && \
     rm -rf /work/upstream /work/build-locks && \
     mv /work/candidate-source /work/upstream && \
     mv /work/candidate-build-locks /work/build-locks && \

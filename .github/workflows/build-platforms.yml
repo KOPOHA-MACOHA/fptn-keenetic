@@ -95,7 +95,9 @@ jobs:
           context: .
           file: ports/generated/Dockerfile
           target: prepared-probe-export
-          build-args: DEPENDENCIES_IMAGE=prepared-dependencies
+          build-args: |
+            DEPENDENCIES_IMAGE=prepared-dependencies
+            DEPENDENCIES_CONTEXT=${{ steps.context.outputs.uri }}
           build-contexts: prepared-dependencies=${{ steps.context.outputs.uri }}
           outputs: type=local,dest=out/probe
           cache-from: type=gha,scope=port-${{ matrix.platform }}
@@ -115,7 +117,9 @@ jobs:
           context: .
           file: ports/generated/Dockerfile
           target: platform-export
-          build-args: DEPENDENCIES_IMAGE=prepared-dependencies
+          build-args: |
+            DEPENDENCIES_IMAGE=prepared-dependencies
+            DEPENDENCIES_CONTEXT=${{ steps.context.outputs.uri }}
           build-contexts: |
             prepared-dependencies=${{ steps.context.outputs.uri }}
             fork-source=./out/fork-source

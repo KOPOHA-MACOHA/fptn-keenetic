@@ -103,7 +103,9 @@ jobs:
           context: .
           file: ${{ steps.key.outputs.file }}
           target: client-export
-          build-args: DEPENDENCIES_IMAGE=prepared-dependencies
+          build-args: |
+            DEPENDENCIES_IMAGE=prepared-dependencies
+            DEPENDENCIES_CONTEXT=${{ steps.context.outputs.uri }}
           build-contexts: |
             prepared-dependencies=${{ steps.context.outputs.uri }}
             fork-source=./out/fork-source

@@ -2,6 +2,7 @@
 """Audit source-only upstream updates against an unchanged dependency SDK."""
 import hashlib
 import json
+import re
 from pathlib import Path
 import subprocess
 import sys
@@ -58,7 +59,7 @@ def cached_sources(root):
     return baseline
 
 
-def audit(work):
+def audit(work, context=""):
     """Run inside the restored image before discarding its original dependency source."""
     work = Path(work)
     old = (work/'sources.lock.json').read_bytes()
@@ -67,10 +68,23 @@ def audit(work):
     # The candidate cannot silently change any recipe, graph, tool or SDK lock.
     lock_names = ('conan.lock', 'graph.json', 'metadata.json', 'python.txt', 'apt.txt',
                   'build-profile', 'ubuntu.sources', 'shared-build-cache.json')
-    old_files = {name:(locks/name).read_bytes() for name in lock_names}
     new_files = {name:(candidate/name).read_bytes() for name in lock_names}
-    if old_files != new_files or json.loads(old_files['metadata.json'])['sourcesSha256'] != digest(old):
-        raise ValueError('Prepared SDK and candidate dependency locks differ')
+    if json.loads(new_files['metadata.json'])['sourcesSha256'] != digest(old):
+        raise ValueError('Candidate locks do not describe the prepared SDK sources')
+    if all((locks/name).is_file() for name in lock_names):
+        old_files = {name:(locks/name).read_bytes() for name in lock_names}
+        if old_files != new_files:
+            raise ValueError('Prepared SDK and candidate dependency locks differ')
+    else:
+        # Two pre-lock ARM images were previously audited and imported under the
+        # locked keys. Authorize only their exact verified OCI manifest, never
+        # an arbitrary image with missing locks. Tools/graph are checked next.
+        image_digest = context.rsplit('@', 1)[-1]
+        imports = json.loads((candidate/'cache-imports.json').read_text())
+        approved = {row['imageDigest'] for platform in imports.values() for row in platform.values()}
+        if not re.fullmatch(r'oci-layout://.+@sha256:[0-9a-f]{64}', context) or image_digest not in approved:
+            raise ValueError('Missing SDK locks require an exact previously audited OCI digest')
+        print('Verified previously audited pre-lock SDK: ' + image_digest)
     if (work/'profile').read_bytes() != (work/'candidate.profile').read_bytes():
         raise ValueError('Prepared SDK ABI profile differs')
     if old != new:
@@ -94,7 +108,7 @@ def audit(work):
 
 
 if __name__ == '__main__':
-    if len(sys.argv) == 3 and sys.argv[1] == 'audit':
-        audit(Path(sys.argv[2]))
+    if len(sys.argv) in (3, 4) and sys.argv[1] == 'audit':
+        audit(Path(sys.argv[2]), sys.argv[3] if len(sys.argv) == 4 else '')
     else:
         sys.exit('usage: dependency-reuse.py audit WORK_DIRECTORY')
