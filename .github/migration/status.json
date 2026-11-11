@@ -1,0 +1,40 @@
+{
+  "schema": 1,
+  "phase": "ready-for-default-branch-selection",
+  "repositoryId": 1453702975,
+  "upstreamRevision": "a389bee62da930807c3bc85284ee4976e9c7e08f",
+  "legacy": {
+    "repositoryId": 1432556444,
+    "lastMainRevision": "efbf0d550f9a03c437ff03714cbecc9d6f5b6f22",
+    "archiveName": "KOPOHA-MACOHA/fptn-keenetic-test"
+  },
+  "clientValidation": {
+    "revision": "f069a726a1d25b5bcbff48756f4a4969f9bc4cec",
+    "runId": 42992353429,
+    "platforms": [
+      "mipsel-mips32r2-softfloat",
+      "aarch64",
+      "armv7-softfloat"
+    ],
+    "result": "success",
+    "dependenciesRebuilt": false
+  },
+  "runtimeValidation": {
+    "revision": "ed1e90ff54222d07420fff9162de105a7536474c",
+    "runId": 42993467275,
+    "tests": 358,
+    "result": "success"
+  },
+  "releaseTransfer": {
+    "state": "not-started",
+    "releases": 64,
+    "assets": 369,
+    "bytes": 10100002162,
+    "inventory": ".github/migration/releases.json",
+    "requiresDefaultBranch": "main"
+  },
+  "legacyTagsChecked": 64,
+  "historicalInstallerMatches": true,
+  "updateChannelMatches": true,
+  "renamingAllowed": false
+}

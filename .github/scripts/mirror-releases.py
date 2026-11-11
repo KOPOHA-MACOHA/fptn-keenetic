@@ -8,6 +8,7 @@ import re
 import subprocess
 import tempfile
 import urllib.error
+import urllib.parse
 import urllib.request
 
 SOURCE = 'KOPOHA-MACOHA/fptn-keenetic'
@@ -52,6 +53,23 @@ class Api:
             if missing and error.code == 404:
                 return None
             raise RuntimeError('GitHub '+method+' failed: HTTP '+str(error.code)) from None
+
+    def upload(self, release_id, name, path):
+        # Stream one asset directly to the official upload endpoint. Avoid a
+        # release lookup for every file and avoid loading large OCI images in RAM.
+        if type(release_id) is not int or release_id < 1:
+            raise ValueError('Invalid target release ID')
+        url = ('https://uploads.github.com/repos/'+TARGET+'/releases/'+str(release_id)+
+               '/assets?name='+urllib.parse.quote(name, safe=''))
+        with path.open('rb') as stream:
+            request = urllib.request.Request(url, data=stream, method='POST', headers={
+                'Authorization': 'Bearer '+self.token, 'Content-Type': 'application/octet-stream',
+                'Content-Length': str(path.stat().st_size), 'X-GitHub-Api-Version': '2022-11-28'})
+            try:
+                with urllib.request.urlopen(request, timeout=900) as response:
+                    return json.load(response)
+            except urllib.error.HTTPError as error:
+                raise RuntimeError('Asset upload failed: HTTP '+str(error.code)) from None
 
 
 def execute(args, output=None):
@@ -114,12 +132,16 @@ def mirror(api, inventory, directory):
                     raise ValueError('Existing target asset differs; refusing overwrite: '+tag+'/'+name)
                 continue
             path = directory/name
-            with path.open('wb') as output:
-                execute(['gh', 'api', '-H', 'Accept: application/octet-stream',
-                         'repos/'+SOURCE+'/releases/assets/'+str(asset['id'])], output)
+            url = ('https://github.com/'+SOURCE+'/releases/download/'+
+                   urllib.parse.quote(tag, safe='')+'/'+urllib.parse.quote(name, safe=''))
+            # Public downloads do not consume authenticated API rate limits.
+            # The frozen size/digest binds the bytes even across CDN redirects.
+            execute(['curl', '--proto', '=https', '--proto-redir', '=https', '-fsSL',
+                     '--retry', '3', '--connect-timeout', '30', '--max-time', '900',
+                     url, '-o', str(path)])
             if path.stat().st_size != asset['size'] or digest(path) != asset['digest']:
                 raise ValueError('Downloaded asset checksum differs: '+tag+'/'+name)
-            execute(['gh', 'release', 'upload', tag, str(path), '--repo', TARGET])
+            api.upload(current['id'], name, path)
             path.unlink()
         verified = checked_assets(api.call('GET', TARGET, '/releases/tags/'+tag))
         if ({n: (a['size'], a['digest']) for n, a in verified.items()} !=

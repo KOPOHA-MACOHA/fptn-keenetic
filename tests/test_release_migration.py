@@ -1,6 +1,8 @@
 """Release migration must not silently replace assets or write the original repo."""
 import importlib.util
 import os
+import io
+import tempfile
 from pathlib import Path
 from unittest.mock import patch
 import unittest
@@ -12,6 +14,19 @@ spec.loader.exec_module(mirror)
 
 
 class ReleaseMigrationTest(unittest.TestCase):
+    def test_upload_streams_to_the_fork_with_exact_length(self):
+        with tempfile.TemporaryDirectory() as directory, patch.dict(os.environ, {'GH_TOKEN': 'fixture-not-a-real-token'}):
+            path = Path(directory)/'asset.tar'
+            path.write_bytes(b'checked bytes')
+            def opened(request, timeout):
+                self.assertTrue(request.full_url.startswith('https://uploads.github.com/repos/'+mirror.TARGET+'/'))
+                self.assertTrue(request.full_url.endswith('name=asset%20name.tar'))
+                self.assertEqual(request.get_header('Content-length'), str(path.stat().st_size))
+                self.assertEqual(request.data.read(), b'checked bytes')
+                return io.BytesIO(b'{"id": 42}')
+            with patch.object(mirror.urllib.request, 'urlopen', side_effect=opened):
+                self.assertEqual(mirror.Api().upload(1, 'asset name.tar', path), {'id': 42})
+
     def test_invalid_asset_names_and_missing_digests_are_rejected(self):
         good = {'name': 'dependencies.tar', 'digest': 'sha256:'+'a'*64, 'size': 42}
         self.assertEqual(set(mirror.checked_assets({'assets': [good]})), {'dependencies.tar'})
