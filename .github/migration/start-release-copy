@@ -1,1 +1,3 @@
-Verify tag creation for the history imported through the authorized GitHub connection.
+Import all original tags and copy the frozen release inventory.
+Original history snapshots were imported by the authorized GitHub connection.
+Source revision: efbf0d550f9a03c437ff03714cbecc9d6f5b6f22
