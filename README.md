@@ -1,8 +1,5 @@
 # FPTN для Keenetic / Entware
 
-> Ветка подготовки переноса в настоящий форк. Установка и обновления пока остаются
-> в действующем репозитории. [Состояние переноса](KEENETIC-MIGRATION.md).
-
 Готовые установочные файлы: **[последний выпуск FPTN Keenetic](https://github.com/KOPOHA-MACOHA/fptn-keenetic/releases/latest)**.
 
 Исследовательский проект интеграции [FPTN](https://github.com/fptn-project/fptn)

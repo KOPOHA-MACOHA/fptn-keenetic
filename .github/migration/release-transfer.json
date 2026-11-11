@@ -1,0 +1,26 @@
+{
+  "schema": 1,
+  "sourceRepositoryId": 1432556444,
+  "targetRepositoryId": 1453702975,
+  "releases": 64,
+  "assets": 369,
+  "latest": "v0.18.4-128",
+  "inventorySha256": "sha256:362b082113ec7f9034cd73221043c3b8b11770d1def28dd6b0f9293fb773e978",
+  "runId": 42997776470,
+  "bytes": 10100002162,
+  "tagAudit": {
+    "sourceTags": 64,
+    "targetTags": 141,
+    "mismatches": []
+  },
+  "cleanup": {
+    "runId": 43001124635,
+    "schema": 1,
+    "copyRunId": 42997776470,
+    "deletedTemporaryBranches": 37,
+    "preservedOriginalTags": 64,
+    "repositoryId": 1453702975,
+    "publicDownloadChecks": 10,
+    "historicalActionsReadable": true
+  }
+}

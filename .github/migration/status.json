@@ -1,6 +1,6 @@
 {
   "schema": 1,
-  "phase": "ready-for-default-branch-selection",
+  "phase": "ready-for-repository-rename",
   "repositoryId": 1453702975,
   "upstreamRevision": "a389bee62da930807c3bc85284ee4976e9c7e08f",
   "legacy": {
@@ -26,15 +26,38 @@
     "result": "success"
   },
   "releaseTransfer": {
-    "state": "not-started",
+    "state": "verified",
+    "runId": 42997776470,
     "releases": 64,
     "assets": 369,
     "bytes": 10100002162,
     "inventory": ".github/migration/releases.json",
-    "requiresDefaultBranch": "main"
+    "inventorySha256": "sha256:362b082113ec7f9034cd73221043c3b8b11770d1def28dd6b0f9293fb773e978",
+    "latest": "v0.18.4-128",
+    "originalTagsVerified": 64
   },
   "legacyTagsChecked": 64,
   "historicalInstallerMatches": true,
   "updateChannelMatches": true,
-  "renamingAllowed": false
+  "renamingAllowed": true,
+  "historyCleanup": {
+    "runId": 43001124635,
+    "schema": 1,
+    "copyRunId": 42997776470,
+    "deletedTemporaryBranches": 37,
+    "preservedOriginalTags": 64,
+    "repositoryId": 1453702975,
+    "publicDownloadChecks": 10,
+    "historicalActionsReadable": true
+  },
+  "nextOperatorAction": [
+    {
+      "from": "KOPOHA-MACOHA/fptn-keenetic",
+      "to": "KOPOHA-MACOHA/fptn-keenetic-test"
+    },
+    {
+      "from": "KOPOHA-MACOHA/fptn-keenetic-next",
+      "to": "KOPOHA-MACOHA/fptn-keenetic"
+    }
+  ]
 }
