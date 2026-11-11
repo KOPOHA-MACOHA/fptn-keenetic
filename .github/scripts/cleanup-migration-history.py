@@ -20,6 +20,10 @@ if (proof.get('status') != 'completed' or proof.get('conclusion') != 'success' o
         proof.get('path') != '.github/workflows/mirror-releases.yml' or
         proof.get('head_repository', {}).get('id') != mirror.TARGET_ID):
     raise SystemExit('Release copy has not passed verification')
+historical = api.call('GET', mirror.SOURCE, '/actions/runs/42650084093')
+if (historical.get('conclusion') != 'success' or
+        historical.get('head_repository', {}).get('id') != mirror.SOURCE_ID):
+    raise SystemExit('Historical validation run is not readable from the fork')
 inventory = json.loads(Path('.github/migration/releases.json').read_text())
 for release in inventory['releases']:
     commit = subprocess.check_output(['git', 'rev-parse', 'refs/tags/'+release['tag_name']+'^{commit}'], text=True).strip()
@@ -68,6 +72,6 @@ if remove:
     subprocess.run(['git', 'push', 'origin', *remove], check=True)
 report = {'schema': 1, 'copyRunId': 42997776470, 'deletedTemporaryBranches': len(remove),
           'preservedOriginalTags': len(inventory['releases']), 'repositoryId': mirror.TARGET_ID,
-          'publicDownloadChecks': public_checks}
+          'publicDownloadChecks': public_checks, 'historicalActionsReadable': True}
 Path(os.environ['RUNNER_TEMP'], 'history-cleanup.json').write_text(json.dumps(report, indent=2)+'\n')
 print(json.dumps(report))
