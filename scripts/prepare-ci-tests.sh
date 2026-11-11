@@ -15,11 +15,17 @@ if [ -n "$http_proxy$https_proxy" ]; then
 else
     echo '[CI] No proxy configured; APT uses the runner network directly.'
 fi
-# GitHub's mirror+file source can point exclusively at Azure's mirror. Its
-# intermittent DNS failures otherwise stall every test job for many minutes.
-for mirror in /etc/apt/apt-mirrors.txt /etc/apt/apt-mirrors-*.txt; do
+# Fall back only when the Ubuntu DNS zone is unavailable on a direct runner.
+# kernel.org mirrors the same signed Ubuntu archive; APT signature and package
+# hash verification remain enabled. This never changes the locked SDK image.
+CI_TEST_UBUNTU_MIRROR=https://archive.ubuntu.com/ubuntu
+if [ -z "$http_proxy$https_proxy" ] && ! timeout 5 getent ahostsv4 archive.ubuntu.com >/dev/null; then
+    CI_TEST_UBUNTU_MIRROR=https://mirrors.edge.kernel.org/ubuntu
+    echo '[CI] Ubuntu DNS unavailable; using the signed Ubuntu archive mirror at kernel.org.'
+fi
+for mirror in /etc/apt/apt-mirrors*.txt; do
     if [ -f "$mirror" ]; then
-        sudo sed -i 's/azure\.archive\.ubuntu\.com/archive.ubuntu.com/g' "$mirror"
+        sudo sed -Ei "s#https?://(azure\.archive|archive|security)\.ubuntu\.com/ubuntu/?#$CI_TEST_UBUNTU_MIRROR/#g" "$mirror"
     fi
 done
 sudo --preserve-env=http_proxy,https_proxy,no_proxy apt-get -o Acquire::Retries=2 -o Acquire::http::Timeout=30 \
