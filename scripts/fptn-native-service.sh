@@ -684,6 +684,11 @@ clear_previous_boot_state() (
   # recovered automatically; same-boot crashes still need ownership checks.
   [ -d "$RUN" ] || return 0
   [ ! -L "$RUN" ] || fail 'Каталог состояния является ссылкой; автоматическое восстановление запрещено.'
+  # Keep the lock in volatile /tmp, not on persistent Entware storage. Read
+  # records under this lock so a competing start cannot remove a fresh RUN.
+  RECOVERY_LOCK=/tmp/fptn-boot-recovery-$(printf '%s' "$ROOT" | sha256sum | awk '{print $1}')
+  mkdir "$RECOVERY_LOCK" 2>/dev/null || fail 'Восстановление состояния уже выполняется; повторите запуск.'
+  trap 'rmdir "$RECOVERY_LOCK" 2>/dev/null || true' EXIT
   [ -f "$RUN/supervisor.pid" ] && [ ! -L "$RUN/supervisor.pid" ] || return 0
   read -r OLD_PID OLD_STAMP OLD_BOOT < "$RUN/supervisor.pid" || return 0
   case "$OLD_PID:$OLD_STAMP" in *[!0-9:]*|:|*:|:*) return 0 ;; esac

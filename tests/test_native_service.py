@@ -117,6 +117,34 @@ class NativeServiceTest(unittest.TestCase):
         result=self.cmd('start');self.assertNotEqual(result.returncode,0)
         self.assertEqual(sentinel.read_text(),'preserve\n');self.assertTrue(run.exists())
 
+    def test_concurrent_recovery_does_not_remove_new_service_state(self):
+        root=self.prepare_native_client();run=self.previous_boot_state(root)
+        entered=self.root/'archive-entered';release=self.root/'archive-release'
+        tail=shutil.which('tail')
+        (self.bin/'tail').write_text(f'''#!/bin/sh
+case "$*" in *supervisor.log)
+  touch '{entered}'
+  while [ ! -f '{release}' ]; do sleep 1; done ;;
+esac
+exec '{tail}' "$@"
+''');(self.bin/'tail').chmod(0o700)
+        first=subprocess.Popen(['sh',str(SCRIPT),'start'],env=self.env,text=True,stdout=subprocess.PIPE,stderr=subprocess.PIPE)
+        try:
+            self.wait_for(entered.exists)
+            second=self.cmd('start')
+            self.assertNotEqual(second.returncode,0)
+            self.assertIn('Восстановление состояния уже выполняется',second.stderr)
+            release.touch()
+            out,err=first.communicate(timeout=20)
+            self.assertEqual(first.returncode,0,out+err)
+            self.assertTrue((run/'ready').exists())
+            self.assertIn('READY получен',self.cmd('status').stdout)
+            self.assertEqual(self.state()['mutations'],0)
+        finally:
+            release.touch()
+            if first.poll() is None:first.communicate(timeout=20)
+            self.cmd('stop')
+
     def test_no_custom_routing_dns_or_firewall_commands(self):
         source=SCRIPT.read_text()
         for forbidden in ['iptables ', 'ip -4 rule ', 'ip -4 route add', 'normalize_cidrs', 'nslookup ', 'ip route default']:
