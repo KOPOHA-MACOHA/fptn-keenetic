@@ -18,10 +18,14 @@ elif command=='date':
  clock=root/'clock';now=int(clock.read_text()) if clock.exists() else 1000
  clock.write_text(str(now+1));print(now)
 elif command=='php-cgi':
+ if args and args[-1].endswith('fptn-backup-retention.php'):
+  real=os.environ.get('FPTN_TEST_REAL_PHP')
+  if not real:sys.exit(1)
+  sys.exit(subprocess.run([real,*args]).returncode)
  if (root/'fail-php').exists():sys.exit(1)
  if os.environ.get('FPTN_AUTH_ACTION')=='op-state':print(json.dumps({'busy':True}))
  elif os.environ.get('FPTN_AUTH_ACTION')=='op-reserve':
-  lock=root/'var/run/fptn-web/action';lock.mkdir();(lock/'action').write_text('update\n');print(json.dumps({'id':'a'*32}))
+  lock=root/'var/run/fptn-web/action';lock.mkdir();(lock/'action').write_text('update\n');(lock/'owner.json').write_text(json.dumps({'id':'a'*32}));print(json.dumps({'id':'a'*32}))
  else:print(json.dumps({'configured':True,'mode':'panel','rootAvailable':True}))
 elif command=='ndmc':
  if args[-1].startswith('no interface '):
@@ -57,7 +61,7 @@ elif command=='curl':
   if 'auth-info' in url:
    with (root.parent/'trace').open('a') as f:f.write('http-auth-info\n')
   if '-K' in args:sys.stdin.read()
-  info={'uiVersion':'old' if (root/'wrong-api').exists() else '0.18.7','service':{'state':'stopped'},'busy':False,'status':'stopped','configured':True,'rootAvailable':True}
+  info={'uiVersion':'old' if (root/'wrong-api').exists() else '0.18.8','service':{'state':'stopped'},'busy':False,'status':'stopped','configured':True,'rootAvailable':True}
   text=json.dumps(info)
   if out:out.write_text(text)
   else:print(text)
@@ -78,7 +82,7 @@ class WebInstallerTest(unittest.TestCase):
         for name in ['bin','libexec/fptn','etc/fptn','etc/lighttpd/conf.d','etc/init.d','share/fptn-web','var/run/fptn-keenetic']:
             (self.root/name).mkdir(parents=True,exist_ok=True)
         self.trace=self.base/'trace'
-        self.env={**os.environ,'FPTN_PREFIX':str(self.root),'FPTN_TEST_TRACE':str(self.trace),'FPTN_INSTALL_PORT':'1111'}
+        self.env={**os.environ,'FPTN_TEST_REAL_PHP':shutil.which('php') or shutil.which('php-cgi') or '','FPTN_PREFIX':str(self.root),'FPTN_TEST_TRACE':str(self.trace),'FPTN_INSTALL_PORT':'1111'}
         for name in ['id','ndmc','ip','netstat','lighttpd','curl','php-cgi','date','sleep']:
             path=self.root/'bin'/name;path.write_text(MOCK);path.chmod(0o700)
         (self.root/'etc/fptn/web-auth.json').write_text('{"username":"admin","hash":"test"}')
@@ -114,7 +118,7 @@ esac
         (lib/'brotli').write_text('dummy');(lib/'brotli').chmod(0o700)
         self.old_sums=''.join(hashlib.sha256((lib/p).read_bytes()).hexdigest()+'  '+p+'\n' for p in ['fptn-client-cli','brotli'])
         (lib/'SHA256SUMS').write_text(self.old_sums)
-        paths=['web/favicon.svg','client-release.json','web/index.html','web/index.cgi','web/style.css','web/app.js','web/api.cgi','scripts/fptn-native-service.sh','scripts/fptn-web-auth.sh','scripts/fptn-web-auth.php','scripts/fptn-web-operations.php','scripts/fptn-transport-plan.php','scripts/fptn-web-update.sh','scripts/fptn-client-capabilities.sh','scripts/fptn-client-identity.sh','scripts/fptn-platform.sh','scripts/fptn-uplink.sh','scripts/fptn-ipv6.sh','scripts/fptn-web-port.sh','runtime-assets.json','platform-releases.json']
+        paths=['web/favicon.svg','client-release.json','web/index.html','web/index.cgi','web/style.css','web/app.js','web/api.cgi','scripts/fptn-native-service.sh','scripts/fptn-web-auth.sh','scripts/fptn-web-auth.php','scripts/fptn-web-operations.php','scripts/fptn-backup-retention.php','scripts/fptn-transport-plan.php','scripts/fptn-web-update.sh','scripts/fptn-client-capabilities.sh','scripts/fptn-client-identity.sh','scripts/fptn-platform.sh','scripts/fptn-uplink.sh','scripts/fptn-ipv6.sh','scripts/fptn-web-port.sh','runtime-assets.json','platform-releases.json']
         for name in paths:
             target=self.payload/name;target.parent.mkdir(parents=True,exist_ok=True)
             target.write_text(controller('staged') if name=='scripts/fptn-native-service.sh' else (REPO/name).read_text())
@@ -187,6 +191,30 @@ esac
         self.assertNotIn('old-stop',trace)
         self.assertTrue((self.root/'var/run/fptn-keenetic').exists())
         self.assertFalse((self.root/'var/run/fptn-web/action').exists())
+        self.assertEqual((self.root/'libexec/fptn/fptn-client-cli').read_bytes(),(self.payload/'client/fptn-client-cli').read_bytes())
+
+    def test_successful_install_retains_three_and_failed_upgrade_never_prunes(self):
+        import json
+        if not self.env['FPTN_TEST_REAL_PHP']:self.skipTest('PHP installed in Actions')
+        for _ in range(5):
+            result=self.execute();self.assertEqual(result.returncode,0,result.stdout+result.stderr)
+        backups=list((self.root/'etc/fptn').glob('web-install-backup.*'))
+        self.assertEqual(len(backups),3)
+        self.assertTrue(all(json.loads((p/'.fptn-backup.json').read_text())['state']=='success' for p in backups))
+        self.assertEqual((self.root/'etc/fptn/token').read_text(),'dummy\n')
+        (self.root/'fail-restart').touch();result=self.execute()
+        self.assertNotEqual(result.returncode,0)
+        for p in backups:self.assertTrue(p.exists(),'failed upgrade must not prune history')
+        after=list((self.root/'etc/fptn').glob('web-install-backup.*'))
+        self.assertEqual(len(after),4)
+        self.assertEqual(sorted(json.loads((p/'.fptn-backup.json').read_text())['state'] for p in after),['failed','success','success','success'])
+
+    def test_cleanup_metadata_failure_does_not_roll_back_successful_upgrade(self):
+        if not self.env['FPTN_TEST_REAL_PHP']:self.skipTest('PHP installed in Actions')
+        (self.root/'etc/fptn/.web-backup-state.json').write_text('broken')
+        result=self.execute();self.assertEqual(result.returncode,0,result.stdout+result.stderr)
+        self.assertIn('очистка для этой установки пропущена',result.stderr)
+        self.assertNotIn('Восстанавливаю файлы',result.stderr)
         self.assertEqual((self.root/'libexec/fptn/fptn-client-cli').read_bytes(),(self.payload/'client/fptn-client-cli').read_bytes())
 
     def test_failed_restart_return_code_with_healthy_http_does_not_roll_back(self):
