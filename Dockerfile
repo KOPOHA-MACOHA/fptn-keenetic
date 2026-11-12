@@ -138,7 +138,7 @@ RUN --mount=type=secret,id=proxy_ca \
       -DCMAKE_TOOLCHAIN_FILE=/build/conan_toolchain.cmake \
       -DCMAKE_BUILD_TYPE=Release -DCMAKE_EXE_LINKER_FLAGS=-static \
       -DCMAKE_COMPILE_WARNING_AS_ERROR=OFF -DCMAKE_CXX_CLANG_TIDY= \
-      -DFPTN_VERSION=0.8.0 && \
+      -DFPTN_VERSION=0.8.1 && \
     python /work/check-cross-includes.py /build/compile_commands.json && \
     cmake --build /build --target fptn-client-cli -j2
 RUN mkdir /out && \

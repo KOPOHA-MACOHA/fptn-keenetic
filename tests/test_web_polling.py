@@ -69,7 +69,7 @@ current.busy=true;current.operationState={stale:true};await run('poll()');assert
 current.busy=false;delete current.operationState;await run('poll()');
 offline=true;await run('poll()');statusCalls=0;await advance(30000);assert(statusCalls===3,'API failure must use the bounded retry interval');
 offline=false;current.service.state='stopped';await advance(10000);assert([...timers.values()].some(t=>t.ms===20000));
-run("beginUpdate({revision:'d'.repeat(40),version:'0.18.9'})");
+run("beginUpdate({revision:'d'.repeat(40),version:'0.18.10'})");
 current.busy=true;current.operation='update';await run('poll()');
 visibility(true);const duringUpdate=statusCalls;await advance(60000);assert(statusCalls===duringUpdate&&timers.size===0);
 current.busy=false;current.revision='d'.repeat(40);current.result={ok:true,action:'update',message:'installed'};

@@ -1,0 +1,196 @@
+{
+  "schema": 1,
+  "date": "2026-11-12",
+  "scope": "Channel/IPPacket component on host Linux; not whole-client or router measurements",
+  "architecture": "x86_64",
+  "libc": [
+    "glibc",
+    "2.41"
+  ],
+  "compiler": "g++ (Debian 14.2.0-19) 14.2.0",
+  "boost": "1.83.0",
+  "spdlog": "1.17.0",
+  "logging": "disabled in both benchmark variants",
+  "peakSource": "Linux /proc/self/status VmHWM after workload; no resident sampler",
+  "packetBytes": 1400,
+  "capacityPackets": 4096,
+  "congestedPrefillPackets": 4095,
+  "congestedBatchPackets": 16384,
+  "results": {
+    "CHANNEL_CONGESTED_RESULT": {
+      "after": [
+        {
+          "accepted": 0,
+          "baselineRssKiB": 1776,
+          "cpuSeconds": 0.106888,
+          "drained": 4095,
+          "elapsedSeconds": 0.105388,
+          "peakRssKiB": 30984,
+          "retainedRssKiB": 7864,
+          "scenario": "congested"
+        },
+        {
+          "accepted": 0,
+          "baselineRssKiB": 1776,
+          "cpuSeconds": 0.098875,
+          "drained": 4095,
+          "elapsedSeconds": 0.0973112,
+          "peakRssKiB": 30984,
+          "retainedRssKiB": 7864,
+          "scenario": "congested"
+        },
+        {
+          "accepted": 0,
+          "baselineRssKiB": 1776,
+          "cpuSeconds": 0.116166,
+          "drained": 4095,
+          "elapsedSeconds": 0.114015,
+          "peakRssKiB": 30984,
+          "retainedRssKiB": 7864,
+          "scenario": "congested"
+        }
+      ],
+      "before": [
+        {
+          "accepted": 16384,
+          "baselineRssKiB": 1780,
+          "cpuSeconds": 0.114034,
+          "drained": 20479,
+          "elapsedSeconds": 0.113622,
+          "peakRssKiB": 54468,
+          "retainedRssKiB": 31288,
+          "scenario": "congested"
+        },
+        {
+          "accepted": 16384,
+          "baselineRssKiB": 1772,
+          "cpuSeconds": 0.176148,
+          "drained": 20479,
+          "elapsedSeconds": 0.175226,
+          "peakRssKiB": 54460,
+          "retainedRssKiB": 31280,
+          "scenario": "congested"
+        },
+        {
+          "accepted": 16384,
+          "baselineRssKiB": 1772,
+          "cpuSeconds": 0.104774,
+          "drained": 20479,
+          "elapsedSeconds": 0.103748,
+          "peakRssKiB": 54460,
+          "retainedRssKiB": 31280,
+          "scenario": "congested"
+        }
+      ]
+    },
+    "CHANNEL_NORMAL_RESULT": {
+      "after": [
+        {
+          "accepted": 640000,
+          "baselineRssKiB": 1776,
+          "cpuSeconds": 0.094995,
+          "drained": 640000,
+          "elapsedSeconds": 0.0980482,
+          "peakRssKiB": 1912,
+          "retainedRssKiB": 1912,
+          "scenario": "normal"
+        },
+        {
+          "accepted": 640000,
+          "baselineRssKiB": 1776,
+          "cpuSeconds": 0.075023,
+          "drained": 640000,
+          "elapsedSeconds": 0.0736019,
+          "peakRssKiB": 1912,
+          "retainedRssKiB": 1912,
+          "scenario": "normal"
+        },
+        {
+          "accepted": 640000,
+          "baselineRssKiB": 1772,
+          "cpuSeconds": 0.083059,
+          "drained": 640000,
+          "elapsedSeconds": 0.0806917,
+          "peakRssKiB": 1908,
+          "retainedRssKiB": 1908,
+          "scenario": "normal"
+        },
+        {
+          "accepted": 640000,
+          "baselineRssKiB": 1776,
+          "cpuSeconds": 0.067127,
+          "drained": 640000,
+          "elapsedSeconds": 0.0646478,
+          "peakRssKiB": 1912,
+          "retainedRssKiB": 1912,
+          "scenario": "normal"
+        },
+        {
+          "accepted": 640000,
+          "baselineRssKiB": 1772,
+          "cpuSeconds": 0.069346,
+          "drained": 640000,
+          "elapsedSeconds": 0.0677063,
+          "peakRssKiB": 1908,
+          "retainedRssKiB": 1908,
+          "scenario": "normal"
+        }
+      ],
+      "before": [
+        {
+          "accepted": 640000,
+          "baselineRssKiB": 1772,
+          "cpuSeconds": 0.066112,
+          "drained": 640000,
+          "elapsedSeconds": 0.0642332,
+          "peakRssKiB": 1908,
+          "retainedRssKiB": 1908,
+          "scenario": "normal"
+        },
+        {
+          "accepted": 640000,
+          "baselineRssKiB": 1776,
+          "cpuSeconds": 0.076169,
+          "drained": 640000,
+          "elapsedSeconds": 0.0726008,
+          "peakRssKiB": 1912,
+          "retainedRssKiB": 1912,
+          "scenario": "normal"
+        },
+        {
+          "accepted": 640000,
+          "baselineRssKiB": 1772,
+          "cpuSeconds": 0.097443,
+          "drained": 640000,
+          "elapsedSeconds": 0.0956656,
+          "peakRssKiB": 1908,
+          "retainedRssKiB": 1908,
+          "scenario": "normal"
+        },
+        {
+          "accepted": 640000,
+          "baselineRssKiB": 1772,
+          "cpuSeconds": 0.075764,
+          "drained": 640000,
+          "elapsedSeconds": 0.073857,
+          "peakRssKiB": 1908,
+          "retainedRssKiB": 1908,
+          "scenario": "normal"
+        },
+        {
+          "accepted": 640000,
+          "baselineRssKiB": 1776,
+          "cpuSeconds": 0.065512,
+          "drained": 640000,
+          "elapsedSeconds": 0.0637651,
+          "peakRssKiB": 1912,
+          "retainedRssKiB": 1912,
+          "scenario": "normal"
+        }
+      ]
+    }
+  },
+  "baselineRevision": "ed2d72c7fa01af6f3fabeab03f229bfc824eb0af",
+  "beforeHeaderSha256": "59d8c6d7662fee638512021f7482a8f73d9b20bcfb124e3a53391187fcf2199f",
+  "afterHeaderSha256": "d2960fcef6f5374a1f7b0b17ce64078a42ec13d1747718d416b1239560566ee3"
+}

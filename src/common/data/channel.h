@@ -47,7 +47,9 @@ class Channel {
     {
       const std::lock_guard<std::mutex> lock(mutex_);  // mutex
 
-      if (queue_.size() >= max_capacity_) {
+      // Accept a batch atomically, without exceeding the packet limit.
+      if (queue_.size() >= max_capacity_ ||
+          packets.size() > max_capacity_ - queue_.size()) {
         dropped_ += packets.size();
         SetFull(true);
         return false;
