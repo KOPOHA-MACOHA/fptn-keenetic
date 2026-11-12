@@ -39,8 +39,8 @@ class BackupRetentionTest(unittest.TestCase):
     def success(self):
         path=self.begin();self.invoke('commit',path);return path
     def record(self,path):return json.loads((path/'.fptn-backup.json').read_text())
-    def pin(self,path):
-        archive=self.conf/'web-recovery'/('c'*32);archive.mkdir(parents=True,exist_ok=True)
+    def pin(self,path,identifier="c"*32):
+        archive=self.conf/'web-recovery'/identifier;archive.mkdir(parents=True,exist_ok=True)
         self.private(archive/'install-backup',str(path)+'\n');return archive
     def test_error_reporting_works_in_cli_and_cgi_without_optional_constants(self):
         for php in dict.fromkeys(filter(None,[shutil.which('php'),shutil.which('php-cgi')])):
@@ -58,26 +58,43 @@ class BackupRetentionTest(unittest.TestCase):
             path=self.success();backups.append(path);os.utime(path,(1000-i,1000-i))
         self.assertEqual([p.exists() for p in backups],[False]*4+[True]*3)
         self.assertTrue(all(self.record(p)['state']=='success' for p in backups[-3:]))
-    def test_failed_pending_legacy_and_foreign_receipts_survive(self):
+    def test_three_successes_enable_cleanup_of_failed_pending_legacy_and_old_receipts(self):
         failed=self.begin();self.invoke('failed',failed)
         pending=self.begin()
-        legacy=self.conf/'web-install-backup.LEGACY';legacy.mkdir();(legacy/'important').write_text('keep')
-        foreign=self.conf/'web-install-backup.OTHERX';foreign.mkdir()
-        fake={**self.record(failed),'directory':foreign.name,'state':'success','owner':'f'*32}
-        self.private(foreign/'.fptn-backup.json',json.dumps(fake))
-        for _ in range(6):self.success()
-        for path in (failed,pending,legacy,foreign):self.assertTrue(path.exists())
-        self.assertEqual(self.record(failed)['state'],'failed');self.assertEqual(self.record(pending)['state'],'pending')
+        legacy=self.conf/'web-install-backup.LEGACY';legacy.mkdir();(legacy/'old').write_text('old runtime')
+        old_owner=self.conf/'web-install-backup.OTHERX';old_owner.mkdir()
+        fake={**self.record(failed),'directory':old_owner.name,'state':'success','owner':'f'*32}
+        self.private(old_owner/'.fptn-backup.json',json.dumps(fake))
+        damaged=self.conf/'web-install-backup.BROKEN';damaged.mkdir();self.private(damaged/'.fptn-backup.json','broken')
+        obsolete=[failed,pending,legacy,old_owner,damaged]
+        recent=[self.success() for _ in range(2)]
+        self.assertTrue(all(path.exists() for path in obsolete),'two successes must not authorize deletion')
+        recent.append(self.success())
+        self.assertFalse(any(path.exists() for path in obsolete))
+        self.assertTrue(all(path.exists() for path in recent))
+    def test_recovery_references_protect_legacy_and_failed_backups_after_threshold(self):
+        failed=self.begin();self.invoke('failed',failed);self.pin(failed)
+        legacy=self.conf/'web-install-backup.LEGACY';legacy.mkdir();(legacy/'old').write_text('rollback data')
+        self.pin(legacy,'d'*32)
+        for _ in range(5):self.success()
+        self.assertTrue(failed.exists());self.assertEqual((legacy/'old').read_text(),'rollback data')
     def test_recovery_reference_pins_old_success_in_addition_to_latest_three(self):
         old=self.success();self.pin(old);recent=[self.success() for _ in range(5)]
         self.assertTrue(old.exists());self.assertEqual([p.exists() for p in recent],[False,False,True,True,True])
+    def test_cleanup_does_not_delete_backup_directory_owned_by_another_uid(self):
+        if os.geteuid()!=0:self.skipTest('ownership check requires root, as used in CI')
+        foreign=self.conf/'web-install-backup.NOTOWN';foreign.mkdir(mode=0o700)
+        (foreign/'data').write_text('foreign owner')
+        os.chown(foreign,12345,-1)
+        for _ in range(4):self.success()
+        self.assertTrue(foreign.exists());self.assertEqual(foreign.stat().st_uid,12345)
     def test_symlink_directories_and_markers_are_preserved_and_inner_links_not_followed(self):
         outside=Path(self.tmp.name)/'outside';outside.mkdir();(outside/'secret').write_text('untouched')
         link=self.conf/'web-install-backup.LINKED';link.symlink_to(outside,target_is_directory=True)
         old=self.success();(old/'web/link').symlink_to(outside,target_is_directory=True)
         forged=self.conf/'web-install-backup.FORGED';forged.mkdir();(forged/'.fptn-backup.json').symlink_to(old/'.fptn-backup.json')
         for _ in range(4):self.success()
-        self.assertFalse(old.exists());self.assertTrue(link.is_symlink());self.assertTrue(forged.is_dir())
+        self.assertFalse(old.exists());self.assertTrue(link.is_symlink());self.assertFalse(forged.exists())
         self.assertEqual((outside/'secret').read_text(),'untouched')
     def test_missing_success_evidence_and_wrong_operation_never_prune(self):
         previous=[self.success() for _ in range(3)];current=self.begin()

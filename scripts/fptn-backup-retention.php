@@ -104,7 +104,9 @@ function removeBackupTree(string $path, bool $root = false): void {
     }
     // Keep the ownership receipt until all payload files have been removed, so
     // an interrupted removal can be retried without guessing directory ownership.
-    if ($root) requireBackup(unlink($path . '/.fptn-backup.json'), 'не удалось удалить журнал старой копии');
+    if ($root && (file_exists($path . '/.fptn-backup.json') || is_link($path . '/.fptn-backup.json'))) {
+        removeBackupTree($path . '/.fptn-backup.json');
+    }
     requireBackup(rmdir($path), 'не удалось удалить каталог старой копии');
 }
 $root = rtrim(getenv('FPTN_PREFIX') ?: '/opt', '/');
@@ -164,30 +166,37 @@ requireBackup(($installed['revision'] ?? null) === $revision, 'новая уст
 $record['state'] = 'success';
 writeBackupJson($receipt, $record);
 $protected = backupProtected($run, $conf, $uid);
-$successful = [];
+$successful = []; $candidates = [];
 foreach (new DirectoryIterator($conf) as $entry) {
     if (!preg_match('/\Aweb-install-backup\.[A-Za-z0-9]{6}\z/D', $entry->getFilename())) continue;
     try {
         $path = backupPath($entry->getPathname(), $conf, $uid);
+        $candidates[] = $path;
         $item = readBackupJson($path . '/.fptn-backup.json', $uid);
         if (($item['schema'] ?? null) !== 1 || ($item['owner'] ?? null) !== $state['owner']
             || ($item['directory'] ?? null) !== basename($path) || ($item['state'] ?? null) !== 'success'
             || !is_string($item['operation'] ?? null) || !preg_match('/\A[a-f0-9]{32}\z/D', $item['operation'])
             || !is_string($item['revision'] ?? null) || !preg_match('/\A[a-f0-9]{40}\z/D', $item['revision'])
             || !is_int($item['sequence'] ?? null) || $item['sequence'] < 1 || $item['sequence'] > $state['sequence']) continue;
-    } catch (RuntimeException $error) { continue; } // Preserve unknown/legacy/damaged backups.
+    } catch (RuntimeException $error) { continue; } // Unknown receipts never count as a verified success.
     requireBackup(!isset($successful[$item['sequence']]), 'дублируется номер копии');
     $successful[$item['sequence']] = $path;
 }
+// Legacy/failed/pending backup directories are eligible only after three
+// verified successful backups exist. Active and recovery references always win.
+if (count($successful) < 3) {
+    echo "Резервные копии: до трёх подтверждённых успешных копий очистка не выполняется.\n";
+    exit;
+}
 krsort($successful, SORT_NUMERIC);
-$removed = 0; $position = 0;
-foreach ($successful as $path) {
-    if (++$position <= 3 || isset($protected[$path])) continue;
+$keep = array_fill_keys(array_slice(array_values($successful), 0, 3), true);
+$removed = 0;
+foreach ($candidates as $path) {
+    if (isset($keep[$path]) || isset($protected[$path])) continue;
     checkBackupMounts($path);
     $stat = privateStat($path, $uid, true); $count = 0;
     backupTreeCheck($path, $stat['dev'], $count);
-    // Recheck the top directory immediately before removing its payload.
     requireBackup(privateStat($path, $uid, true)['ino'] === $stat['ino'], 'копия изменена во время очистки');
     removeBackupTree($path, true); $removed++;
 }
-echo "Резервные копии: удалено старых успешных — ", $removed, "; сохраняются три последних и защищённые копии.\n";
+echo "Резервные копии: удалено лишних — ", $removed, "; сохраняются три последних успешных и защищённые копии.\n";

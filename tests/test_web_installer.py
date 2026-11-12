@@ -196,6 +196,7 @@ esac
     def test_successful_install_retains_three_and_failed_upgrade_never_prunes(self):
         import json
         if not self.env['FPTN_TEST_REAL_PHP']:self.skipTest('PHP installed in Actions')
+        legacy=self.root/'etc/fptn/web-install-backup.LEGACY';legacy.mkdir();(legacy/'fptnctl').write_text('old runtime')
         for _ in range(5):
             result=self.execute();self.assertEqual(result.returncode,0,result.stdout+result.stderr)
         backups=list((self.root/'etc/fptn').glob('web-install-backup.*'))
