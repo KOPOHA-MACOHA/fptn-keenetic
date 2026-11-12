@@ -2,6 +2,7 @@
 import json
 import os
 from pathlib import Path
+import re
 import shutil
 import subprocess
 import tempfile
@@ -25,6 +26,9 @@ class ChannelMemoryTest(unittest.TestCase):
                     '-I'+str(boost), '-I'+str(spdlog), '-I'+str(ROOT/'src'),
                     '-DCHANNEL_HEADER="'+str(header)+'"', str(ROOT/'tests/benchmark_channel_memory.cpp'),
                     '-o', str(cls.root/variant)]
+            tweak = spdlog/'spdlog/tweakme.h'
+            if tweak.exists() and re.search(r'^\s*#\s*define\s+SPDLOG_FMT_EXTERNAL(?:\s|$)', tweak.read_text(), re.M):
+                args.append('-lfmt')
             built = subprocess.run(args, text=True, capture_output=True, timeout=120)
             if built.returncode: raise AssertionError(built.stderr)
 
