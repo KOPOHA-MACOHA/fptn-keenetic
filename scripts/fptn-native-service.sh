@@ -679,6 +679,32 @@ attempt_service() {
   echo "FPTN: процесс завершён, код $CLIENT_RC."
   return 0
 }
+clear_previous_boot_state() (
+  # /opt/var/run can be persistent. Only a proven previous boot may be
+  # recovered automatically; same-boot crashes still need ownership checks.
+  [ -d "$RUN" ] || return 0
+  [ ! -L "$RUN" ] || fail 'Каталог состояния является ссылкой; автоматическое восстановление запрещено.'
+  [ -f "$RUN/supervisor.pid" ] && [ ! -L "$RUN/supervisor.pid" ] || return 0
+  read -r OLD_PID OLD_STAMP OLD_BOOT < "$RUN/supervisor.pid" || return 0
+  case "$OLD_PID:$OLD_STAMP" in *[!0-9:]*|:|*:|:*) return 0 ;; esac
+  printf '%s\n' "$OLD_BOOT" | grep -Eq '^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$' || return 0
+  read -r BOOT_NOW < /proc/sys/kernel/random/boot_id
+  [ "$OLD_BOOT" != "$BOOT_NOW" ] || return 0
+  if [ -e "$RUN/client.pid" ] || [ -L "$RUN/client.pid" ]; then
+    [ -f "$RUN/client.pid" ] && [ ! -L "$RUN/client.pid" ] || fail 'Неизвестный PID клиента; состояние сохранено.'
+    read -r OLD_CLIENT OLD_CLIENT_STAMP CLIENT_BOOT < "$RUN/client.pid" || fail 'Повреждён PID клиента; состояние сохранено.'
+    case "$OLD_CLIENT:$OLD_CLIENT_STAMP" in *[!0-9:]*|:|*:|:*) fail 'Повреждён PID клиента; состояние сохранено.' ;; esac
+    [ "$CLIENT_BOOT" = "$OLD_BOOT" ] || fail 'PID клиента относится к другой загрузке; состояние сохранено.'
+  fi
+  for entry in supervisor.log client.log; do
+    [ ! -L "$RUN/$entry" ] || fail 'Журнал является ссылкой; состояние сохранено.'
+  done
+  [ ! -f "$RUN/supervisor.log" ] || tail -c 16384 "$RUN/supervisor.log" > "$CONF/service-last.log"
+  [ ! -f "$RUN/client.log" ] || tail -c 65536 "$RUN/client.log" > "$CONF/last.log"
+  # No signals: a PID may already belong to a different process after reboot.
+  rm -rf "$RUN"
+  echo 'FPTN: сохранены журналы и удалено состояние предыдущей загрузки.'
+)
 start_service() {
   for cmd in ip timeout nice nohup jq base64 stty; do command -v "$cmd" >/dev/null 2>&1 || fail "Нет команды $cmd"; done
   [ -s "$CONF/token" ] && [ -s "$CONF/server" ] || fail 'Вставьте токен и сохраните сервер в веб-панели.'
@@ -699,6 +725,7 @@ start_service() {
   if [ "${1:-}" != boot ]; then ip link show dev "$TUN" >/dev/null 2>&1 || fail "Keenetic не создал $TUN."; fi
   mkdir -p "$ROOT/var/run"
   if [ "${1:-}" = boot ] && alive "$RUN/supervisor.pid"; then return 0; fi
+  clear_previous_boot_state
   mkdir "$RUN" 2>/dev/null || fail 'Уже запущено или осталось состояние: status / recover.'
   trap 'rm -rf "$RUN"' EXIT
   (cd "$LIB"; sha256sum -c SHA256SUMS) || fail 'Повреждены установленные файлы.'

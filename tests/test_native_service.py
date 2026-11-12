@@ -57,6 +57,66 @@ class NativeServiceTest(unittest.TestCase):
                 self.assertNotIn(('FPTN_OPERATION_ID='+marker).encode(),Path('/proc/'+pid+'/environ').read_bytes())
         finally:self.cmd('stop')
 
+    def previous_boot_state(self, root):
+        run=root/'var/run/fptn-keenetic';run.mkdir(parents=True)
+        # Deliberately reuse a LIVE foreign PID. Previous-boot records must
+        # never cause a signal to this process, regardless of PID reuse.
+        stamp=Path(f'/proc/{os.getpid()}/stat').read_text().rsplit(') ',1)[1].split()[19]
+        boot='00000000-0000-0000-0000-000000000000'
+        for name in ['supervisor','client']:
+            (run/f'{name}.pid').write_text(f'{os.getpid()} {stamp} {boot}\n')
+        (run/'phase').write_text('running\n');(run/'ready').touch()
+        (run/'supervisor.log').write_text('previous supervisor\n')
+        (run/'client.log').write_text('previous client\n')
+        return run
+
+    def test_boot_recovers_previous_boot_state_without_signalling_reused_pid(self):
+        root=self.prepare_native_client();run=self.previous_boot_state(root)
+        (root/'etc/fptn/autostart').touch()
+        try:
+            result=self.cmd('_boot');self.assertEqual(result.returncode,0,result.stdout+result.stderr)
+            self.wait_for(lambda:(run/'ready').exists() and (run/'client.pid').exists() and
+                          (run/'client.pid').read_text().split()[0]!=str(os.getpid()))
+            self.assertEqual((root/'etc/fptn/service-last.log').read_text(),'previous supervisor\n')
+            self.assertEqual((root/'etc/fptn/last.log').read_text(),'previous client\n')
+            self.assertEqual(self.state()['mutations'],0)
+        finally:self.cmd('stop')
+
+    def test_manual_start_also_recovers_proven_previous_boot_state(self):
+        root=self.prepare_native_client();self.previous_boot_state(root)
+        try:
+            result=self.cmd('start');self.assertEqual(result.returncode,0,result.stdout+result.stderr)
+            self.assertIn('READY получен',result.stdout)
+        finally:self.cmd('stop')
+
+    def test_start_preserves_same_boot_stale_state_and_logs(self):
+        root=self.prepare_native_client();run=self.previous_boot_state(root)
+        boot=Path('/proc/sys/kernel/random/boot_id').read_text().strip()
+        (run/'supervisor.pid').write_text(f'999999999 1 {boot}\n')
+        (root/'etc/fptn/autostart').touch()
+        result=self.cmd('_boot');self.assertNotEqual(result.returncode,0)
+        self.assertEqual((run/'supervisor.log').read_text(),'previous supervisor\n')
+        self.assertTrue((run/'ready').exists())
+        self.assertEqual(self.state()['mutations'],0)
+
+    def test_previous_boot_recovery_refuses_mixed_or_malformed_client_records(self):
+        root=self.prepare_native_client();run=self.previous_boot_state(root)
+        boot=Path('/proc/sys/kernel/random/boot_id').read_text().strip()
+        for record in [f'999999999 1 {boot}\n','broken\n']:
+            with self.subTest(record=record):
+                (run/'client.pid').write_text(record)
+                result=self.cmd('start');self.assertNotEqual(result.returncode,0)
+                self.assertEqual((run/'client.pid').read_text(),record)
+                self.assertEqual((run/'supervisor.log').read_text(),'previous supervisor\n')
+        self.assertEqual(self.state()['mutations'],0)
+
+    def test_previous_boot_recovery_refuses_symlinked_log(self):
+        root=self.prepare_native_client();run=self.previous_boot_state(root)
+        sentinel=self.root/'sentinel';sentinel.write_text('preserve\n')
+        (run/'client.log').unlink();(run/'client.log').symlink_to(sentinel)
+        result=self.cmd('start');self.assertNotEqual(result.returncode,0)
+        self.assertEqual(sentinel.read_text(),'preserve\n');self.assertTrue(run.exists())
+
     def test_no_custom_routing_dns_or_firewall_commands(self):
         source=SCRIPT.read_text()
         for forbidden in ['iptables ', 'ip -4 rule ', 'ip -4 route add', 'normalize_cidrs', 'nslookup ', 'ip route default']:
