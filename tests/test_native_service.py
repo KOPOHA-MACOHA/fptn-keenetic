@@ -364,6 +364,24 @@ int main(int argc,char**argv){
             self.assertEqual(self.state()['mutations'],0)
         finally:self.cmd('stop')
 
+    def test_stale_status_allows_safe_stop_and_restart_without_terminal_recover(self):
+        root=self.prepare_native_client();run=root/'var/run/fptn-keenetic';run.mkdir(parents=True)
+        boot=Path('/proc/sys/kernel/random/boot_id').read_text().strip()
+        for name in ['supervisor','client']:
+            (run/f'{name}.pid').write_text(f'999999999 1 {boot}\n')
+        (run/'supervisor.log').write_text('preserve stale diagnostics\n')
+        status=json.loads(self.cmd('status-json').stdout)
+        self.assertEqual(status['state'],'stale')
+        self.assertFalse(status['canStart']);self.assertTrue(status['canStop']);self.assertTrue(status['canRestart'])
+        self.assertIn('Переподключить',status['message']);self.assertNotIn('fptnctl recover',status['message'])
+        try:
+            stopped=self.cmd('stop');self.assertEqual(stopped.returncode,0,stopped.stderr)
+            self.assertEqual((root/'etc/fptn/service-last.log').read_text(),'preserve stale diagnostics\n')
+            started=self.cmd('start');self.assertEqual(started.returncode,0,started.stdout+started.stderr)
+            self.assertIn('READY получен',started.stdout)
+            self.assertEqual(self.state()['mutations'],0)
+        finally:self.cmd('stop')
+
     def test_stop_handles_replaced_executable_without_hanging(self):
         root=self.prepare_native_client();run=root/'var/run/fptn-keenetic'
         try:

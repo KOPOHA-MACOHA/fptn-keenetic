@@ -787,12 +787,14 @@ status_json() {
     reconnecting) MESSAGE='Соединение потеряно. FPTN восстанавливает туннель.' ;;
     selecting) MESSAGE='Проверяем серверы и выбираем подключение.'; [ ! -s "$RUN/state" ] || MESSAGE=$(cat "$RUN/state") ;;
     retrying) MESSAGE='Ожидаем следующую попытку подключения.' ;;
-    stale) MESSAGE='Осталось состояние завершённой службы. Требуется fptnctl recover.' ;;
+    stale) MESSAGE='Осталось состояние завершённой службы. Нажмите «Переподключить» для восстановления или «Остановить» для очистки состояния.' ;;
     *) MESSAGE='Служба запускается.' ;;
   esac
   EFFECTIVE=null
   if [ "$CLIENT" = true ] && [ -f "$RUN/effective-connection.json" ]; then EFFECTIVE=$(cat "$RUN/effective-connection.json"); fi
   CAN_START=false
+  CAN_MANAGE=false
+  if [ "$SUPERVISOR" = true ] || [ "$STATE" = stale ]; then CAN_MANAGE=true; fi
   if [ "$STATE" = stopped ] && [ -s "$CONF/token" ] && [ -s "$CONF/server" ] && [ -f "$CONF/native-setup-complete" ]; then CAN_START=true; fi
   RETRY_AT=0; [ ! -r "$RUN/retry-at" ] || RETRY_AT=$(cat "$RUN/retry-at")
   PREFERRED=$(cat "$CONF/server" 2>/dev/null || true)
@@ -801,8 +803,8 @@ status_json() {
   if [ "$CLIENT" = true ] && [ -r "$RUN/health.json" ]; then HEALTH_STATUS=$(jq -c '{state,checkedAt,nextCheckAt,failures,threshold}' "$RUN/health.json" 2>/dev/null || echo null); fi
   [ ! -r "$RUN/last-switch.json" ] || SWITCH=$(jq -c '{from,to,reason,at}' "$RUN/last-switch.json" 2>/dev/null || echo null)
   jq -n --argjson retryAt "$RETRY_AT" --arg preferredServer "$PREFERRED" --arg selectionMode "$MODE" --argjson health "$HEALTH_STATUS" --argjson lastSwitch "$SWITCH" --arg nativeInterface "$NATIVE" --arg state "$STATE" --arg message "$MESSAGE" --arg server "$ACTIVE" \
-    --argjson effective "$EFFECTIVE" --argjson supervisor "$SUPERVISOR" --argjson client "$CLIENT" --argjson connected "$CONNECTED" --argjson canStart "$CAN_START" \
-    '{retryAt:$retryAt,preferredServer:$preferredServer,selectionMode:$selectionMode,health:$health,lastSwitch:$lastSwitch,nativeInterface:$nativeInterface,effectiveConnection:$effective,state:$state,message:$message,selectedServer:$server,supervisorAlive:$supervisor,clientAlive:$client,connected:$connected,canStart:$canStart,canStop:$supervisor,canRestart:$supervisor}'
+    --argjson effective "$EFFECTIVE" --argjson supervisor "$SUPERVISOR" --argjson client "$CLIENT" --argjson connected "$CONNECTED" --argjson canStart "$CAN_START" --argjson canManage "$CAN_MANAGE" \
+    '{retryAt:$retryAt,preferredServer:$preferredServer,selectionMode:$selectionMode,health:$health,lastSwitch:$lastSwitch,nativeInterface:$nativeInterface,effectiveConnection:$effective,state:$state,message:$message,selectedServer:$server,supervisorAlive:$supervisor,clientAlive:$client,connected:$connected,canStart:$canStart,canStop:$canManage,canRestart:$canManage}'
 }
 check_servers() (
   "$LIB/fptn-client-cli" --help | grep -q -- '--keenetic-probe-only' || fail 'Для проверки нужен клиент 0.4.0.'
