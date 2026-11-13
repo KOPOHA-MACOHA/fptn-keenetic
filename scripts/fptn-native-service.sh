@@ -887,9 +887,10 @@ show_logs() {
   fi
 }
 uninstall_runtime() (
-  # Keep credentials and all firmware configuration, including routes using the owned OpkgTun.
+  # Remove this installation, its private state and its verified native interface.
   [ -f "$LIB/.runtime-managed" ] || fail 'Удаление поддерживается после обновления до 0.13.0.'
   WEB=$ROOT/share/fptn-web
+  [ ! -L "$LIB" ] && [ ! -L "$WEB" ] || fail 'Каталоги программы или панели являются ссылками; удаление отменено.'
   FRAGMENT=$ROOT/etc/lighttpd/conf.d/95-fptn.conf
   [ -f "$WEB/.fptn-web-owned" ] || fail 'Не подтверждено владение каталогом панели.'
   [ ! -e "$FRAGMENT" ] || grep -Fq '# Managed by fptn-web-ui' "$FRAGMENT" || fail '95-fptn.conf изменён другим приложением.'
@@ -908,14 +909,43 @@ uninstall_runtime() (
   FPTN_OPERATION_ID=$(printf '%s' "$RESERVED" | jq -er .id); export FPTN_OPERATION_ID
   trap 'rm -rf "$LOCK"' EXIT
   trap 'exit 1' INT TERM HUP
+  sh "$LIB/web-auth.sh" op-purge-check >/dev/null || fail 'Нельзя безопасно удалить данные FPTN; удаление не начато.'
+  PRIVATE=$(sh "$LIB/web-auth.sh" op-private-dir | jq -er .path)
+  REMOVE_NATIVE=no
+  if [ -n "$NATIVE" ]; then
+    [ -f "$CONF/native-setup-complete" ] || fail 'Не подтверждено владение интерфейсом FPTN.'
+    INTERFACES=$(ndmc -c 'show interface') || fail 'Не удалось проверить интерфейсы Keenetic.'
+    if printf '%s\n' "$INTERFACES" | awk -v own="$NATIVE" '$1=="id:" && $2==own{found=1} END{exit !found}'; then
+      DETAILS=$(ndmc -c "show interface $NATIVE") || fail 'Не удалось прочитать интерфейс FPTN.'
+      printf '%s\n' "$DETAILS" | awk -v own="$NATIVE" '
+        $1=="id:" && $2==own{id=1}
+        $1=="type:" && $2=="OpkgTun"{type=1}
+        $1=="description:" {sub(/^[[:space:]]*description:[[:space:]]*/, ""); if($0=="FPTN")description=1}
+        $1=="address:" && $2=="10.0.0.1"{address=1}
+        $1=="mask:" && $2=="255.255.255.255"{mask=1}
+        END{exit !(id && type && description && address && mask)}' || fail 'Сохранённый OpkgTun изменён или принадлежит другому сервису; удаление отменено.'
+      REMOVE_NATIVE=yes
+    fi
+  fi
+  HOOK=$ROOT/etc/ndm/netfilter.d/190-fptn-ipv6.sh
+  if [ -e "$HOOK" ]; then grep -Fq '# Managed by fptn IPv6' "$HOOK" || fail 'IPv6 hook изменён другим приложением.'; fi
   stop_service
   ipv6_helper remove || fail 'Удаление прервано: проверьте IPv6 NAT. Файлы программы сохранены.'
+  if [ "$REMOVE_NATIVE" = yes ]; then
+    ndmc -c "no interface $NATIVE" || fail 'Не удалось удалить собственный OpkgTun. Данные FPTN сохранены.'
+    INTERFACES=$(ndmc -c 'show interface') || fail 'Не удалось подтвердить удаление OpkgTun.'
+    if printf '%s\n' "$INTERFACES" | awk -v own="$NATIVE" '$1=="id:" && $2==own{found=1} END{exit !found}'; then fail 'OpkgTun остался в Keenetic. Данные FPTN сохранены.'; fi
+  fi
+  if [ -n "$NATIVE" ]; then
+    echo 'Сохраняю удаление интерфейса и весь текущий running-config Keenetic.'
+    ndmc -c 'system configuration save' || fail 'Не удалось сохранить удаление интерфейса. Повторите uninstall; данные FPTN сохранены.'
+  fi
   HOOK=$ROOT/etc/ndm/netfilter.d/190-fptn-ipv6.sh
   if [ -e "$HOOK" ]; then
     grep -Fq '# Managed by fptn IPv6' "$HOOK" || fail 'IPv6 hook изменён другим приложением.'
     rm -f "$HOOK"
   fi
-  BACKUP=$(mktemp -d "$CONF/uninstall-backup.XXXXXX")
+  BACKUP=$PRIVATE
   if [ -f "$FRAGMENT" ]; then
     cp -p "$FRAGMENT" "$BACKUP/95-fptn.conf"
     rm "$FRAGMENT"
@@ -936,15 +966,16 @@ uninstall_runtime() (
       fail 'lighttpd не подтвердил запуск. Фрагмент панели восстановлен; файлы службы сохранены.'
     fi
   fi
-  rm -f "$CONF/autostart" "$INIT"
+  rm -f "$INIT"
   for file in index.html index.cgi app.js style.css api.cgi favicon.svg .fptn-web-owned; do rm -f "$WEB/$file"; done
   rmdir "$WEB" 2>/dev/null || true
-  for file in fptn-client-cli brotli web-auth.sh web-auth.php web-operations.php transport-plan.php web-update.sh client-capabilities.sh client-identity.sh platform.sh uplink.sh ipv6.sh web-port.sh sources.lock.json SHA256SUMS LICENSE-FPTN LICENSE-BROTLI BROTLI-SOURCE.txt .runtime-managed; do rm -f "$LIB/$file"; done
+  sh "$LIB/web-auth.sh" op-purge >/dev/null || fail 'Не удалось полностью удалить закрытые данные FPTN.'
+  for file in fptn-client-cli brotli web-auth.sh web-auth.php web-operations.php private-state.php transport-plan.php web-update.sh client-capabilities.sh client-identity.sh platform.sh uplink.sh ipv6.sh web-port.sh fptn-client-cli.previous sources.lock.json SHA256SUMS LICENSE-FPTN LICENSE-BROTLI BROTLI-SOURCE.txt .runtime-managed; do rm -f "$LIB/$file"; done
   rmdir "$LIB" 2>/dev/null || true
   rm -f "$ROOT/bin/fptnctl"
   echo 'Программа и панель FPTN удалены. Пакеты Entware и другие веб-панели сохранены.'
-  echo 'Токен, вход, настройки и резервные копии оставлены в /opt/etc/fptn. Повторная установка использует их.'
-  echo "Интерфейс $NATIVE и маршруты Keenetic оставлены: удалить или переназначить их можно в Keenetic."
+  echo 'Токен, вход, настройки, сессии, кэш и резервные копии FPTN удалены.'
+  [ -z "$NATIVE" ] || echo "Собственный $NATIVE удалён; конфигурация Keenetic сохранена."
 )
 
 set_autostart() {

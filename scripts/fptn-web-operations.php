@@ -1,5 +1,7 @@
 <?php
 // Included by the private PHP helper, never directly served by lighttpd.
+$private=__DIR__.'/private-state.php';if(!is_file($private))$private=__DIR__.'/fptn-private-state.php';
+require $private;
 $directory = $run . '/action';
 // Never hold the operation mutex while waiting for a caller to finish stdin.
 $pendingRequest=$action==='op-reserve' ? json_decode((string)file_get_contents('php://stdin',false,null,0,300001),true) : null;
@@ -59,7 +61,40 @@ if ($action === 'op-state') { reply(operationState());exit; }
 if ($action === 'op-own') {
     $owner=json_decode((string)@file_get_contents($directory.'/owner.json'),true);
     if (!is_array($owner) || !hash_equals($owner['id'], getenv('FPTN_OPERATION_ID') ?: '')) failAuth('Изменилась операция.');
+    privateMigrateOperation($directory,$owner['id']);
     writeOwner($owner['id'],trim((string)file_get_contents($directory.'/action')));reply(['ok'=>true]);exit;
+}
+if (in_array($action,['op-private-dir','op-private-clean','op-sanitize-history','op-purge-check','op-purge'],true)) {
+    $owner=json_decode((string)@file_get_contents($directory.'/owner.json'),true);
+    $id=getenv('FPTN_OPERATION_ID')?:'';
+    if(!is_array($owner)||!hash_equals($owner['id']??'',$id))failAuth('Изменилась операция.');
+    if($action==='op-private-dir'){reply(['path'=>privatePath($id)]);exit;}
+    if($action==='op-private-clean'){privateClear($id);reply(['ok'=>true]);exit;}
+    if($action==='op-sanitize-history'){privateScrubHistory();reply(['ok'=>true]);exit;}
+    $paths=[$conf,$run,$root.'/var/run/fptn-capabilities',$root.'/var/run/fptn-keenetic',privateBase()];
+    foreach($paths as $path)if(file_exists($path)||is_link($path))privateCheckRemoval($path);
+    $files=[];
+    foreach(['fptnctl.previous','fptnctl-backup.*'] as $pattern)
+        foreach(glob($root.'/bin/'.$pattern)?:[] as $file)
+            if(basename($file)==='fptnctl.previous'||preg_match('/\Afptnctl-backup\.[A-Za-z0-9]{6}\z/D',basename($file)))$files[]=$file;
+    // Log files belong to this client only; never erase other applications' logs.
+    $logs=$root==='/opt'?'/var/log/fptn':$root.'/var/log/fptn';
+    if(is_dir($logs)&&!is_link($logs))foreach(glob($logs.'/fptn-client-cli*.log')?:[] as $file)
+        if(preg_match('/\Afptn-client-cli(?:\.[0-9]+)?\.log\z/D',basename($file)))$files[]=$file;
+    $feed=$root.'/etc/opkg/fptn-keenetic.conf';
+    if(is_file($feed)&&!is_link($feed)&&strpos((string)file_get_contents($feed),'# Managed by FPTN package channel')!==false){
+        $files[]=$feed;
+        foreach(['var/opkg-lists','var/lib/opkg/lists'] as $lists){
+            foreach(['fptn_keenetic','fptn_keenetic.sig'] as $name)if(file_exists($root.'/'.$lists.'/'.$name))$files[]=$root.'/'.$lists.'/'.$name;
+        }
+    }
+    foreach($files as $file){$st=@lstat($file);if(!$st||!in_array($st['mode']&0170000,[0100000,0120000],true))throw new RuntimeException('Неожиданный файл FPTN.');}
+    if($action==='op-purge'){
+        foreach($files as $file)if(!unlink($file))throw new RuntimeException('Не удалось удалить файл FPTN.');
+        foreach($paths as $path)if(file_exists($path))privateErase($path);
+        @rmdir($logs);
+    }
+    reply(['ok'=>true]);exit;
 }
 if ($action === 'op-reserve') {
     if (is_dir($directory)) failAuth('Дождитесь операции или восстановите управление в панели.');
@@ -70,7 +105,9 @@ if ($action === 'op-reserve') {
     if (!mkdir($prepared,0700)) failAuth('Не удалось создать журнал операции.');
     $target=$directory;$directory=$prepared;
     writeOwner($id,$name);
-    file_put_contents($prepared.'/action',$name."\n");file_put_contents($prepared.'/request.json',json_encode($body));
+    file_put_contents($prepared.'/action',$name."\n");
+    if(is_string($body['token']??null))privateWrite(privatePath($id).'/request-token',$body['token']);
+    file_put_contents($prepared.'/request.json',json_encode(privateRedactRequest($body)));
     if (is_dir($target) || !rename($prepared,$target)) failAuth('Параллельно началась другая операция.');
     @unlink($run.'/result.json');reply(['id'=>$id]);exit;
 }
@@ -78,10 +115,16 @@ if ($action === 'op-recover') {
     $state=operationState();
     if (!$state['canRecover']) failAuth($state['message'] ?: 'Нет прерванной операции.');
     $old=json_decode((string)file_get_contents($directory.'/owner.json'),true);
+    privateMigrateOperation($directory,$old['id']);
     $archive=$conf.'/web-recovery/'.$old['id'];
     if (!is_dir($archive)) mkdir($archive,0700,true);
-    foreach (glob($directory.'/*') ?: [] as $file) if(is_file($file)) copy($file,$archive.'/'.basename($file));
-    $id=bin2hex(random_bytes(16));writeOwner($id,'recover');
+    $allowed=['owner.json','action','request.json','was-running','rollback-needed','old-token-present','old-server','old-connection.json','old-server-policy.json','old-fallback.json','old-interface-mtu','install-backup'];
+    foreach($allowed as $name){$file=$directory.'/'.$name;if(is_file($file)&&!is_link($file))copy($file,$archive.'/'.$name);}
+    privateScrubHistory();
+    $id=bin2hex(random_bytes(16));
+    $previous=privatePath($old['id'],false);$next=privatePath($id,false);
+    if(is_dir($previous)&&!rename($previous,$next))failAuth('Не удалось перенести временные данные.');
+    writeOwner($id,'recover');
     file_put_contents($directory.'/action',"recover\n");
     @unlink($run.'/result.json');reply(['id'=>$id,'backup'=>$archive]);exit;
 }

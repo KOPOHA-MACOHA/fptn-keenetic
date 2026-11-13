@@ -54,7 +54,8 @@ class WebOperationTest(unittest.TestCase):
         result=self.wait_worker();self.assertTrue(result['ok'],result)
         for key,value in previous.items():self.assertEqual((self.conf/key).read_text(),value)
         self.assertTrue(self.client_run.exists());self.assertEqual([a for a in (self.root/'trace').read_text().splitlines() if a!='status'],['stop','start'])
-        self.assertTrue(list((self.conf/'web-recovery').glob('*/old-token')))
+        self.assertFalse(list((self.conf/'web-recovery').glob('*/old-token')))
+        self.assertFalse(list((self.root/'tmp').glob('fptn-private-*/*')))
 
     def test_finished_or_update_action_only_releases_lock_and_preserves_running_vpn(self):
         for action in ['save','update']:
@@ -93,3 +94,34 @@ class WebOperationTest(unittest.TestCase):
         winner=next(json.loads(out)['id'] for c,(out,err) in zip(children,results) if c.returncode==0)
         owner=json.loads((self.run/'action/owner.json').read_text());self.assertEqual(owner['id'],winner)
         self.assertEqual(json.loads((self.run/'action/request.json').read_text()),{'action':'check'})
+
+    def test_submitted_token_never_enters_persistent_journal(self):
+        secret='unique-submitted-secret'
+        result=self.helper('op-reserve',{'action':'save','token':secret,'password':'not-journalled','server':'CZ'})
+        self.assertEqual(result.returncode,0,result.stdout+result.stderr)
+        self.assertEqual(json.loads((self.run/'action/request.json').read_text()),{'action':'save','server':'CZ'})
+        scratch=list((self.root/'tmp').glob('fptn-private-*/*/request-token'))
+        self.assertEqual(len(scratch),1);self.assertEqual(scratch[0].read_text(),secret)
+        self.assertEqual(scratch[0].stat().st_mode&0o777,0o600)
+
+    def test_recovery_without_volatile_old_token_stops_client_and_unlocks(self):
+        self.reserve('save');lock=self.run/'action'
+        (lock/'old-token-present').touch();(lock/'rollback-needed').touch()
+        (lock/'was-running').write_text('yes');self.client_run.mkdir();self.stale()
+        status,data=self.request(body={'action':'recover'});self.assertEqual(status,202,data)
+        result=self.wait_worker();self.assertTrue(result['ok'],result)
+        self.assertIn('токен утрачен',result['message'])
+        self.assertFalse(self.client_run.exists());self.assertFalse(lock.exists())
+
+    def test_history_scrub_removes_credentials_but_preserves_code_and_external_symlink_target(self):
+        marker=self.reserve();self.env['FPTN_OPERATION_ID']=marker
+        backup=self.conf/'web-install-backup.abc123';backup.mkdir()
+        (backup/'token').write_text('old-secret');(backup/'web-auth.json').write_text('old-password')
+        (backup/'request.json').write_text(json.dumps({'action':'save','token':'submitted-secret','server':'CZ'}))
+        (backup/'fptnctl').write_text('program')
+        outside=self.root/'outside';outside.mkdir();(outside/'token').write_text('external')
+        (backup/'outside').symlink_to(outside,target_is_directory=True)
+        result=self.helper('op-sanitize-history');self.assertEqual(result.returncode,0,result.stdout+result.stderr)
+        self.assertFalse((backup/'token').exists());self.assertFalse((backup/'web-auth.json').exists())
+        self.assertEqual(json.loads((backup/'request.json').read_text()),{'action':'save','server':'CZ'})
+        self.assertEqual((backup/'fptnctl').read_text(),'program');self.assertEqual((outside/'token').read_text(),'external')

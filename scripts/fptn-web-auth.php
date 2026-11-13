@@ -15,7 +15,11 @@ function failAuth(string $message): void {
     else reply(['error' => $message]);
     exit(1);
 }
-set_exception_handler(function ($error): void { failAuth('Не удалось проверить вход. Проверьте настройки панели.'); });
+set_exception_handler(function ($error): void {
+    global $action;
+    failAuth(strpos($action,'op-')===0 && $error instanceof RuntimeException
+        ? $error->getMessage() : 'Не удалось проверить вход. Проверьте настройки панели.');
+});
 function config(): ?array {
     global $credentials;
     if (!file_exists($credentials)) return null;

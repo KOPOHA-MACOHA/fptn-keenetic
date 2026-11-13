@@ -54,6 +54,7 @@ class WebUiTest(unittest.TestCase):
         shutil.copyfile(ROOT/'scripts/fptn-web-auth.sh',lib/'web-auth.sh')
         shutil.copyfile(ROOT/'scripts/fptn-web-auth.php',lib/'web-auth.php')
         shutil.copyfile(ROOT/'scripts/fptn-web-operations.php',lib/'web-operations.php')
+        shutil.copyfile(ROOT/'scripts/fptn-private-state.php',lib/'private-state.php')
         shutil.copyfile(ROOT/'scripts/fptn-transport-plan.php',lib/'transport-plan.php')
         (lib / 'brotli').write_text('#!/bin/sh\ncat\n')
         (lib / 'brotli').chmod(0o700)
@@ -280,7 +281,7 @@ else: sys.exit(2)
     def test_status_exposes_explicit_state_and_versions(self):
         (self.conf/'web-meta.json').write_text(json.dumps({'clientVersion':'0.4.0','revision':'abc'}))
         status,data=self.request()
-        self.assertEqual(status,200);self.assertEqual(data['uiVersion'],'0.18.9')
+        self.assertEqual(status,200);self.assertEqual(data['uiVersion'],'0.18.10')
         self.assertEqual(data['clientVersion'],'0.4.0')
         self.assertTrue(data['service']['canStart']);self.assertFalse(data['service']['canStop'])
         self.client_run.mkdir()
@@ -301,8 +302,8 @@ else: sys.exit(2)
     def test_entry_page_is_not_cached_and_assets_are_versioned(self):
         page=subprocess.run(['sh',str(ROOT/'web/index.cgi')],capture_output=True,check=True).stdout.decode()
         self.assertIn('Cache-Control: no-store',page)
-        self.assertIn('data-ui-version="0.18.9"',page)
-        self.assertIn('app.js?v=0.18.9',page)
+        self.assertIn('data-ui-version="0.18.10"',page)
+        self.assertIn('app.js?v=0.18.10',page)
 
     def test_failed_save_restores_previous_actual_firmware_mtu(self):
         old=self.settings();(self.conf/'connection.json').write_text(json.dumps(old))

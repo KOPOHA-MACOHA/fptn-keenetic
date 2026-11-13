@@ -40,9 +40,15 @@ decode_token() {
 }
 
 restore_saved_settings() {
+  if [ -f "$LOCK/old-token-present" ] && [ ! -f "$PRIVATE/old-token" ]; then
+    echo 'Предыдущий токен отсутствует во временной памяти; автоматический откат невозможен.' >> "$LOCK/output"
+    return 2
+  fi
   "$CTL" stop >> "$LOCK/output" 2>&1 || return 1
   if [ -f "$LOCK/old-interface-mtu" ]; then "$CTL" set-interface-mtu "$(cat "$LOCK/old-interface-mtu")" >> "$LOCK/output" 2>&1 || return 1; fi
-  for key in token server connection.json server-policy.json fallback.json; do
+  if [ -f "$PRIVATE/old-token" ]; then cp -p "$PRIVATE/old-token" "$CONF/token" || return 1
+  else rm -f "$CONF/token" || return 1; fi
+  for key in server connection.json server-policy.json fallback.json; do
     if [ -f "$LOCK/old-$key" ]; then cp -p "$LOCK/old-$key" "$CONF/$key" || return 1
     else rm -f "$CONF/$key" || return 1; fi
   done
@@ -53,6 +59,7 @@ restore_saved_settings() {
 }
 worker() {
   FPTN_OWNER_PID=$$ sh "$LIB/web-auth.sh" op-own >/dev/null
+  PRIVATE=$(sh "$LIB/web-auth.sh" op-private-dir | jq -er .path)
   ACTION=$(cat "$LOCK/action")
   rollback=no
   was_running=no
@@ -73,13 +80,10 @@ worker() {
     [ ! -f "$LOCK/worker.log" ] || tail -c 8192 "$LOCK/worker.log" >> "$LOCK/output"
     tail -c 16384 "$LOCK/output" > "$RUN/action.log"
     rm -f "$RUN/failed-request.json"
-    if [ -f "$LOCK/rollback-needed" ]; then
-      mkdir -p "$CONF/web-recovery"
-      for key in token server connection.json server-policy.json fallback.json; do
-        [ ! -f "$LOCK/old-$key" ] || cp -p "$LOCK/old-$key" "$CONF/web-recovery/$key"
-      done
+    if [ ! -f "$LOCK/rollback-needed" ]; then
+      sh "$LIB/web-auth.sh" op-private-clean >/dev/null || true
+      rm -rf "$LOCK"
     fi
-    if [ ! -f "$LOCK/rollback-needed" ]; then rm -rf "$LOCK"; fi
   }
   trap finish_worker EXIT
   trap 'exit 1' INT TERM HUP
@@ -87,8 +91,15 @@ worker() {
   case "$ACTION" in
     recover)
       if [ -d "$CONF/web-port-change" ]; then sh "$LIB/web-port.sh" rollback >> "$LOCK/output" 2>&1 || exit 1; fi
-      if [ -f "$LOCK/rollback-needed" ]; then restore_saved_settings || exit 1; fi
       SUCCESS_MESSAGE='Управление восстановлено. Состояние службы проверено заново.'
+      if [ -f "$LOCK/rollback-needed" ]; then
+        RESTORE_RC=0;restore_saved_settings || RESTORE_RC=$?
+        if [ "$RESTORE_RC" = 2 ]; then
+          "$CTL" stop >> "$LOCK/output" 2>&1 || exit 1
+          rm -f "$LOCK/rollback-needed"
+          SUCCESS_MESSAGE='Управление восстановлено. Прежний токен утрачен после перезагрузки; проверьте и заново сохраните настройки перед запуском.'
+        elif [ "$RESTORE_RC" != 0 ]; then exit 1; fi
+      fi
       [ ! -f "$LOCK/install-backup" ] || SUCCESS_MESSAGE='Управление восстановлено. Обновление было прервано — повторите установку.' ;; 
     start) "$CTL" start >> "$LOCK/output" 2>&1; SUCCESS_MESSAGE='Служба запущена.' ;;
     stop) "$CTL" stop >> "$LOCK/output" 2>&1; SUCCESS_MESSAGE='Служба остановлена.' ;;
@@ -102,7 +113,7 @@ worker() {
     change-port) sh "$LIB/web-port.sh" apply "$(jq -r .port "$LOCK/request.json")" >> "$LOCK/output" 2>&1; SUCCESS_MESSAGE='Новый порт подтверждён. VPN продолжает работать.' ;;
     save)
       # All validation precedes stopping or writing the current configuration.
-      TOKEN=$(jq -r '.token // ""' "$LOCK/request.json")
+      TOKEN=$(cat "$PRIVATE/request-token" 2>/dev/null || true)
       [ -n "$TOKEN" ] || TOKEN=$(cat "$CONF/token" 2>/dev/null || true)
       TOKEN_JSON=$(printf '%s' "$TOKEN" | decode_token) || exit 1
       SERVER=$(jq -r '.server' "$LOCK/request.json")
@@ -125,7 +136,11 @@ worker() {
       if jq -e 'has("fallback")' "$LOCK/request.json" >/dev/null; then FALLBACK=$(jq .fallback "$LOCK/request.json")
       else FALLBACK=$("$CTL" get-fallback); fi
       jq --argjson fallback "$FALLBACK" --argjson policy "$POLICY" '{fallback:$fallback,policy:$policy}' "$LOCK/request.json" | "$CTL" validate-fallback > "$LOCK/new-fallback.json" || exit 1
-      for key in token server connection.json server-policy.json fallback.json; do
+      if [ -f "$CONF/token" ]; then
+        cp -p "$CONF/token" "$PRIVATE/old-token"
+        : > "$LOCK/old-token-present"
+      fi
+      for key in server connection.json server-policy.json fallback.json; do
         [ ! -f "$CONF/$key" ] || cp -p "$CONF/$key" "$LOCK/old-$key"
       done
       rm -f "$RUN/server-checks.json"
@@ -190,7 +205,7 @@ done
 [ -n "$ACCEPTED_ORIGIN" ] || error '403 Forbidden' 'Неверный адрес панели.'
 if [ "${QUERY_STRING:-}" = auth-info ] && [ "${REQUEST_METHOD:-}" = GET ]; then
   INFO=$(sh "$LIB/web-auth.sh" info) || error '503 Service Unavailable' 'Не удалось проверить настройки входа.'
-  respond '200 OK' "$(printf '%s' "$INFO" | jq '. + {uiVersion:"0.18.9"}')"
+  respond '200 OK' "$(printf '%s' "$INFO" | jq '. + {uiVersion:"0.18.10"}')"
 fi
 case "${QUERY_STRING:-}:${REQUEST_METHOD:-}" in login:POST|setup:POST)
   [ "${CONTENT_TYPE:-}" = application/json ] || error '415 Unsupported Media Type' 'Ожидается JSON.'
@@ -261,7 +276,7 @@ case "${REQUEST_METHOD:-}" in
         RESULT='null'; [ ! -r "$RUN/result.json" ] || RESULT=$(cat "$RUN/result.json")
         respond '200 OK' "$(jq -n --arg rss "${RSS:-0}" --arg operation "$OPERATION" \
           --arg panelOrigin "$ORIGIN" --argjson portChange "$PORT_CHANGE" --argjson interfaceNeedsSave "$INTERFACE_NEEDS_SAVE" --argjson configured "$CONFIGURED" --argjson interfaceReady "$INTERFACE_READY" --argjson identity "$IDENTITY" --argjson operationState "$OP_STATE" --argjson autostart "$AUTOSTART" --argjson service "$SERVICE" --argjson report "$REPORT" --argjson meta "$META" --argjson busy "$BUSY" --argjson result "$RESULT" \
-          '{panelOrigin:$panelOrigin,portChange:$portChange,interfaceNeedsSave:$interfaceNeedsSave,configured:$configured,interfaceReady:$interfaceReady,operationState:$operationState,autostart:$autostart,status:([$service.message,("Сервер: "+($service.selectedServer//"")),("Интерфейс: "+($service.nativeInterface//"")),(if $autostart then "Автозапуск включён." else "Автозапуск выключен." end)]|join("\n")),service:$service,report:$report,uiVersion:"0.18.9",clientVersion:($identity.clientVersion // $meta.clientVersion // "неизвестна"),clientIdentityVerified:($identity.clientIdentityVerified//false),clientBuildRevision:$identity.clientBuildRevision,clientSha256:$identity.clientSha256,upstreamVersion:$identity.upstreamVersion,upstreamRevision:$identity.upstreamRevision,revision:($meta.revision // ""),operation:$operation,rssKiB:($rss|tonumber),busy:$busy,result:$result}')"
+          '{panelOrigin:$panelOrigin,portChange:$portChange,interfaceNeedsSave:$interfaceNeedsSave,configured:$configured,interfaceReady:$interfaceReady,operationState:$operationState,autostart:$autostart,status:([$service.message,("Сервер: "+($service.selectedServer//"")),("Интерфейс: "+($service.nativeInterface//"")),(if $autostart then "Автозапуск включён." else "Автозапуск выключен." end)]|join("\n")),service:$service,report:$report,uiVersion:"0.18.10",clientVersion:($identity.clientVersion // $meta.clientVersion // "неизвестна"),clientIdentityVerified:($identity.clientIdentityVerified//false),clientBuildRevision:$identity.clientBuildRevision,clientSha256:$identity.clientSha256,upstreamVersion:$identity.upstreamVersion,upstreamRevision:$identity.upstreamRevision,revision:($meta.revision // ""),operation:$operation,rssKiB:($rss|tonumber),busy:$busy,result:$result}')"
         ;;
       updates)
         UPDATE=$(sh "$LIB/web-update.sh" status) || error '500 Internal Server Error' 'Не удалось прочитать обновление.'
@@ -288,7 +303,7 @@ case "${REQUEST_METHOD:-}" in
         IDENTITY=$(sh "$LIB/client-identity.sh" inspect 2>/dev/null) || IDENTITY='{}'
         # Explicit allowlist: no logs, server names/addresses, credentials or full config.
         respond '200 OK' "$(jq -n --argjson service "$SERVICE" --argjson identity "$IDENTITY" \
-          '{schema:1,uiVersion:"0.18.9",clientVersion:$identity.clientVersion,upstreamVersion:$identity.upstreamVersion,clientBuildRevision:$identity.clientBuildRevision,state:$service.state,connected:$service.connected,nativeInterface:$service.nativeInterface,health:$service.health}')" ;;
+          '{schema:1,uiVersion:"0.18.10",clientVersion:$identity.clientVersion,upstreamVersion:$identity.upstreamVersion,clientBuildRevision:$identity.clientBuildRevision,state:$service.state,connected:$service.connected,nativeInterface:$service.nativeInterface,health:$service.health}')" ;;
       logs)
         { "$CTL" logs 2>&1 || true; [ ! -f "$RUN/action.log" ] || tail -c 8192 "$RUN/action.log"; } |
           tail -c 24576 > "$RUN/log-view.tmp.$$"

@@ -18,7 +18,7 @@ elif command=='date':
  clock=root/'clock';now=int(clock.read_text()) if clock.exists() else 1000
  clock.write_text(str(now+1));print(now)
 elif command=='php-cgi':
- if args and args[-1].endswith('fptn-backup-retention.php'):
+ if (args and args[-1].endswith('fptn-backup-retention.php')) or os.environ.get('FPTN_AUTH_ACTION')=='op-sanitize-history':
   real=os.environ.get('FPTN_TEST_REAL_PHP')
   if not real:sys.exit(1)
   sys.exit(subprocess.run([real,*args]).returncode)
@@ -61,7 +61,7 @@ elif command=='curl':
   if 'auth-info' in url:
    with (root.parent/'trace').open('a') as f:f.write('http-auth-info\n')
   if '-K' in args:sys.stdin.read()
-  info={'uiVersion':'old' if (root/'wrong-api').exists() else '0.18.9','service':{'state':'stopped'},'busy':False,'status':'stopped','configured':True,'rootAvailable':True}
+  info={'uiVersion':'old' if (root/'wrong-api').exists() else '0.18.10','service':{'state':'stopped'},'busy':False,'status':'stopped','configured':True,'rootAvailable':True}
   text=json.dumps(info)
   if out:out.write_text(text)
   else:print(text)
@@ -118,7 +118,7 @@ esac
         (lib/'brotli').write_text('dummy');(lib/'brotli').chmod(0o700)
         self.old_sums=''.join(hashlib.sha256((lib/p).read_bytes()).hexdigest()+'  '+p+'\n' for p in ['fptn-client-cli','brotli'])
         (lib/'SHA256SUMS').write_text(self.old_sums)
-        paths=['web/favicon.svg','client-release.json','web/index.html','web/index.cgi','web/style.css','web/app.js','web/api.cgi','scripts/fptn-native-service.sh','scripts/fptn-web-auth.sh','scripts/fptn-web-auth.php','scripts/fptn-web-operations.php','scripts/fptn-backup-retention.php','scripts/fptn-transport-plan.php','scripts/fptn-web-update.sh','scripts/fptn-client-capabilities.sh','scripts/fptn-client-identity.sh','scripts/fptn-platform.sh','scripts/fptn-uplink.sh','scripts/fptn-ipv6.sh','scripts/fptn-web-port.sh','runtime-assets.json','platform-releases.json']
+        paths=['web/favicon.svg','client-release.json','web/index.html','web/index.cgi','web/style.css','web/app.js','web/api.cgi','scripts/fptn-native-service.sh','scripts/fptn-web-auth.sh','scripts/fptn-web-auth.php','scripts/fptn-web-operations.php','scripts/fptn-private-state.php','scripts/fptn-backup-retention.php','scripts/fptn-transport-plan.php','scripts/fptn-web-update.sh','scripts/fptn-client-capabilities.sh','scripts/fptn-client-identity.sh','scripts/fptn-platform.sh','scripts/fptn-uplink.sh','scripts/fptn-ipv6.sh','scripts/fptn-web-port.sh','runtime-assets.json','platform-releases.json']
         for name in paths:
             target=self.payload/name;target.parent.mkdir(parents=True,exist_ok=True)
             target.write_text(controller('staged') if name=='scripts/fptn-native-service.sh' else (REPO/name).read_text())
@@ -449,3 +449,13 @@ sys.exit(result.returncode)
         result=self.execute();self.assertNotEqual(result.returncode,0,result.stdout+result.stderr)
         self.assert_original_files();self.assertIn('old-start',self.trace.read_text())
         self.assertTrue((self.root/'var/run/fptn-keenetic').exists())
+
+    def test_upgrade_scrubs_legacy_archived_secrets_without_changing_active_credentials(self):
+        if not self.env['FPTN_TEST_REAL_PHP']:self.skipTest('PHP required in CI')
+        old=self.root/'etc/fptn/web-install-backup.abc123';old.mkdir()
+        for key in ['token','old-token','web-auth.json']:(old/key).write_text('legacy-secret')
+        (old/'fptnctl').write_text('retained program')
+        result=self.execute();self.assertEqual(result.returncode,0,result.stdout+result.stderr)
+        for key in ['token','old-token','web-auth.json']:self.assertFalse((old/key).exists())
+        self.assertEqual((old/'fptnctl').read_text(),'retained program')
+        self.assertEqual((self.root/'etc/fptn/token').read_text(),'dummy\n')
