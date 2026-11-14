@@ -1,5 +1,5 @@
 """Bootstrap installs only missing dependencies and verifies the runtime installer."""
-import hashlib,json,os,re,shutil,subprocess,tempfile,unittest
+import hashlib,importlib.util,json,os,re,shutil,subprocess,tempfile,unittest
 from pathlib import Path
 ROOT=Path(__file__).resolve().parents[1]
 MOCK='''#!/usr/bin/env python3
@@ -13,8 +13,14 @@ elif name=='opkg':
  if args and args[0]=='install' and 'lighttpd' in args:
   p=root/'etc/lighttpd/lighttpd.conf';p.parent.mkdir(parents=True,exist_ok=True);p.write_text('default package config')
   p=root/'bin/lighttpd';p.write_text('#!/bin/sh\\nexit 0\\n');p.chmod(0o700)
- if args and args[0]=='install' and 'coreutils-timeout' in args and not (root/'omit-timeout').exists():
-  p=root/'bin/timeout';p.write_text('#!/bin/sh\\nexit 0\\n');p.chmod(0o700)
+ if args and args[0]=='install':
+  providers=json.loads((root/'providers.json').read_text());commands=json.loads((root/'real-commands.json').read_text())
+  for command,package in providers.items():
+   if package in args and not (command=='timeout' and (root/'omit-timeout').exists()):
+    p=root/'bin'/command
+    if p.exists():continue
+    if commands[command]:p.symlink_to(commands[command])
+    else:p.write_text('#!/bin/sh\\nexit 0\\n');p.chmod(0o700)
 elif name=='curl':
  out=pathlib.Path(args[args.index('-o')+1]);url=next(a for a in args if a.startswith('http'))
  out.write_bytes((root/('channel.json' if url.endswith('web/update.json') else 'remote-installer')).read_bytes())
@@ -25,9 +31,12 @@ class BootstrapTest(unittest.TestCase):
         self.tmp=tempfile.TemporaryDirectory();self.addCleanup(self.tmp.cleanup);self.root=Path(self.tmp.name)/'opt'
         for directory in ['bin','sbin','etc/lighttpd','lib/lighttpd']:(self.root/directory).mkdir(parents=True,exist_ok=True)
         self.env={**os.environ,'BOOT_ROOT':str(self.root)}
-        for name in ['python3','awk','mkdir','mktemp','readlink','dirname','sha256sum','jq','sh','rm','cat']:(self.root/'bin'/name).symlink_to(shutil.which(name))
-        for name in ['id','opkg','curl','ip','lighttpd','ndmc','pidof','netstat','timeout','uname']:
+        for name in ['python3', 'sh', 'awk', 'cat', 'chmod', 'cp', 'date', 'dirname', 'grep', 'head', 'id', 'mkdir', 'mv', 'pidof', 'rm', 'rmdir', 'sleep', 'tail', 'touch', 'tr', 'uname', 'wc', 'curl', 'jq', 'lighttpd', 'timeout', 'nice', 'nohup', 'base64', 'stty', 'stat', 'readlink', 'mktemp', 'sha256sum', 'netstat', 'tar', 'gzip']:
+            if name not in ['id','uname','pidof','netstat','lighttpd','curl']:(self.root/'bin'/name).symlink_to(shutil.which(name))
+        for name in ['id','opkg','curl','ip','lighttpd','ndmc','pidof','netstat','uname']:
             p=self.root/'bin'/name;p.write_text(MOCK);p.chmod(0o700)
+        (self.root/'providers.json').write_text(json.dumps({'curl': 'curl', 'jq': 'jq', 'lighttpd': 'lighttpd', 'timeout': 'coreutils-timeout', 'nice': 'coreutils-nice', 'nohup': 'coreutils-nohup', 'base64': 'coreutils-base64', 'stty': 'coreutils-stty', 'stat': 'coreutils-stat', 'readlink': 'coreutils-readlink', 'mktemp': 'coreutils-mktemp', 'sha256sum': 'coreutils-sha256sum', 'netstat': 'net-tools-netstat', 'tar': 'tar', 'gzip': 'gzip'}))
+        (self.root/'real-commands.json').write_text(json.dumps({name:shutil.which(name) for name in ['curl', 'jq', 'lighttpd', 'timeout', 'nice', 'nohup', 'base64', 'stty', 'stat', 'readlink', 'mktemp', 'sha256sum', 'netstat', 'tar', 'gzip']}))
         (self.root/'sbin/ip').write_text('#!/bin/sh\n');(self.root/'sbin/ip').chmod(0o700)
         for module in ['cgi','setenv']:(self.root/'lib/lighttpd'/('mod_'+module+'.so')).touch()
         (self.root/'etc/entware_release').write_text('arch=mipsel\ncpu_type=mips32r2\nfloat=soft\n')
@@ -92,3 +101,49 @@ class BootstrapTest(unittest.TestCase):
         result=self.execute();self.assertNotEqual(result.returncode,0)
         self.assertIn('Не найдена команда timeout',result.stderr)
         self.assertFalse((self.root/'invoked').exists())
+
+    def test_each_runtime_utility_is_installed_when_absent_from_firmware(self):
+        providers=json.loads((self.root/'providers.json').read_text())
+        # Install PHP once so each following request isolates one missing utility.
+        p=self.root/'bin/php-cgi';p.write_text(MOCK);p.chmod(0o700)
+        for command in ['nice','nohup','base64','stty','stat','readlink','mktemp','sha256sum','netstat','tar','gzip']:
+            with self.subTest(command=command):
+                (self.root/'bin'/command).unlink();(self.root/'opkg.log').unlink(missing_ok=True)
+                result=self.execute();self.assertEqual(result.returncode,0,result.stdout+result.stderr)
+                self.assertIn('install '+providers[command]+'\n',(self.root/'opkg.log').read_text())
+                self.assertTrue((self.root/'bin'/command).exists())
+
+    def test_missing_firmware_baseline_fails_before_packages_or_file_changes(self):
+        (self.root/'bin/awk').unlink()
+        result=self.execute();self.assertNotEqual(result.returncode,0)
+        self.assertIn('Нет базовой команды KeeneticOS: awk',result.stderr)
+        self.assertFalse((self.root/'opkg.log').exists());self.assertFalse((self.root/'invoked').exists())
+
+    def test_bootstrap_and_ipk_dependency_maps_cannot_drift(self):
+        spec=importlib.util.spec_from_file_location('ipk_deps',ROOT/'scripts/package-ipk.py')
+        module=importlib.util.module_from_spec(spec);spec.loader.exec_module(module)
+        source=(ROOT/'install.sh').read_text()
+        pairs=re.search(r'for pair in ([^;]+); do',source).group(1).split()
+        self.assertEqual(dict(pair.split(':') for pair in pairs),module.COMMAND_PACKAGES)
+        baseline=re.search(r'for cmd in ([^;]+); do',source).group(1).split()
+        self.assertEqual(baseline,module.BASE_COMMANDS)
+        self.assertNotIn('ip6tables',module.COMMAND_PACKAGES)
+
+    def test_runtime_preflight_commands_all_have_a_provider_or_explicit_platform_requirement(self):
+        spec=importlib.util.spec_from_file_location('ipk_runtime_deps',ROOT/'scripts/package-ipk.py')
+        module=importlib.util.module_from_spec(spec);spec.loader.exec_module(module)
+        covered=set(module.COMMAND_PACKAGES)|set(module.BASE_COMMANDS)|{'ip','ndmc','opkg'}
+        for name in ['fptn-native-service.sh','install-web-ui.sh']:
+            source=(ROOT/'scripts'/name).read_text()
+            for commands in re.findall(r'for cmd in ([^;]+); do',source):
+                self.assertLessEqual(set(commands.split()),covered,name)
+
+    def test_short_loader_checks_prerequisites_before_creating_its_stage(self):
+        env={**self.env,'PATH':str(self.root/'bin'),'TMPDIR':str(self.root)}
+        result=subprocess.run(['sh',str(ROOT/'get.sh')],env=env,text=True,capture_output=True,timeout=10)
+        self.assertEqual(result.returncode,0,result.stdout+result.stderr)
+        self.assertTrue((self.root/'invoked').exists());self.assertFalse(list(self.root.glob('fptn-setup.*')))
+        (self.root/'invoked').unlink();(self.root/'bin/mktemp').unlink()
+        result=subprocess.run(['sh',str(ROOT/'get.sh')],env=env,text=True,capture_output=True,timeout=10)
+        self.assertNotEqual(result.returncode,0);self.assertIn('mktemp',result.stderr)
+        self.assertFalse((self.root/'invoked').exists());self.assertFalse(list(self.root.glob('fptn-setup.*')))

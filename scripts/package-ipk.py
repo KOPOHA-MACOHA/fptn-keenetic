@@ -13,6 +13,9 @@ PLATFORMS={'mipsel-mips32r2-softfloat':('mipsel-3.4','mipselsf-k3.4'),
            'aarch64':('aarch64-3.10','aarch64-k3.10'),
            'armv7-softfloat':('armv7-3.2','armv7sf-k3.2')}
 PACKAGE='fptn-keenetic'
+COMMAND_PACKAGES={'curl': 'curl', 'jq': 'jq', 'lighttpd': 'lighttpd', 'timeout': 'coreutils-timeout', 'nice': 'coreutils-nice', 'nohup': 'coreutils-nohup', 'base64': 'coreutils-base64', 'stty': 'coreutils-stty', 'stat': 'coreutils-stat', 'readlink': 'coreutils-readlink', 'mktemp': 'coreutils-mktemp', 'sha256sum': 'coreutils-sha256sum', 'netstat': 'net-tools-netstat', 'tar': 'tar', 'gzip': 'gzip'}
+BASE_COMMANDS=['sh', 'awk', 'cat', 'chmod', 'cp', 'date', 'dirname', 'grep', 'head', 'id', 'mkdir', 'mv', 'pidof', 'rm', 'rmdir', 'sleep', 'tail', 'touch', 'tr', 'uname', 'wc']
+PACKAGE_DEPENDENCIES=[*COMMAND_PACKAGES.values(),'ip-full','lighttpd-mod-cgi','lighttpd-mod-setenv','php8-cgi']
 
 
 def sha(data): return hashlib.sha256(data).hexdigest()
@@ -73,6 +76,7 @@ fi
 command -v ndmc >/dev/null 2>&1 || exit 1
 [ -c /dev/net/tun ] || exit 1
 '''
+        body='for cmd in '+ ' '.join(BASE_COMMANDS) +'; do command -v "$cmd" >/dev/null 2>&1 || { echo "FPTN: Нет базовой команды KeeneticOS: $cmd." >&2; exit 1; }; done\n'+body
     elif action=='postinst':body='exec "$ROOT/bin/fptn-package" deploy\n'
     elif action=='prerm':body='case "${1:-remove}" in remove|deconfigure) exec "$ROOT/bin/fptn-package" remove ;; upgrade) exit 0 ;; *) exit 1 ;; esac\n'
     else:body='case "${1:-}" in remove) rm -f "$ROOT/etc/fptn/opkg-managed.json" ;; esac\n'
@@ -93,7 +97,7 @@ def build(root,runtime,out,platform,revision,serial):
           'opt/share/fptn-package/platform.sh':((root/'scripts/fptn-platform.sh').read_bytes(),0o700)}
     control=(f'Package: {PACKAGE}\nVersion: {version}\nArchitecture: {arch}\n'
              'Maintainer: FPTN Keenetic contributors\nSection: net\nPriority: optional\nLicense: See included upstream license files\n'
-             'Depends: curl, jq, coreutils-timeout, ip-full, lighttpd, lighttpd-mod-cgi, lighttpd-mod-setenv, php8-cgi\n'
+             f'Depends: {", ".join(PACKAGE_DEPENDENCIES)}\n'
              f'Installed-Size: {sum(len(d) for d,_ in data.values())}\n'
              'Description: FPTN client and web panel for Keenetic Entware\n'
              ' Transactional runtime deployment; settings and shared services are preserved.\n')

@@ -6,6 +6,8 @@ export LC_ALL=C LANG=C
 PATH=/opt/sbin:/opt/bin:/opt/usr/bin:/usr/sbin:/usr/bin:/sbin:/bin
 export PATH
 fail() { echo "FPTN: $*" >&2; exit 1; }
+# POSIX/BusyBox baseline supplied by KeeneticOS; check it before any installation.
+for cmd in sh awk cat chmod cp date dirname grep head id mkdir mv pidof rm rmdir sleep tail touch tr uname wc; do command -v "$cmd" >/dev/null 2>&1 || fail "Нет базовой команды KeeneticOS: $cmd."; done
 [ "$(id -u)" = 0 ] || fail 'Запустите от root Entware.'
 MODE=${1:-install}
 case "$MODE" in install|opkg) ;; *) fail 'Использование: sh install.sh [install|opkg] [LAN_IP] [PORT]' ;; esac
@@ -37,7 +39,7 @@ if [ ! -f /opt/etc/lighttpd/lighttpd.conf ] && ! command -v lighttpd >/dev/null 
   NEW_HTTP=yes
 fi
 PACKAGES=
-for pair in curl:curl jq:jq lighttpd:lighttpd timeout:coreutils-timeout; do
+for pair in curl:curl jq:jq lighttpd:lighttpd timeout:coreutils-timeout nice:coreutils-nice nohup:coreutils-nohup base64:coreutils-base64 stty:coreutils-stty stat:coreutils-stat readlink:coreutils-readlink mktemp:coreutils-mktemp sha256sum:coreutils-sha256sum netstat:net-tools-netstat tar:tar gzip:gzip; do
   command -v "${pair%:*}" >/dev/null 2>&1 || PACKAGES="$PACKAGES ${pair#*:}"
 done
 [ -x /opt/sbin/ip ] || [ -x /opt/libexec/ip-full ] || PACKAGES="$PACKAGES ip-full"
@@ -70,7 +72,7 @@ if [ "$NEW_HTTP" = yes ]; then
     fail 'Не удалось подготовить новый lighttpd. Его основной конфиг не менялся.'
   fi
 fi
-for cmd in curl jq sha256sum mktemp timeout; do command -v "$cmd" >/dev/null 2>&1 || fail "Не найдена команда $cmd."; done
+for cmd in curl jq lighttpd timeout nice nohup base64 stty stat readlink mktemp sha256sum netstat tar gzip; do command -v "$cmd" >/dev/null 2>&1 || fail "Не найдена команда $cmd."; done
 if [ "$MODE" = opkg ]; then
   case "$(value arch)" in
     mipsel) FEED=mipselsf-k3.4 ;; aarch64) FEED=aarch64-k3.10 ;; arm) FEED=armv7sf-k3.2 ;; *) fail 'Неизвестная платформа.' ;;
