@@ -93,7 +93,7 @@ def build(root,runtime,out,platform,revision,serial):
           'opt/share/fptn-package/platform.sh':((root/'scripts/fptn-platform.sh').read_bytes(),0o700)}
     control=(f'Package: {PACKAGE}\nVersion: {version}\nArchitecture: {arch}\n'
              'Maintainer: FPTN Keenetic contributors\nSection: net\nPriority: optional\nLicense: See included upstream license files\n'
-             'Depends: curl, jq, ip-full, lighttpd, lighttpd-mod-cgi, lighttpd-mod-setenv, php8-cgi\n'
+             'Depends: curl, jq, coreutils-timeout, ip-full, lighttpd, lighttpd-mod-cgi, lighttpd-mod-setenv, php8-cgi\n'
              f'Installed-Size: {sum(len(d) for d,_ in data.values())}\n'
              'Description: FPTN client and web panel for Keenetic Entware\n'
              ' Transactional runtime deployment; settings and shared services are preserved.\n')

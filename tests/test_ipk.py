@@ -58,7 +58,10 @@ printf '{"revision":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"}' > "$FPTN_PREFIX
   with self.outer() as outer:
    self.assertEqual(outer.getnames(),['debian-binary','control.tar.gz','data.tar.gz'])
    control=tarfile.open(fileobj=io.BytesIO(outer.extractfile('control.tar.gz').read()),mode='r:gz')
-   self.assertIn('Architecture: mipsel-3.4',control.extractfile('control').read().decode())
+   metadata=control.extractfile('control').read().decode()
+   self.assertIn('Architecture: mipsel-3.4',metadata)
+   dependencies=next(line for line in metadata.splitlines() if line.startswith('Depends: '))
+   self.assertIn('coreutils-timeout',dependencies.split(': ',1)[1].split(', '))
   self.assertEqual(gzip.decompress((self.out/'Packages.gz').read_bytes()).decode(),(self.out/'Packages').read_text())
   again=ipk.build(self.root,self.runtime,self.base/'again',self.platform,self.revision,1)
   self.assertEqual(again.read_bytes(),self.package.read_bytes())

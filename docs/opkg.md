@@ -48,7 +48,7 @@ fptn-package configure 192.168.10.1 1115
 
 ```sh
 opkg update
-opkg install curl jq ip-full lighttpd lighttpd-mod-cgi lighttpd-mod-setenv php8-cgi
+opkg install curl jq coreutils-timeout ip-full lighttpd lighttpd-mod-cgi lighttpd-mod-setenv php8-cgi
 ```
 
 Затем установите скачанный файл командой `opkg install /путь/к/файлу.ipk`.

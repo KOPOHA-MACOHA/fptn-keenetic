@@ -7,11 +7,14 @@ import json,os,pathlib,sys
 root=pathlib.Path(os.environ['BOOT_ROOT']);name=pathlib.Path(sys.argv[0]).name;args=sys.argv[1:]
 if name=='id':print(0)
 elif name=='pidof':sys.exit(1)
+elif name=='uname':print('armv7l')
 elif name=='opkg':
  with (root/'opkg.log').open('a') as f:f.write(' '.join(args)+'\\n')
  if args and args[0]=='install' and 'lighttpd' in args:
   p=root/'etc/lighttpd/lighttpd.conf';p.parent.mkdir(parents=True,exist_ok=True);p.write_text('default package config')
   p=root/'bin/lighttpd';p.write_text('#!/bin/sh\\nexit 0\\n');p.chmod(0o700)
+ if args and args[0]=='install' and 'coreutils-timeout' in args and not (root/'omit-timeout').exists():
+  p=root/'bin/timeout';p.write_text('#!/bin/sh\\nexit 0\\n');p.chmod(0o700)
 elif name=='curl':
  out=pathlib.Path(args[args.index('-o')+1]);url=next(a for a in args if a.startswith('http'))
  out.write_bytes((root/('channel.json' if url.endswith('web/update.json') else 'remote-installer')).read_bytes())
@@ -23,7 +26,7 @@ class BootstrapTest(unittest.TestCase):
         for directory in ['bin','sbin','etc/lighttpd','lib/lighttpd']:(self.root/directory).mkdir(parents=True,exist_ok=True)
         self.env={**os.environ,'BOOT_ROOT':str(self.root)}
         for name in ['python3','awk','mkdir','mktemp','readlink','dirname','sha256sum','jq','sh','rm','cat']:(self.root/'bin'/name).symlink_to(shutil.which(name))
-        for name in ['id','opkg','curl','ip','lighttpd','ndmc','pidof','netstat']:
+        for name in ['id','opkg','curl','ip','lighttpd','ndmc','pidof','netstat','timeout','uname']:
             p=self.root/'bin'/name;p.write_text(MOCK);p.chmod(0o700)
         (self.root/'sbin/ip').write_text('#!/bin/sh\n');(self.root/'sbin/ip').chmod(0o700)
         for module in ['cgi','setenv']:(self.root/'lib/lighttpd'/('mod_'+module+'.so')).touch()
@@ -75,3 +78,17 @@ class BootstrapTest(unittest.TestCase):
         self.assertIn('server.bind := "127.0.0.1"',base.read_text());self.assertIn('server.port := 1110',base.read_text())
         self.assertEqual((self.root/'etc/lighttpd/lighttpd.conf').read_text(),'default package config')
         self.assertIn('lighttpd',(self.root/'opkg.log').read_text())
+
+    def test_arm_without_timeout_installs_it_before_verified_runtime(self):
+        (self.root/'etc/entware_release').write_text('arch=arm\ncpu_type=armv7\nfloat=soft\n')
+        (self.root/'bin/timeout').unlink()
+        p=self.root/'bin/php-cgi';p.write_text(MOCK);p.chmod(0o700)
+        result=self.execute();self.assertEqual(result.returncode,0,result.stdout+result.stderr)
+        self.assertIn('install coreutils-timeout\n',(self.root/'opkg.log').read_text())
+        self.assertTrue((self.root/'bin/timeout').is_file());self.assertTrue((self.root/'invoked').exists())
+
+    def test_unavailable_timeout_after_package_install_stops_before_runtime(self):
+        (self.root/'bin/timeout').unlink();(self.root/'omit-timeout').touch()
+        result=self.execute();self.assertNotEqual(result.returncode,0)
+        self.assertIn('Не найдена команда timeout',result.stderr)
+        self.assertFalse((self.root/'invoked').exists())

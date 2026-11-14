@@ -37,7 +37,7 @@ if [ ! -f /opt/etc/lighttpd/lighttpd.conf ] && ! command -v lighttpd >/dev/null 
   NEW_HTTP=yes
 fi
 PACKAGES=
-for pair in curl:curl jq:jq lighttpd:lighttpd; do
+for pair in curl:curl jq:jq lighttpd:lighttpd timeout:coreutils-timeout; do
   command -v "${pair%:*}" >/dev/null 2>&1 || PACKAGES="$PACKAGES ${pair#*:}"
 done
 [ -x /opt/sbin/ip ] || [ -x /opt/libexec/ip-full ] || PACKAGES="$PACKAGES ip-full"
@@ -70,7 +70,7 @@ if [ "$NEW_HTTP" = yes ]; then
     fail 'Не удалось подготовить новый lighttpd. Его основной конфиг не менялся.'
   fi
 fi
-for cmd in curl jq sha256sum mktemp; do command -v "$cmd" >/dev/null 2>&1 || fail "Не найдена команда $cmd."; done
+for cmd in curl jq sha256sum mktemp timeout; do command -v "$cmd" >/dev/null 2>&1 || fail "Не найдена команда $cmd."; done
 if [ "$MODE" = opkg ]; then
   case "$(value arch)" in
     mipsel) FEED=mipselsf-k3.4 ;; aarch64) FEED=aarch64-k3.10 ;; arm) FEED=armv7sf-k3.2 ;; *) fail 'Неизвестная платформа.' ;;
