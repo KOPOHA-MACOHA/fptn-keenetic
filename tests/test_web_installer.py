@@ -45,7 +45,8 @@ elif command=='curl':
  url=next(a for a in args if a.startswith('http'))
  if url.startswith('http://192.168.1.1:1111'):
   with (root/'http-probes').open('a') as f:f.write(url+'\n')
-  if (root/'web-down').exists():sys.exit(7)
+  if (root/'web-down').exists():
+   print('curl: (7) Failed to connect to panel',file=sys.stderr);sys.exit(7)
   warm=root/'web-warmup'
   if warm.exists():
    left=int(warm.read_text())
@@ -61,7 +62,7 @@ elif command=='curl':
   if 'auth-info' in url:
    with (root.parent/'trace').open('a') as f:f.write('http-auth-info\n')
   if '-K' in args:sys.stdin.read()
-  info={'uiVersion':'old' if (root/'wrong-api').exists() else '0.18.12','service':{'state':'stopped'},'busy':False,'status':'stopped','configured':True,'rootAvailable':True}
+  info={'uiVersion':'old' if (root/'wrong-api').exists() else '0.18.13','service':{'state':'stopped'},'busy':False,'status':'stopped','configured':True,'rootAvailable':True}
   text=json.dumps(info)
   if out:out.write_text(text)
   else:print(text)
@@ -459,3 +460,13 @@ sys.exit(result.returncode)
         for key in ['token','old-token','web-auth.json']:self.assertFalse((old/key).exists())
         self.assertEqual((old/'fptnctl').read_text(),'retained program')
         self.assertEqual((self.root/'etc/fptn/token').read_text(),'dummy\n')
+
+    def test_local_health_ignores_curlrc_and_keeps_real_connection_error(self):
+        (self.root/'fail-restart').touch()
+        result=self.execute();self.assertNotEqual(result.returncode,0)
+        self.assertIn('curl: (7) Failed to connect to panel',result.stderr)
+        errors=list((self.root/'etc/fptn').glob('web-install-backup.*/http-diagnostic/curl-error'))
+        self.assertEqual(len(errors),1);self.assertIn('Failed to connect',errors[0].read_text())
+        probes=[line for line in (self.root/'downloads').read_text().splitlines() if 'http://192.168.1.1:1111' in line]
+        self.assertTrue(probes)
+        self.assertTrue(all(line.startswith("-q -4 --noproxy * ") for line in probes),probes)

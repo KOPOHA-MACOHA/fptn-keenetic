@@ -13,7 +13,7 @@ PLATFORMS={'mipsel-mips32r2-softfloat':('mipsel-3.4','mipselsf-k3.4'),
            'aarch64':('aarch64-3.10','aarch64-k3.10'),
            'armv7-softfloat':('armv7-3.2','armv7sf-k3.2')}
 PACKAGE='fptn-keenetic'
-COMMAND_PACKAGES={'curl': 'curl', 'jq': 'jq', 'lighttpd': 'lighttpd', 'timeout': 'coreutils-timeout', 'nice': 'coreutils-nice', 'nohup': 'coreutils-nohup', 'base64': 'coreutils-base64', 'stty': 'coreutils-stty', 'stat': 'coreutils-stat', 'readlink': 'coreutils-readlink', 'mktemp': 'coreutils-mktemp', 'sha256sum': 'coreutils-sha256sum', 'netstat': 'net-tools-netstat', 'tar': 'tar', 'gzip': 'gzip'}
+COMMAND_PACKAGES={'curl': 'curl', 'jq': 'jq', 'lighttpd': 'lighttpd', 'timeout': 'coreutils-timeout', 'nice': 'coreutils-nice', 'nohup': 'coreutils-nohup', 'base64': 'coreutils-base64', 'stty': 'coreutils-stty', 'stat': 'coreutils-stat', 'readlink': 'coreutils-readlink', 'mktemp': 'coreutils-mktemp', 'sha256sum': 'coreutils-sha256sum', 'md5sum': 'coreutils-md5sum', 'netstat': 'net-tools-netstat', 'tar': 'tar', 'gzip': 'gzip'}
 BASE_COMMANDS=['sh', 'awk', 'cat', 'chmod', 'cp', 'date', 'dirname', 'grep', 'head', 'id', 'mkdir', 'mv', 'pidof', 'rm', 'rmdir', 'sleep', 'tail', 'touch', 'tr', 'uname', 'wc']
 PACKAGE_DEPENDENCIES=[*COMMAND_PACKAGES.values(),'ip-full','lighttpd-mod-cgi','lighttpd-mod-setenv','php8-cgi']
 

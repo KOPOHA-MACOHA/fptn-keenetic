@@ -39,7 +39,7 @@ if [ ! -f /opt/etc/lighttpd/lighttpd.conf ] && ! command -v lighttpd >/dev/null 
   NEW_HTTP=yes
 fi
 PACKAGES=
-for pair in curl:curl jq:jq lighttpd:lighttpd timeout:coreutils-timeout nice:coreutils-nice nohup:coreutils-nohup base64:coreutils-base64 stty:coreutils-stty stat:coreutils-stat readlink:coreutils-readlink mktemp:coreutils-mktemp sha256sum:coreutils-sha256sum netstat:net-tools-netstat tar:tar gzip:gzip; do
+for pair in curl:curl jq:jq lighttpd:lighttpd timeout:coreutils-timeout nice:coreutils-nice nohup:coreutils-nohup base64:coreutils-base64 stty:coreutils-stty stat:coreutils-stat readlink:coreutils-readlink mktemp:coreutils-mktemp sha256sum:coreutils-sha256sum md5sum:coreutils-md5sum netstat:net-tools-netstat tar:tar gzip:gzip; do
   command -v "${pair%:*}" >/dev/null 2>&1 || PACKAGES="$PACKAGES ${pair#*:}"
 done
 [ -x /opt/sbin/ip ] || [ -x /opt/libexec/ip-full ] || PACKAGES="$PACKAGES ip-full"
@@ -53,8 +53,26 @@ if [ -n "$PACKAGES" ]; then
   # Deliberate word splitting of a fixed list; no user-controlled package names.
   opkg install $PACKAGES
 fi
+# Manual users may have installed lighttpd before this bootstrap. Its untouched
+# vendor configuration can still use the implicit default :80, owned by Keenetic.
+# Repair only that fresh, stopped installation; leave customized/running servers alone.
+MAIN=/opt/etc/lighttpd/lighttpd.conf
+BASE_FRAGMENT=/opt/etc/lighttpd/conf.d/05-fptn-bootstrap.conf
+if [ "$NEW_HTTP" != yes ] && [ ! -e /opt/bin/fptnctl ] && [ ! -e "$BASE_FRAGMENT" ] && ! pidof lighttpd >/dev/null 2>&1; then
+  VENDOR_SUM=$(opkg status lighttpd 2>/dev/null | awk -v p="$MAIN" '$1==p && $2~/^[a-f0-9]+$/ {print $2}')
+  if [ "${#VENDOR_SUM}" = 32 ] && [ -f "$MAIN" ] && [ "$(md5sum "$MAIN" | awk '{print $1}')" = "$VENDOR_SUM" ]; then
+    EFFECTIVE=$(lighttpd -p -f "$MAIN") || fail 'Не удалось прочитать настройки lighttpd.'
+    # -p omits unset defaults. Root context is printed before conditional sockets.
+    PRIMARY_PORT=$(printf '%s\n' "$EFFECTIVE" | awk '
+      BEGIN {port=80}
+      /^[[:space:]]*if / {exit}
+      /^[[:space:]]*server\.port[[:space:]]*=/ {port=$3}
+      END {print port}')
+    if [ "$PRIMARY_PORT" = 80 ]; then NEW_HTTP=yes; fi
+  fi
+fi
 if [ "$NEW_HTTP" = yes ]; then
-  # A newly installed Entware lighttpd otherwise defaults to :80, occupied by Keenetic.
+  # An untouched Entware lighttpd otherwise defaults to :80, occupied by Keenetic.
   # Keep its unused primary listener private; FPTN gets its own LAN socket.
   BASE_FRAGMENT=/opt/etc/lighttpd/conf.d/05-fptn-bootstrap.conf
   [ ! -e "$BASE_FRAGMENT" ] || fail 'Фрагмент начальной настройки lighttpd уже существует.'
@@ -72,7 +90,7 @@ if [ "$NEW_HTTP" = yes ]; then
     fail 'Не удалось подготовить новый lighttpd. Его основной конфиг не менялся.'
   fi
 fi
-for cmd in curl jq lighttpd timeout nice nohup base64 stty stat readlink mktemp sha256sum netstat tar gzip; do command -v "$cmd" >/dev/null 2>&1 || fail "Не найдена команда $cmd."; done
+for cmd in curl jq lighttpd timeout nice nohup base64 stty stat readlink mktemp sha256sum md5sum netstat tar gzip; do command -v "$cmd" >/dev/null 2>&1 || fail "Не найдена команда $cmd."; done
 if [ "$MODE" = opkg ]; then
   case "$(value arch)" in
     mipsel) FEED=mipselsf-k3.4 ;; aarch64) FEED=aarch64-k3.10 ;; arm) FEED=armv7sf-k3.2 ;; *) fail 'Неизвестная платформа.' ;;

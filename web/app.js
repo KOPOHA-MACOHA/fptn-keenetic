@@ -1,5 +1,5 @@
 'use strict';
-const UI_VERSION = '0.18.12';
+const UI_VERSION = '0.18.13';
 const $ = id => document.getElementById(id);
 if (window.top !== window.self) { document.documentElement.replaceChildren(); throw new Error('Panel cannot be framed'); }
 let profiles={},clientCapabilities=null;

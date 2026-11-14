@@ -6,9 +6,13 @@ MOCK='''#!/usr/bin/env python3
 import json,os,pathlib,sys
 root=pathlib.Path(os.environ['BOOT_ROOT']);name=pathlib.Path(sys.argv[0]).name;args=sys.argv[1:]
 if name=='id':print(0)
-elif name=='pidof':sys.exit(1)
+elif name=='pidof':sys.exit(0 if (root/'running-http').exists() else 1)
 elif name=='uname':print('armv7l')
 elif name=='opkg':
+ if args==['status','lighttpd']:
+  vendor=root/'vendor-md5'
+  if vendor.exists():print('Conffiles:\\n '+str(root/'etc/lighttpd/lighttpd.conf')+' '+vendor.read_text().strip())
+  sys.exit(0)
  with (root/'opkg.log').open('a') as f:f.write(' '.join(args)+'\\n')
  if args and args[0]=='install' and 'lighttpd' in args:
   p=root/'etc/lighttpd/lighttpd.conf';p.parent.mkdir(parents=True,exist_ok=True);p.write_text('default package config')
@@ -21,6 +25,8 @@ elif name=='opkg':
     if p.exists():continue
     if commands[command]:p.symlink_to(commands[command])
     else:p.write_text('#!/bin/sh\\nexit 0\\n');p.chmod(0o700)
+elif name=='lighttpd':
+ if '-p' in args and (root/'effective-http').exists():print((root/'effective-http').read_text())
 elif name=='curl':
  out=pathlib.Path(args[args.index('-o')+1]);url=next(a for a in args if a.startswith('http'))
  out.write_bytes((root/('channel.json' if url.endswith('web/update.json') else 'remote-installer')).read_bytes())
@@ -31,12 +37,12 @@ class BootstrapTest(unittest.TestCase):
         self.tmp=tempfile.TemporaryDirectory();self.addCleanup(self.tmp.cleanup);self.root=Path(self.tmp.name)/'opt'
         for directory in ['bin','sbin','etc/lighttpd','lib/lighttpd']:(self.root/directory).mkdir(parents=True,exist_ok=True)
         self.env={**os.environ,'BOOT_ROOT':str(self.root)}
-        for name in ['python3', 'sh', 'awk', 'cat', 'chmod', 'cp', 'date', 'dirname', 'grep', 'head', 'id', 'mkdir', 'mv', 'pidof', 'rm', 'rmdir', 'sleep', 'tail', 'touch', 'tr', 'uname', 'wc', 'curl', 'jq', 'lighttpd', 'timeout', 'nice', 'nohup', 'base64', 'stty', 'stat', 'readlink', 'mktemp', 'sha256sum', 'netstat', 'tar', 'gzip']:
+        for name in ['python3', 'sh', 'awk', 'cat', 'chmod', 'cp', 'date', 'dirname', 'grep', 'head', 'id', 'mkdir', 'mv', 'pidof', 'rm', 'rmdir', 'sleep', 'tail', 'touch', 'tr', 'uname', 'wc', 'curl', 'jq', 'lighttpd', 'timeout', 'nice', 'nohup', 'base64', 'stty', 'stat', 'readlink', 'mktemp', 'sha256sum', 'md5sum', 'netstat', 'tar', 'gzip']:
             if name not in ['id','uname','pidof','netstat','lighttpd','curl']:(self.root/'bin'/name).symlink_to(shutil.which(name))
         for name in ['id','opkg','curl','ip','lighttpd','ndmc','pidof','netstat','uname']:
             p=self.root/'bin'/name;p.write_text(MOCK);p.chmod(0o700)
-        (self.root/'providers.json').write_text(json.dumps({'curl': 'curl', 'jq': 'jq', 'lighttpd': 'lighttpd', 'timeout': 'coreutils-timeout', 'nice': 'coreutils-nice', 'nohup': 'coreutils-nohup', 'base64': 'coreutils-base64', 'stty': 'coreutils-stty', 'stat': 'coreutils-stat', 'readlink': 'coreutils-readlink', 'mktemp': 'coreutils-mktemp', 'sha256sum': 'coreutils-sha256sum', 'netstat': 'net-tools-netstat', 'tar': 'tar', 'gzip': 'gzip'}))
-        (self.root/'real-commands.json').write_text(json.dumps({name:shutil.which(name) for name in ['curl', 'jq', 'lighttpd', 'timeout', 'nice', 'nohup', 'base64', 'stty', 'stat', 'readlink', 'mktemp', 'sha256sum', 'netstat', 'tar', 'gzip']}))
+        (self.root/'providers.json').write_text(json.dumps({'curl': 'curl', 'jq': 'jq', 'lighttpd': 'lighttpd', 'timeout': 'coreutils-timeout', 'nice': 'coreutils-nice', 'nohup': 'coreutils-nohup', 'base64': 'coreutils-base64', 'stty': 'coreutils-stty', 'stat': 'coreutils-stat', 'readlink': 'coreutils-readlink', 'mktemp': 'coreutils-mktemp', 'sha256sum': 'coreutils-sha256sum', 'md5sum': 'coreutils-md5sum', 'netstat': 'net-tools-netstat', 'tar': 'tar', 'gzip': 'gzip'}))
+        (self.root/'real-commands.json').write_text(json.dumps({name:shutil.which(name) for name in ['curl', 'jq', 'lighttpd', 'timeout', 'nice', 'nohup', 'base64', 'stty', 'stat', 'readlink', 'mktemp', 'sha256sum', 'md5sum', 'netstat', 'tar', 'gzip']}))
         (self.root/'sbin/ip').write_text('#!/bin/sh\n');(self.root/'sbin/ip').chmod(0o700)
         for module in ['cgi','setenv']:(self.root/'lib/lighttpd'/('mod_'+module+'.so')).touch()
         (self.root/'etc/entware_release').write_text('arch=mipsel\ncpu_type=mips32r2\nfloat=soft\n')
@@ -106,7 +112,7 @@ class BootstrapTest(unittest.TestCase):
         providers=json.loads((self.root/'providers.json').read_text())
         # Install PHP once so each following request isolates one missing utility.
         p=self.root/'bin/php-cgi';p.write_text(MOCK);p.chmod(0o700)
-        for command in ['nice','nohup','base64','stty','stat','readlink','mktemp','sha256sum','netstat','tar','gzip']:
+        for command in ['nice','nohup','base64','stty','stat','readlink','mktemp','sha256sum','md5sum','netstat','tar','gzip']:
             with self.subTest(command=command):
                 (self.root/'bin'/command).unlink();(self.root/'opkg.log').unlink(missing_ok=True)
                 result=self.execute();self.assertEqual(result.returncode,0,result.stdout+result.stderr)
@@ -147,3 +153,27 @@ class BootstrapTest(unittest.TestCase):
         result=subprocess.run(['sh',str(ROOT/'get.sh')],env=env,text=True,capture_output=True,timeout=10)
         self.assertNotEqual(result.returncode,0);self.assertIn('mktemp',result.stderr)
         self.assertFalse((self.root/'invoked').exists());self.assertFalse(list(self.root.glob('fptn-setup.*')))
+
+    def vendor_http(self, effective):
+        main=self.root/'etc/lighttpd/lighttpd.conf'
+        (self.root/'vendor-md5').write_text(hashlib.md5(main.read_bytes()).hexdigest())
+        (self.root/'effective-http').write_text(effective)
+
+    def test_preinstalled_vendor_http_with_implicit_port_80_gets_private_listener(self):
+        self.vendor_http('config {\n server.document-root = "/opt/share/www"\n}\n')
+        result=self.execute();self.assertEqual(result.returncode,0,result.stdout+result.stderr)
+        base=self.root/'etc/lighttpd/conf.d/05-fptn-bootstrap.conf'
+        self.assertIn('server.port := 1110',base.read_text())
+        self.assertEqual((self.root/'etc/lighttpd/lighttpd.conf').read_text(),'existing config')
+
+    def test_custom_main_running_http_and_nondefault_primary_port_are_not_reconfigured(self):
+        for case in ['custom-main','running','custom-port','conditional-port']:
+            with self.subTest(case=case):
+                self.vendor_http('config {\n server.port = 80\n}\n')
+                if case=='custom-main':(self.root/'vendor-md5').write_text('0'*32)
+                elif case=='running':(self.root/'running-http').touch()
+                elif case=='custom-port':(self.root/'effective-http').write_text('config {\n server.port = 8088\n}\n')
+                else:(self.root/'effective-http').write_text('config {\n server.port = 8088\n if $SERVER["socket"] == ":9090" {\n server.port = 80\n }\n}\n')
+                result=self.execute();self.assertEqual(result.returncode,0,result.stdout+result.stderr)
+                self.assertFalse((self.root/'etc/lighttpd/conf.d/05-fptn-bootstrap.conf').exists())
+                (self.root/'running-http').unlink(missing_ok=True)

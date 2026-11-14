@@ -50,7 +50,7 @@ fptn-package configure 192.168.10.1 1115
 opkg update
 opkg install curl jq ip-full lighttpd lighttpd-mod-cgi lighttpd-mod-setenv php8-cgi
 opkg install coreutils-timeout coreutils-nice coreutils-nohup coreutils-base64 coreutils-stty
-opkg install coreutils-stat coreutils-readlink coreutils-mktemp coreutils-sha256sum net-tools-netstat tar gzip
+opkg install coreutils-stat coreutils-readlink coreutils-mktemp coreutils-sha256sum coreutils-md5sum net-tools-netstat tar gzip
 ```
 
 Затем установите скачанный файл командой `opkg install /путь/к/файлу.ipk`.

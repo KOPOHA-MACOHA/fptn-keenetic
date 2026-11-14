@@ -45,7 +45,7 @@ jobs:
           PYREF
       - name: Prepare PHP and lighttpd integration tests
         run: |
-          sh scripts/prepare-ci-tests.sh php-cgi lighttpd libboost-dev libspdlog-dev libfmt-dev python3-yaml iproute2 iptables libarchive-dev libcurl4-openssl-dev pkg-config
+          sh scripts/prepare-ci-tests.sh php-cgi lighttpd net-tools libboost-dev libspdlog-dev libfmt-dev python3-yaml iproute2 iptables libarchive-dev libcurl4-openssl-dev pkg-config
           php-cgi -n -v
       - name: Build the pinned native opkg test tool
         run: sh tests/build-opkg.sh

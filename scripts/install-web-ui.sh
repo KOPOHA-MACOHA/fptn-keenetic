@@ -28,7 +28,7 @@ WEB=/opt/share/fptn-web
 FRAGMENT=/opt/etc/lighttpd/conf.d/95-fptn.conf
 MAIN=/opt/etc/lighttpd/lighttpd.conf
 HOOK=/opt/etc/ndm/netfilter.d/190-fptn-ipv6.sh
-for cmd in sh awk cat chmod cp date dirname grep head id mkdir mv pidof rm rmdir sleep tail touch tr uname wc curl jq lighttpd timeout nice nohup base64 stty stat readlink mktemp sha256sum netstat tar gzip ip; do
+for cmd in sh awk cat chmod cp date dirname grep head id mkdir mv pidof rm rmdir sleep tail touch tr uname wc curl jq lighttpd timeout nice nohup base64 stty stat readlink mktemp sha256sum md5sum netstat tar gzip ip; do
   command -v "$cmd" >/dev/null 2>&1 || fail "Не найдена команда $cmd."
 done
 FRESH=no
@@ -304,7 +304,7 @@ sh -n "$STAGE/web/api.cgi"
 sh -n "$STAGE/web/index.cgi"
 # Exercise the real entry file before any installed file or process is changed.
 sh "$STAGE/web/index.cgi" > "$STAGE/entry-check" || fail 'Стартовый CGI не смог прочитать страницу. Установленные файлы не менялись.'
-grep -Fq 'data-ui-version="0.18.12"' "$STAGE/entry-check" || fail 'Стартовый CGI не выдал HTML панели. Установленные файлы не менялись.'
+grep -Fq 'data-ui-version="0.18.13"' "$STAGE/entry-check" || fail 'Стартовый CGI не выдал HTML панели. Установленные файлы не менялись.'
 sh -n "$STAGE/scripts/fptn-native-service.sh"
 TARGET=$(sh "$STAGE/scripts/fptn-client-identity.sh" validate "$STAGE/client-release.json") || fail 'Некорректное описание сборки клиента.'
 TARGET_REV=$(printf '%s' "$TARGET" | jq -r .buildRevision)
@@ -490,7 +490,7 @@ if [ "$FRESH" = yes ]; then
 fi
 printf '%s\n' "$ORIGIN" > "$CONF/web-origin"
 CLIENT_VERSION=$(jq -r '.clientVersion // "неизвестна"' "$CONF/web-meta.json" 2>/dev/null || echo неизвестна)
-jq -n --arg version "$CLIENT_VERSION" --arg revision "$REV" '{uiVersion:"0.18.12",clientVersion:$version,revision:$revision}' > "$CONF/web-meta.json.new"
+jq -n --arg version "$CLIENT_VERSION" --arg revision "$REV" '{uiVersion:"0.18.13",clientVersion:$version,revision:$revision}' > "$CONF/web-meta.json.new"
 mv "$CONF/web-meta.json.new" "$CONF/web-meta.json"
 cat > "$FRAGMENT" <<EOF
 # Managed by fptn-web-ui. Credentials live outside the document root.
@@ -518,17 +518,17 @@ if ! FPTN_OPERATION_ID= "$INIT" restart; then
 fi
 check_panel() {
   PANEL_ERROR='Страница панели не отвечает.'
-  curl --noproxy '*' -fsS -D "$STAGE/headers" --connect-timeout 1 --max-time 2 "$ORIGIN/" -o "$STAGE/page" 2>/dev/null || return 1
+  curl -q -4 --noproxy '*' -fsS -D "$STAGE/headers" --connect-timeout 1 --max-time 2 "$ORIGIN/" -o "$STAGE/page" 2>"$STAGE/curl-error" || return 1
   PANEL_ERROR='На порту открылась другая версия панели.'
-  grep -Fq 'data-ui-version="0.18.12"' "$STAGE/page" || return 1
+  grep -Fq 'data-ui-version="0.18.13"' "$STAGE/page" || return 1
   PANEL_CACHE_WARNING=no
   grep -iq '^Cache-Control:.*no-store' "$STAGE/headers" || PANEL_CACHE_WARNING=yes
   PANEL_ERROR='Не прошла проверка ограничения доступа к API.'
-  CODE=$(curl --noproxy '*' -sS -o /dev/null -w '%{http_code}' --connect-timeout 1 --max-time 2 "$ORIGIN/api.cgi?status" 2>/dev/null) || return 1
+  CODE=$(curl -q -4 --noproxy '*' -sS -o /dev/null -w '%{http_code}' --connect-timeout 1 --max-time 2 "$ORIGIN/api.cgi?status" 2>"$STAGE/curl-error") || return 1
   [ "$CODE" = 401 ] || return 1
   PANEL_ERROR='API настройки входа не готово или отвечает другой версией.'
-  curl --noproxy '*' -fsS --connect-timeout 1 --max-time 2 "$ORIGIN/api.cgi?auth-info" -o "$STAGE/auth-info.json" 2>/dev/null || return 1
-  jq -e '.uiVersion=="0.18.12" and (.configured|type=="boolean") and (.rootAvailable|type=="boolean")' "$STAGE/auth-info.json" >/dev/null 2>&1 || return 1
+  curl -q -4 --noproxy '*' -fsS --connect-timeout 1 --max-time 2 "$ORIGIN/api.cgi?auth-info" -o "$STAGE/auth-info.json" 2>"$STAGE/curl-error" || return 1
+  jq -e '.uiVersion=="0.18.13" and (.configured|type=="boolean") and (.rootAvailable|type=="boolean")' "$STAGE/auth-info.json" >/dev/null 2>&1 || return 1
   return 0
 }
 # rc.func may report failed before the daemon becomes visible. Decide from the
@@ -537,18 +537,22 @@ PANEL_DEADLINE=$(( $(date +%s) + 30 ))
 until check_panel; do
   if [ "$(date +%s)" -ge "$PANEL_DEADLINE" ]; then
     mkdir -p "$BACKUP/http-diagnostic"
-    for item in headers page auth-info.json; do
+    for item in headers page auth-info.json curl-error; do
       [ ! -f "$STAGE/$item" ] || cp "$STAGE/$item" "$BACKUP/http-diagnostic/$item"
     done
     echo "Ответ сервера сохранён: $BACKUP/http-diagnostic" >&2
     if [ -f "$STAGE/page" ]; then
       echo "Размер ответа страницы: $(wc -c < "$STAGE/page") байт." >&2
     fi
+    if [ -s "$STAGE/curl-error" ]; then
+      echo "Ошибка локального запроса к $ORIGIN:" >&2
+      tail -c 2048 "$STAGE/curl-error" >&2
+    fi
     fail "Панель не готова после ожидания: $PANEL_ERROR"
   fi
   sleep 1
 done
-echo 'lighttpd отвечает: страница и API панели 0.18.12 проверены.'
+echo 'lighttpd отвечает: страница и API панели 0.18.13 проверены.'
 if [ "$PANEL_CACHE_WARNING" = yes ]; then
   echo "Откройте свежую страницу по ссылке $ORIGIN/?v=$REV (заголовок кэша применится после перезагрузки lighttpd)."
 fi
@@ -590,7 +594,7 @@ fi
 printf '%s\n' "$TARGET" > "$CONF/client-release.json.new"
 chmod 600 "$CONF/client-release.json.new"
 mv "$CONF/client-release.json.new" "$CONF/client-release.json"
-printf '%s' "$TARGET" | jq --arg revision "$REV" '. + {uiVersion:"0.18.12",revision:$revision,clientRevision:.buildRevision,clientSha256:.sha256}' > "$CONF/web-meta.json.new"
+printf '%s' "$TARGET" | jq --arg revision "$REV" '. + {uiVersion:"0.18.13",revision:$revision,clientRevision:.buildRevision,clientSha256:.sha256}' > "$CONF/web-meta.json.new"
 mv "$CONF/web-meta.json.new" "$CONF/web-meta.json"
 : > /opt/libexec/fptn/.runtime-managed
 sh /opt/libexec/fptn/web-auth.sh op-sanitize-history >/dev/null || fail 'Не удалось очистить секреты из прежних архивов восстановления.'
@@ -599,7 +603,7 @@ if [ "$INTERFACE_NEW" = yes ] && [ "$(cat "$CONF/native-creation-owner" 2>/dev/n
   rm -f "$CONF/native-creation-owner"
 fi
 echo
-echo "Панель 0.18.12: $ORIGIN/?v=$REV"
+echo "Панель 0.18.13: $ORIGIN/?v=$REV"
 rm -f "$CONF/web-key"
 echo 'Откройте панель: создайте логин и пароль или войдите через root Entware.'
 echo 'Пароль в терминале не нужен. Существующие настройки входа сохраняются.'

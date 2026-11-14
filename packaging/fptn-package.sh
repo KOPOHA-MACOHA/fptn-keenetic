@@ -34,16 +34,8 @@ case "${1:-}" in
   LAN=${LAN:-192.168.1.1}
   # No terminal: retain the existing endpoint or explicitly try the default port.
   if [ -z "$PORT" ] && ! (: < /dev/tty) 2>/dev/null; then PORT=1111; fi
-  BOOTSTRAP_HTTP=no
-  if [ ! -e "$ROOT/bin/fptnctl" ] && ! pidof lighttpd >/dev/null 2>&1; then
-    MAIN=$ROOT/etc/lighttpd/lighttpd.conf
-    VENDOR_SUM=$(opkg status lighttpd | awk -v p="$MAIN" '$1==p && $2~/^[a-f0-9]+$/ {print $2}')
-    if [ "${#VENDOR_SUM}" = 32 ] && [ -f "$MAIN" ] && [ "$(md5sum "$MAIN" | awk '{print $1}')" = "$VENDOR_SUM" ]; then
-      EFFECTIVE=$(lighttpd -p -f "$MAIN")
-      if printf '%s\n' "$EFFECTIVE" | grep -Eq 'server.port[[:space:]]*=[[:space:]]*80([[:space:]]|$)'; then BOOTSTRAP_HTTP=yes; fi
-    fi
-  fi
-  FPTN_PACKAGE_DEPLOY=1 FPTN_BOOTSTRAP_HTTP=$BOOTSTRAP_HTTP sh "$BUNDLE/install.sh" install "$LAN" "$PORT"
+  # The common bootstrap also handles a preinstalled, untouched default lighttpd.
+  FPTN_PACKAGE_DEPLOY=1 sh "$BUNDLE/install.sh" install "$LAN" "$PORT"
   mkdir -p "$CONF"
   cp "$PAYLOAD/package.json" "$CONF/opkg-managed.new"
   chmod 600 "$CONF/opkg-managed.new"

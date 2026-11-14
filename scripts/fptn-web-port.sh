@@ -33,7 +33,7 @@ restart() {
   if ! "$INIT" restart; then echo 'Init сообщил failed; проверяю фактический ответ панели.' >&2; fi
 }
 ready() {
-  curl --noproxy '*' -fsS --connect-timeout 1 --max-time 2 "$1/api.cgi?auth-info" |
+  curl -q -4 --noproxy '*' -fsS --connect-timeout 1 --max-time 2 "$1/api.cgi?auth-info" |
     jq -e --arg version "$(jq -r .uiVersion "$CONF/web-meta.json")" '.uiVersion==$version and (.configured|type=="boolean")' >/dev/null 2>&1
 }
 wait_ready() {
